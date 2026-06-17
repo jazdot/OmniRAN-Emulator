@@ -40,6 +40,31 @@ func init() {
 func main() {
 
 	app := &cli.App{
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "config",
+				Aliases: []string{"c"},
+				Value:   "config/config.yml",
+				Usage:   "Path to the configuration file",
+			},
+		},
+		Before: func(c *cli.Context) error {
+			if c.IsSet("config") {
+				configPath := c.String("config")
+				err := config.LoadConfig(configPath)
+				if err != nil {
+					log.Fatalf("Failed to load configuration file at %s: %v", configPath, err)
+				}
+				// Re-apply log level from loaded config
+				cfg := config.Data
+				if cfg.Logs.Level == 0 {
+					log.SetLevel(log.InfoLevel)
+				} else {
+					log.SetLevel(log.Level(cfg.Logs.Level))
+				}
+			}
+			return nil
+		},
 		Commands: []*cli.Command{
 			{
 				Name:    "ue",
