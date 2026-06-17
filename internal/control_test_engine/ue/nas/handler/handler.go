@@ -132,13 +132,14 @@ func HandlerRegistrationAccept(ue *context.UEContext, message *nas.Message) {
 	time.Sleep(20 * time.Millisecond)
 
 	// getting ul nas transport and pduSession establishment request.
-	ulNasTransport, err := mm_5gs.UlNasTransport(ue, nasMessage.ULNASTransportRequestTypeInitialRequest)
+	defaultPduSessionId := ue.GetPduSesssionId()
+	ulNasTransport, err := mm_5gs.UlNasTransport(ue, defaultPduSessionId, nasMessage.ULNASTransportRequestTypeInitialRequest)
 	if err != nil {
 		log.Fatal("[UE][NAS] Error sending ul nas transport and pdu session establishment request: ", err)
 	}
 
-	// change the sate of ue(SM).
-	ue.SetStateSM_PDU_SESSION_PENDING()
+	// change the state of this session to pending.
+	ue.GetPduSession(defaultPduSessionId).State = context.SM5G_PDU_SESSION_ACTIVE_PENDING
 
 	// sending to GNB
 	sender.SendToGnb(ue, ulNasTransport)
@@ -148,16 +149,44 @@ func HandlerDlNasTransportPduaccept(ue *context.UEContext, message *nas.Message)
 
 	//getting PDU Session establishment accept.
 	payloadContainer := nas_control.GetNasPduFromPduAccept(message)
+	if payloadContainer == nil {
+		log.Error("[UE][NAS] Error: payloadContainer is nil in PDU Accept")
+		return
+	}
 	if payloadContainer.GsmHeader.GetMessageType() == nas.MsgTypePDUSessionEstablishmentAccept {
 		log.Info("[UE][NAS] Receiving PDU Session Establishment Accept")
 
-		// update PDU Session information.
+		// get PDU Session ID from payloadContainer
+		pduSessionId := payloadContainer.PDUSessionEstablishmentAccept.PDUSessionID.GetPDUSessionID()
 
-		// change the state of ue(SM)(PDU Session Active).
-		ue.SetStateSM_PDU_SESSION_ACTIVE()
+		// update PDU Session state to active.
+		ue.GetPduSession(pduSessionId).State = context.SM5G_PDU_SESSION_ACTIVE
 
 		// get UE ip
 		UeIp := payloadContainer.PDUSessionEstablishmentAccept.GetPDUAddressInformation()
-		ue.SetIp(UeIp)
+		ue.SetIp(pduSessionId, UeIp)
 	}
+}
+
+func HandlerDeregistrationRequestUETerminatedDeregistration(ue *context.UEContext, message *nas.Message) {
+	log.Info("[UE][NAS] Handling network-initiated Deregistration Request")
+
+	// 1. Terminate/cleanup all virtual interfaces, routes, rules, etc.
+	ue.Terminate()
+
+	// 2. Generate Deregistration Accept response
+	deregAccept, err := mm_5gs.DeregistrationAcceptUETerminated(ue)
+	if err != nil {
+		log.Error("[UE][NAS] Error generating Deregistration Accept: ", err)
+		return
+	}
+
+	// 3. Send the accept response to GNodeB
+	sender.SendToGnb(ue, deregAccept)
+
+	// 4. Update the GMM/SM state
+	ue.SetStateMM_DEREGISTERED()
+	ue.SetStateSM_PDU_SESSION_INACTIVE()
+
+	log.Warn("[UE][NAS] Deregistration completed. UE state set to DEREGISTERED")
 }

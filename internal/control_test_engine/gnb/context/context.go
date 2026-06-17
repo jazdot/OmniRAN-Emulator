@@ -49,6 +49,8 @@ type ControlInfo struct {
 	gnbPort      int
 	unixlistener net.Listener
 	n2           *sctp.SCTPConn
+	linkType     string
+	linkPort     int
 }
 
 func (gnb *GNBContext) NewRanGnbContext(gnbId, mcc, mnc, tac, sst, sd, ip, ipData string, port, portData int) {
@@ -146,6 +148,24 @@ func (gnb *GNBContext) DeleteGnBUe(ranUeId int64) {
 
 func (gnb *GNBContext) DeleteGnBUeByIp(ip string) {
 	gnb.ueIpPool.Delete(ip)
+}
+
+func (gnb *GNBContext) RangeUePool(f func(ranUeId int64, ue *GNBUe) bool) {
+	gnb.uePool.Range(func(key, value interface{}) bool {
+		return f(key.(int64), value.(*GNBUe))
+	})
+}
+
+func (gnb *GNBContext) StoreTeid(teid uint32, ue *GNBUe) {
+	gnb.teidPool.Store(teid, ue)
+}
+
+func (gnb *GNBContext) StoreUeIp(ip string, ue *GNBUe) {
+	gnb.ueIpPool.Store(ip, ue)
+}
+
+func (gnb *GNBContext) GetRanUeIp() uint8 {
+	return gnb.getRanUeIp()
 }
 
 func (gnb *GNBContext) GetGnbUe(ranUeId int64) (*GNBUe, error) {
@@ -485,4 +505,26 @@ func reverse(s string) string {
 		aux = string(valor) + aux
 	}
 	return aux
+}
+
+func (gnb *GNBContext) SetLinkType(linkType string) {
+	gnb.controlInfo.linkType = linkType
+}
+
+func (gnb *GNBContext) GetLinkType() string {
+	if gnb.controlInfo.linkType == "" {
+		return "unix"
+	}
+	return gnb.controlInfo.linkType
+}
+
+func (gnb *GNBContext) SetLinkPort(port int) {
+	gnb.controlInfo.linkPort = port
+}
+
+func (gnb *GNBContext) GetLinkPort() int {
+	if gnb.controlInfo.linkPort == 0 {
+		return 9488
+	}
+	return gnb.controlInfo.linkPort
 }

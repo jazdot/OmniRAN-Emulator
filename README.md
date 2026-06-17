@@ -19,6 +19,8 @@ We have modernized and optimized the emulator to support modern Linux and compil
 3. **Dynamic Configuration Loading**: Added support for custom configuration files using the global CLI flag `-c` / `--config` (e.g. `./app -c custom_config.yml ue`).
 4. **Ultra-lightweight Docker Packaging**: Redesigned the Docker build process using a multi-stage `golang:1.22-bookworm` builder and an `ubuntu:noble` (24.04) runner. By stripping the Go compiler SDK from the runtime image, the final container size has been reduced from **~850MB to just 95.8MB (an 88%+ reduction)**.
 5. **Developer Makefile**: Added a root `Makefile` that automatically detects system-wide Go installations, falls back to a workspace Go SDK if missing, and provides clean container management targets.
+6. **Advanced 5G Core Emulation**: Integrated TCP Radio Link Simulation (RLS) socket communication, sequential/concurrent multiple PDU sessions (up to 15 concurrent sessions per UE), dual-stack IPv4v6 PDU interface, and advanced NAS signaling procedures (Paging response via Service Request, and Network-initiated De-registration cleanup).
+7. **Decoupled Architecture CLI Flags**: Supported standalone UE deployment command flags for separated machine/container testing scenarios.
 
 ---
 
@@ -66,8 +68,11 @@ This compiles the application in a cached builder stage and packages a minimal r
 
 #### 1. `ue`
 Test a single UE registration, authentication, security mode, and PDU session attachment procedure with the 5G Core. Creates a virtual `uetun1` interface.
+- `--ue-only`: Run only the UE (do not start gNodeB in this process; GNodeB must be running).
 ```bash
 ./app ue
+# Standalone decoupled mode
+./app ue --ue-only
 # Or with a custom configuration file
 ./app -c config/alternative.yml ue
 ```
@@ -81,8 +86,11 @@ Initialize and establish an SCTP connection (NGAP) and GTP-U tunnel (N3) with th
 #### 3. `load-test`
 Stress test the AMF by firing concurrent/queued registration requests for multiple simulated UEs.
 - `-n, --number-of-ues`: Number of UEs to simulate (default: 1).
+- `--ue-only`: Run only the UEs (do not start gNodeB in this process).
 ```bash
 ./app load-test -n 50
+# Decoupled load testing
+./app load-test -n 50 --ue-only
 ```
 
 #### 4. `amf-load-loop`
@@ -123,3 +131,40 @@ make docker-up
 ```bash
 make docker-down
 ```
+
+---
+
+## 🔧 Advanced Features Config & Usage
+
+### 1. TCP Radio Link Simulation (RLS)
+By default, the UE communicates with GNodeB via local UNIX sockets (`/tmp/gnb.sock`). To run them on separate hosts or network namespaces, configure:
+- **gNodeB Config (`config/config.yml`)**:
+  ```yaml
+  gnodeb:
+    link_type: "tcp"
+    link_port: 9488
+  ```
+- **UE Config (`config/config.yml`)**:
+  ```yaml
+  gnodeb:
+    link_type: "tcp"
+    link_port: 9488
+    controlif:
+      ip: "<IP of remote gNodeB>"
+  ```
+
+### 2. Multi-PDU & Dual-Stack Sessions
+Configure concurrent PDU sessions under the `ue.pdusessions` list:
+```yaml
+ue:
+  pdusessiontype: "IPv4v6"
+  pdusessions:
+    - id: 1
+      dnn: "internet"
+      pdusessiontype: "IPv4v6"
+    - id: 2
+      dnn: "ims"
+      pdusessiontype: "IPv6"
+```
+On session establishment, separate TUN interfaces (`uetun1`, `uetun2`) will be dynamically configured with policy routing tables and source routing rules matching their respective session IDs.
+

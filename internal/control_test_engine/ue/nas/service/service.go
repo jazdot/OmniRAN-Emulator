@@ -14,10 +14,20 @@ func CloseConn(ue *context.UEContext) {
 
 func InitConn(ue *context.UEContext) error {
 
-	// initiated communication with GNB(unix sockets).
-	conn, err := net.Dial("unix", "/tmp/gnb.sock")
-	if err != nil {
-		return fmt.Errorf("[UE] Error on Dial with server", err)
+	var conn net.Conn
+	var err error
+
+	if ue.GetGnbLinkType() == "tcp" {
+		addr := fmt.Sprintf("%s:%d", ue.GetGnbControlIp(), ue.GetGnbLinkPort())
+		conn, err = net.Dial("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("[UE] Error on Dial TCP with server %s: %v", addr, err)
+		}
+	} else {
+		conn, err = net.Dial("unix", "/tmp/gnb.sock")
+		if err != nil {
+			return fmt.Errorf("[UE] Error on Dial UNIX with server: %v", err)
+		}
 	}
 
 	// store unix socket connection in the UE.

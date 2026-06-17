@@ -34,6 +34,8 @@ type Config struct {
 			Sst string `yaml:"sst"`
 			Sd  string `yaml:"sd"`
 		} `yaml:"slicesupportlist"`
+		LinkType string `yaml:"link_type"`
+		LinkPort int    `yaml:"link_port"`
 	} `yaml:"gnodeb"`
 	Ue struct {
 		Msin  string `yaml:"msin"`
@@ -41,7 +43,8 @@ type Config struct {
 		Opc   string `yaml:"opc"`
 		Amf   string `yaml:"amf"`
 		Sqn   string `yaml:"sqn"`
-		Dnn   string `yaml:"dnn"`
+		Dnn            string `yaml:"dnn"`
+		PduSessionType string `yaml:"pdusessiontype"`
 		Hplmn struct {
 			Mcc string `yaml:"mcc"`
 			Mnc string `yaml:"mnc"`
@@ -50,6 +53,7 @@ type Config struct {
 			Sst int    `yaml:"sst"`
 			Sd  string `yaml:"sd"`
 		} `yaml:"snssai"`
+		PduSessions []PDUSessionConfig `yaml:"pdusessions"`
 	} `yaml:"ue"`
 	AMF struct {
 		Ip   string `yaml:"ip"`
@@ -58,6 +62,14 @@ type Config struct {
 	Logs struct {
 		Level int `yaml:"level"`
 	} `yaml:"logs"`
+}
+
+type PDUSessionConfig struct {
+	Id             uint8  `yaml:"id"`
+	Dnn            string `yaml:"dnn"`
+	PduSessionType string `yaml:"pdusessiontype"`
+	Sst            int    `yaml:"sst"`
+	Sd             string `yaml:"sd"`
 }
 
 func RootDir() string {

@@ -18,6 +18,7 @@ type GNBUe struct {
 	sctpConnection       *sctp.SCTPConn // Sctp association in using by the UE.
 	unixSocketConnection net.Conn       // Unix sockets association in using by the UE.
 	context              Context
+	pduSessions          map[int64]*PDUSession // Multiple PDU sessions
 }
 
 type Context struct {
@@ -63,20 +64,91 @@ func (ue *GNBUe) CreateUeContext(plmn string, imeisv string, sst []string, sd []
 }
 
 func (ue *GNBUe) CreatePduSession(pduSessionId int64, sst string, sd string, pduType uint64,
-	qosId int64, priArp int64, fiveQi int64, ulTeid uint32) string {
+	qosId int64, priArp int64, fiveQi int64, ulTeid uint32, ueIp net.IP, dlTeid uint32) string {
 
-	ue.context.pduSession.pduSessionId = pduSessionId
-
-	if !ue.pduSessionNssai(sst, sd) {
-		return "Slice was not found"
+	if ue.pduSessions == nil {
+		ue.pduSessions = make(map[int64]*PDUSession)
 	}
+
+	// For legacy compatibility, also store in the single context.pduSession
+	ue.context.pduSession.pduSessionId = pduSessionId
 	ue.context.pduSession.pduType = pduType
 	ue.context.pduSession.qosId = qosId
 	ue.context.pduSession.priArp = priArp
 	ue.context.pduSession.fiveQi = fiveQi
 	ue.context.pduSession.uplinkTeid = ulTeid
+	ue.context.pduSession.downlinkTeid = dlTeid
+	ue.context.pduSession.ranUeIP = ueIp
 
+	sess := &PDUSession{
+		pduSessionId: pduSessionId,
+		ranUeIP:      ueIp,
+		uplinkTeid:   ulTeid,
+		downlinkTeid: dlTeid,
+		pduType:      pduType,
+		qosId:        qosId,
+		fiveQi:       fiveQi,
+		priArp:       priArp,
+	}
+
+	if !ue.pduSessionNssai(sst, sd) {
+		return "Slice was not found"
+	}
+
+	// copy slice status to the session
+	mov := ue.context.pduSession.slices
+	for i := 0; i < ue.context.pduSession.lenSlice; i++ {
+		if mov.sst == sst && mov.sd == sd {
+			sess.slices = mov
+			break
+		}
+		mov = mov.next
+	}
+
+	ue.pduSessions[pduSessionId] = sess
 	return ""
+}
+
+func (ue *GNBUe) FindPduSessionByIp(ip string) *PDUSession {
+	if ue.pduSessions == nil {
+		return nil
+	}
+	for _, sess := range ue.pduSessions {
+		if sess.ranUeIP != nil && sess.ranUeIP.String() == ip {
+			return sess
+		}
+	}
+	return nil
+}
+
+func (ue *GNBUe) FindPduSessionByDownlinkTeid(teid uint32) *PDUSession {
+	if ue.pduSessions == nil {
+		return nil
+	}
+	for _, sess := range ue.pduSessions {
+		if sess.downlinkTeid == teid {
+			return sess
+		}
+	}
+	return nil
+}
+
+func (ue *GNBUe) GetTeidDownlinkOfSession(pduSessionId int64) uint32 {
+	if ue.pduSessions != nil {
+		if sess, ok := ue.pduSessions[pduSessionId]; ok {
+			return sess.downlinkTeid
+		}
+	}
+	return 0
+}
+
+func (ue *GNBUe) GetQosIdOfSession(pduSessionId int64) int64 {
+	if ue.pduSessions != nil {
+		if sess, ok := ue.pduSessions[pduSessionId]; ok {
+			return sess.qosId
+		}
+	}
+	return 0
 }
 
 func (ue *GNBUe) GetQosId() int64 {
@@ -282,4 +354,16 @@ func (ue *GNBUe) GetAmfUeId() int64 {
 func (ue *GNBUe) SetAmfUeId(amfUeId int64) {
 	// fmt.Println(amfUeId)
 	ue.amfUeNgapId = amfUeId
+}
+
+func (p *PDUSession) GetUplinkTeid() uint32 {
+	return p.uplinkTeid
+}
+
+func (p *PDUSession) GetRanUeIP() net.IP {
+	return p.ranUeIP
+}
+
+func (p *PDUSession) GetPduSessionId() int64 {
+	return p.pduSessionId
 }

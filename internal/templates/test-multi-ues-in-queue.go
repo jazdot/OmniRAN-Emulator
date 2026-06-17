@@ -11,7 +11,7 @@ import (
 	"fmt"
 )
 
-func TestMultiUesInQueue(numUes int) {
+func TestMultiUesInQueue(numUes int, ueOnly bool) {
 
 	wg := sync.WaitGroup{}
 
@@ -21,11 +21,11 @@ func TestMultiUesInQueue(numUes int) {
 		log.Fatal("Error in get configuration")
 	}
 
-	go gnb.InitGnb(cfg, &wg)
-
-	wg.Add(1)
-
-	time.Sleep(1 * time.Second)
+	if !ueOnly {
+		go gnb.InitGnb(cfg, &wg)
+		wg.Add(1)
+		time.Sleep(1 * time.Second)
+	}
     msin :=  cfg.Ue.Msin
 	for i := 1; i <= numUes; i++ {
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/lib/UeauCommon"
 	"OmniRAN-Emulator/lib/milenage"
 	"OmniRAN-Emulator/lib/nas/nasMessage"
@@ -31,13 +32,17 @@ const SM5G_PDU_SESSION_ACTIVE_PENDING = 0x07
 const SM5G_PDU_SESSION_ACTIVE = 0x08
 
 type UEContext struct {
-	id         uint8
-	UeSecurity SECURITY
-	StateMM    int
-	StateSM    int
-	UnixConn   net.Conn
-	PduSession PDUSession
-	amfInfo    Amf
+	id           uint8
+	UeSecurity   SECURITY
+	StateMM      int
+	StateSM      int
+	UnixConn     net.Conn
+	PduSession   PDUSession
+	PduSessions  map[uint8]*PDUSession
+	amfInfo      Amf
+	gnbLinkType  string
+	gnbLinkPort  int
+	gnbControlIp string
 }
 
 type Amf struct {
@@ -47,15 +52,17 @@ type Amf struct {
 }
 
 type PDUSession struct {
-	Id        uint8
-	ueIP      string
-	ueGnbIP   net.IP
-	Dnn       string
-	Snssai    models.Snssai
-	gatewayIP net.IP
-	tun       netlink.Link
-	routeTun  *netlink.Route
-	ruleTun   *netlink.Rule
+	Id             uint8
+	ueIP           string
+	ueGnbIP        net.IP
+	Dnn            string
+	PduSessionType string
+	Snssai         models.Snssai
+	gatewayIP      net.IP
+	tun            netlink.Link
+	routeTun       []netlink.Route
+	ruleTun        []netlink.Rule
+	State          int
 }
 
 type SECURITY struct {
@@ -78,8 +85,9 @@ type SECURITY struct {
 
 func (ue *UEContext) NewRanUeContext(msin string,
 	cipheringAlg, integrityAlg uint8,
-	k, opc, op, amf, sqn, mcc, mnc, dnn string,
-	sst int32, sd string, id uint8) {
+	k, opc, op, amf, sqn, mcc, mnc, dnn, pduSessionType string,
+	sst int32, sd string, id uint8,
+	extraSessions []config.PDUSessionConfig) {
 
 	// added SUPI.
 	ue.UeSecurity.Msin = msin
@@ -103,11 +111,14 @@ func (ue *UEContext) NewRanUeContext(msin string,
 	// added supi
 	ue.UeSecurity.Supi = fmt.Sprintf("imsi-%s%s%s", mcc, mnc, msin)
 
-	// added PDU Session id
-	ue.PduSession.Id = id
-
 	// added UE id.
 	ue.id = id
+
+	// initialize map
+	ue.PduSessions = make(map[uint8]*PDUSession)
+
+	// added PDU Session id
+	ue.PduSession.Id = id
 
 	// added network slice
 	ue.PduSession.Snssai.Sd = sd
@@ -116,8 +127,50 @@ func (ue *UEContext) NewRanUeContext(msin string,
 	// added Domain Network Name.
 	ue.PduSession.Dnn = dnn
 
+	// added PDU Session Type
+	if pduSessionType == "" {
+		ue.PduSession.PduSessionType = "IPv4"
+	} else {
+		ue.PduSession.PduSessionType = pduSessionType
+	}
+
 	// added gateway ip.
 	ue.PduSession.gatewayIP = net.ParseIP("127.0.0.2").To4()
+	ue.PduSession.State = SM5G_PDU_SESSION_INACTIVE
+
+	// Add default PDU session to the map
+	ue.PduSessions[id] = &PDUSession{
+		Id:             id,
+		Dnn:            dnn,
+		PduSessionType: ue.PduSession.PduSessionType,
+		Snssai:         ue.PduSession.Snssai,
+		gatewayIP:      ue.PduSession.gatewayIP,
+		State:          SM5G_PDU_SESSION_INACTIVE,
+	}
+
+	// add extra PDU sessions to map
+	for _, sessConf := range extraSessions {
+		sessId := sessConf.Id
+		if sessId == 0 {
+			continue
+		}
+		if sessId == id {
+			continue // avoid overwriting the default
+		}
+		sess := &PDUSession{
+			Id:             sessId,
+			Dnn:            sessConf.Dnn,
+			PduSessionType: sessConf.PduSessionType,
+			gatewayIP:      net.ParseIP("127.0.0.2").To4(),
+			State:          SM5G_PDU_SESSION_INACTIVE,
+		}
+		sess.Snssai.Sst = int32(sessConf.Sst)
+		sess.Snssai.Sd = sessConf.Sd
+		if sess.PduSessionType == "" {
+			sess.PduSessionType = "IPv4"
+		}
+		ue.PduSessions[sessId] = sess
+	}
 
 	// encode mcc and mnc for mobileIdentity5Gs.
 	resu := ue.GetMccAndMncInOctets()
@@ -214,28 +267,62 @@ func (ue *UEContext) GetUnixConn() net.Conn {
 	return ue.UnixConn
 }
 
-func (ue *UEContext) SetIp(ip [12]uint8) {
-	ue.PduSession.ueIP = fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
+func (ue *UEContext) GetPduSession(id uint8) *PDUSession {
+	if ue.PduSessions == nil {
+		ue.PduSessions = make(map[uint8]*PDUSession)
+	}
+	sess, ok := ue.PduSessions[id]
+	if !ok {
+		sess = &PDUSession{
+			Id:        id,
+			gatewayIP: net.ParseIP("127.0.0.2").To4(),
+			State:     SM5G_PDU_SESSION_INACTIVE,
+		}
+		// Copy DNN, PDU Session Type, and Slice from first available session
+		for _, defSess := range ue.PduSessions {
+			sess.Dnn = defSess.Dnn
+			sess.PduSessionType = defSess.PduSessionType
+			sess.Snssai = defSess.Snssai
+			break
+		}
+		ue.PduSessions[id] = sess
+	}
+	return sess
 }
 
-func (ue *UEContext) GetIp() string {
-	return ue.PduSession.ueIP
+func (ue *UEContext) SetIp(pduSessionId uint8, ip [12]uint8) {
+	sess := ue.GetPduSession(pduSessionId)
+	if sess.PduSessionType == "IPv6" {
+		sess.ueIP = fmt.Sprintf("2001:db8:1::%02x%02x:%02x%02x:%02x%02x:%02x%02x",
+			ip[0], ip[1], ip[2], ip[3], ip[4], ip[5], ip[6], ip[7])
+	} else if sess.PduSessionType == "IPv4v6" {
+		ipv4Str := fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
+		ipv6Str := fmt.Sprintf("2001:db8:1::%02x%02x:%02x%02x:%02x%02x:%02x%02x",
+			ip[4], ip[5], ip[6], ip[7], ip[8], ip[9], ip[10], ip[11])
+		sess.ueIP = ipv4Str + "," + ipv6Str
+	} else {
+		sess.ueIP = fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
+	}
 }
 
-func (ue *UEContext) GetGatewayIp() net.IP {
-	return ue.PduSession.gatewayIP
+func (ue *UEContext) GetIp(pduSessionId uint8) string {
+	return ue.GetPduSession(pduSessionId).ueIP
 }
 
-func (ue *UEContext) SetGnbIp(ip net.IP) {
-	ue.PduSession.ueGnbIP = ip
+func (ue *UEContext) GetGatewayIp(pduSessionId uint8) net.IP {
+	return ue.GetPduSession(pduSessionId).gatewayIP
 }
 
-func (ue *UEContext) GetGnbIp() net.IP {
-	return ue.PduSession.ueGnbIP
+func (ue *UEContext) SetGnbIp(pduSessionId uint8, ip net.IP) {
+	ue.GetPduSession(pduSessionId).ueGnbIP = ip
+}
+
+func (ue *UEContext) GetGnbIp(pduSessionId uint8) net.IP {
+	return ue.GetPduSession(pduSessionId).ueGnbIP
 }
 
 func (ue *UEContext) GetPduSesssionId() uint8 {
-	return ue.PduSession.Id
+	return ue.id
 }
 
 func (ue *UEContext) deriveSNN() string {
@@ -510,51 +597,53 @@ func SetUESecurityCapability(ue *UEContext) (UESecurityCapability *nasType.UESec
 	return
 }
 
-func (ue *UEContext) SetTunInterface(tun netlink.Link) {
-	ue.PduSession.tun = tun
+func (ue *UEContext) SetTunInterface(pduSessionId uint8, tun netlink.Link) {
+	ue.GetPduSession(pduSessionId).tun = tun
 }
 
-func (ue *UEContext) GetTunInterface() netlink.Link {
-	return ue.PduSession.tun
+func (ue *UEContext) GetTunInterface(pduSessionId uint8) netlink.Link {
+	return ue.GetPduSession(pduSessionId).tun
 }
 
-func (ue *UEContext) SetTunRoute(route *netlink.Route) {
-	ue.PduSession.routeTun = route
+func (ue *UEContext) SetTunRoute(pduSessionId uint8, route netlink.Route) {
+	sess := ue.GetPduSession(pduSessionId)
+	sess.routeTun = append(sess.routeTun, route)
 }
 
-func (ue *UEContext) GetTunRoute() *netlink.Route {
-	return ue.PduSession.routeTun
+func (ue *UEContext) GetTunRoute(pduSessionId uint8) []netlink.Route {
+	return ue.GetPduSession(pduSessionId).routeTun
 }
 
-func (ue *UEContext) SetTunRule(rule *netlink.Rule) {
-	ue.PduSession.ruleTun = rule
+func (ue *UEContext) SetTunRule(pduSessionId uint8, rule netlink.Rule) {
+	sess := ue.GetPduSession(pduSessionId)
+	sess.ruleTun = append(sess.ruleTun, rule)
 }
 
-func (ue *UEContext) GetTunRule() *netlink.Rule {
-	return ue.PduSession.ruleTun
+func (ue *UEContext) GetTunRule(pduSessionId uint8) []netlink.Rule {
+	return ue.GetPduSession(pduSessionId).ruleTun
 }
 
 func (ue *UEContext) Terminate() {
 
 	// clean all context of tun interface
-	ueTun := ue.GetTunInterface()
-	ueRoute := ue.GetTunRoute()
-	ueRule := ue.GetTunRule()
+	for _, sess := range ue.PduSessions {
+		if sess.tun != nil {
+			_ = netlink.LinkSetDown(sess.tun)
+			_ = netlink.LinkDel(sess.tun)
+		}
+
+		for _, route := range sess.routeTun {
+			r := route
+			_ = netlink.RouteDel(&r)
+		}
+
+		for _, rule := range sess.ruleTun {
+			ru := rule
+			_ = netlink.RuleDel(&ru)
+		}
+	}
+
 	ueUnix := ue.GetUnixConn()
-
-	if ueTun != nil {
-		_ = netlink.LinkSetDown(ueTun)
-		_ = netlink.LinkDel(ueTun)
-	}
-
-	if ueRoute != nil {
-		_ = netlink.RouteDel(ueRoute)
-	}
-
-	if ueRule != nil {
-		_ = netlink.RuleDel(ueRule)
-	}
-
 	if ueUnix != nil {
 		ueUnix.Close()
 	}
@@ -571,4 +660,37 @@ func reverse(s string) string {
 	}
 	return aux
 
+}
+
+func (ue *UEContext) SetGnbLinkType(t string) {
+	ue.gnbLinkType = t
+}
+
+func (ue *UEContext) GetGnbLinkType() string {
+	if ue.gnbLinkType == "" {
+		return "unix"
+	}
+	return ue.gnbLinkType
+}
+
+func (ue *UEContext) SetGnbLinkPort(p int) {
+	ue.gnbLinkPort = p
+}
+
+func (ue *UEContext) GetGnbLinkPort() int {
+	if ue.gnbLinkPort == 0 {
+		return 9488
+	}
+	return ue.gnbLinkPort
+}
+
+func (ue *UEContext) SetGnbControlIp(ip string) {
+	ue.gnbControlIp = ip
+}
+
+func (ue *UEContext) GetGnbControlIp() string {
+	if ue.gnbControlIp == "" {
+		return "127.0.0.1"
+	}
+	return ue.gnbControlIp
 }

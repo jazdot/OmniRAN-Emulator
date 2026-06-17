@@ -13,6 +13,8 @@ gnodeb:
   slicesupportlist:
     sst: "@SST_GNB@"
     sd: "@SD@"
+  link_type: "@LINK_TYPE@"
+  link_port: @LINK_PORT@
 
 ue:
   msin: "@MSIN@"
@@ -21,6 +23,7 @@ ue:
   amf: "8000"
   sqn: "0000000"
   dnn: "@DNN@"
+  pdusessiontype: "@PDU_SESSION_TYPE@"
   hplmn:
     mcc: "@MCC@"
     mnc: "@MNC@"

@@ -11,6 +11,7 @@ import (
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/trigger"
 	"OmniRAN-Emulator/lib/aper"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
+	"net"
 	"time"
 )
 
@@ -335,27 +336,30 @@ func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *nga
 		// TODO SEND ERROR INDICATION
 	}
 
-	// create PDU Session for GNB UE.
-	if ue.CreatePduSession(pduSessionId, sst, sd, pduSType, qosId, priArp, fiveQi, ulTeid) != "" {
+	// allocate downlink TEID and IP for this PDU Session
+	teidDown := gnb.GetUeTeid()
+	gnb.StoreTeid(teidDown, ue)
 
+	ueGnbIpVal := gnb.GetRanUeIp()
+	ueGnbIp := net.IPv4(127, 0, 0, ueGnbIpVal)
+	gnb.StoreUeIp(ueGnbIp.String(), ue)
+
+	// create PDU Session for GNB UE.
+	if ue.CreatePduSession(pduSessionId, sst, sd, pduSType, qosId, priArp, fiveQi, ulTeid, ueGnbIp, teidDown) != "" {
 		log.Info("[GNB][NGAP] Error in Pdu Session Resource Setup Request. NSSAI informed was not found")
 	} else {
-
 		log.Info("[GNB][NGAP][UE] PDU Session was created with successful.")
-		log.Info("[GNB][NGAP][UE] PDU Session Id: ", ue.GetPduSessionId())
+		log.Info("[GNB][NGAP][UE] PDU Session Id: ", pduSessionId)
 		sst, sd := ue.GetSelectedNssai()
 		log.Info("[GNB][NGAP][UE] NSSAI Selected --- sst: ", sst, " sd: ", sd)
 		log.Info("[GNB][NGAP][UE] PDU Session Type: ", ue.GetPduType())
 		log.Info("[GNB][NGAP][UE] QOS Flow Identifier: ", ue.GetQosId())
-		log.Info("[GNB][NGAP][UE] Uplink Teid: ", ue.GetTeidUplink())
-		log.Info("[GNB][NGAP][UE] Downlink Teid: ", ue.GetTeidDownlink())
-		log.Info("[GNB][NGAP][UE] Non-Dynamic-5QI: ", ue.GetFiveQI())
-		log.Info("[GNB][NGAP][UE] Priority Level ARP: ", ue.GetPriorityARP())
+		log.Info("[GNB][NGAP][UE] Uplink Teid: ", ulTeid)
+		log.Info("[GNB][NGAP][UE] Downlink Teid: ", teidDown)
+		log.Info("[GNB][NGAP][UE] Non-Dynamic-5QI: ", fiveQi)
+		log.Info("[GNB][NGAP][UE] Priority Level ARP: ", priArp)
 		log.Info("[GNB][NGAP][UE] UPF Address: ", fmt.Sprintf("%d.%d.%d.%d", upfAddress[0], upfAddress[1], upfAddress[2], upfAddress[3]), " :2152")
 	}
-
-	// set uplink teid.
-	// ue.SetTeidUplink(ulTeid)
 
 	// get UPF ip.
 	if gnb.GetUpfIp() == "" {
@@ -366,19 +370,11 @@ func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *nga
 	// send NAS message to UE.
 	sender.SendToUe(ue, messageNas)
 
-// 	// configure GTP tunnel and listen.
-// 	if gnb.GetN3Plane() == nil {
-// 		// TODO check if GTP tunnel and gateway is ok.
-// 		serviceGtp.InitGTPTunnel(gnb)
-// 		serviceGateway.InitGatewayGnb(gnb)
-// 	}
-
 	// send PDU Session Resource Setup Response.
-	trigger.SendPduSessionResourceSetupResponse(ue, gnb)
+	trigger.SendPduSessionResourceSetupResponse(ue, gnb, pduSessionId)
 
 	time.Sleep(20 * time.Millisecond)
 
-	
 	// configure GTP tunnel and listen.
 	if gnb.GetN3Plane() == nil {
 		// TODO check if GTP tunnel and gateway is ok.
@@ -387,9 +383,9 @@ func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *nga
 	}
 	
 	// ue is ready for data plane.
-	// send GNB UE IP message to UE.
-	UeGnBIp := ue.GetIp()
-	sender.SendToUe(ue, UeGnBIp)
+	// send GNB UE IP message to UE (prepended with PDU Session ID).
+	msg := append([]byte{byte(pduSessionId)}, ueGnbIp...)
+	sender.SendToUe(ue, msg)
 }
 
 func HandlerNgSetupResponse(amf *context.GNBAmf, gnb *context.GNBContext, message *ngapType.NGAPPDU) {
@@ -587,4 +583,52 @@ func HandlerNgSetupFailure(amf *context.GNBAmf, gnb *context.GNBContext, message
 	amf.SetStateInactive()
 
 	log.Info("[GNB][NGAP] AMF is inactive")
+}
+
+func HandlerPaging(gnb *context.GNBContext, message *ngapType.NGAPPDU) {
+	log.Info("[GNB][NGAP] Handling Paging Request from AMF")
+
+	valueMessage := message.InitiatingMessage.Value.Paging
+	if valueMessage == nil {
+		log.Warn("[GNB][NGAP] Paging value message is nil")
+		return
+	}
+
+	var tmsiBytes []byte
+	for _, ies := range valueMessage.ProtocolIEs.List {
+		if ies.Id.Value == ngapType.ProtocolIEIDUEPagingIdentity {
+			if ies.Value.UEPagingIdentity != nil {
+				pagingId := ies.Value.UEPagingIdentity
+				if pagingId.Present == ngapType.UEPagingIdentityPresentFiveGSTMSI {
+					if pagingId.FiveGSTMSI != nil {
+						tmsiBytes = pagingId.FiveGSTMSI.FiveGTMSI.Value
+					}
+				}
+			}
+		}
+	}
+
+	if tmsiBytes == nil {
+		log.Warn("[GNB][NGAP] Paging identity (5G-S-TMSI) not found in Paging Request")
+	}
+
+	found := false
+	gnb.RangeUePool(func(ranUeId int64, ue *context.GNBUe) bool {
+		log.Infof("[GNB] Paging UE (RanUeId: %d)", ranUeId)
+		conn := ue.GetUnixSocket()
+		if conn != nil {
+			_, err := conn.Write([]byte{0x00, 0x01})
+			if err != nil {
+				log.Errorf("[GNB] Error sending paging trigger to UE: %v", err)
+			} else {
+				log.Info("[GNB] Paging trigger sent successfully to UE")
+				found = true
+			}
+		}
+		return true
+	})
+
+	if !found {
+		log.Warn("[GNB][NGAP] No active UE socket connection found to page")
+	}
 }

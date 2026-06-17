@@ -22,6 +22,9 @@ services:
       AMF: 8000
       SQN: 0000000
       DNN: internet
+      PDU_SESSION_TYPE: IPv4
+      LINK_TYPE: unix
+      LINK_PORT: 9488
       NUM_UE: 2
     cap_add:
       - NET_ADMIN

@@ -158,6 +158,10 @@ func DispatchNas(ue *context.UEContext, message []byte) {
 	case nas.MsgTypeRegistrationReject:
 		// handler registration reject
 		log.Info("[UE][NAS] Receive Registration Reject")
+
+	case nas.MsgTypeDeregistrationRequestUETerminatedDeregistration:
+		log.Info("[UE][NAS] Receive Deregistration Request (Network Terminated)")
+		handler.HandlerDeregistrationRequestUETerminatedDeregistration(ue, m)
 	}
 
 }

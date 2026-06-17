@@ -13,6 +13,8 @@ gnodeb:
   slicesupportlist:
     sst: "01"
     sd: "010203"
+  link_type: "unix"
+  link_port: 9488
 
 ue:
   msin: "0000000001"
@@ -21,6 +23,7 @@ ue:
   amf: "8000"
   sqn: "0000000"
   dnn: "internet"
+  pdusessiontype: "IPv4"
   hplmn:
     mcc: "208"
     mnc: "93"

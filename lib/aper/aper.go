@@ -2,9 +2,7 @@ package aper
 
 import (
 	"fmt"
-	"path"
 	"reflect"
-	"runtime"
 )
 
 type perBitData struct {
@@ -14,15 +12,6 @@ type perBitData struct {
 }
 
 func perTrace(level int, s string) {
-
-	_, file, line, ok := runtime.Caller(1)
-	if !ok {
-		// logger.AperLog.Debugln(s)
-		fmt.Sprintf(s)
-	} else {
-		// logger.AperLog.Debugf("%s (%s:%d)\n", s, path.Base(file), line)
-		fmt.Sprintf(s, path.Base(file), line)
-	}
 }
 
 func perBitLog(numBits uint64, byteOffset uint64, bitsOffset uint, value interface{}) string {

@@ -17,21 +17,21 @@ func InitGTPTunnel(gnb *context.GNBContext) error {
 	remote := fmt.Sprintf("%s:%d", gnb.GetUpfIp(), gnb.GetUpfPort())
 	remoteUdp, err := net.ResolveUDPAddr("udp", remote)
 	if err != nil {
-		return fmt.Errorf("[GNB][GTP] Error in resolving UPF address for GTP/UDP tunnel", err)
+		return fmt.Errorf("[GNB][GTP] Error in resolving UPF address for GTP/UDP tunnel: %v", err)
 	}
 
 	// get GNB Data plane ip and GNB Data plane port.
 	local := fmt.Sprintf("%s:%d", gnb.GetGnbIpByData(), gnb.GetGnbPortByData())
 	localUdp, err := net.ResolveUDPAddr("udp", local)
 	if err != nil {
-		return fmt.Errorf("[GNB][GTP] Error in resolving GNB address for GTP/UDP tunnel", err)
+		return fmt.Errorf("[GNB][GTP] Error in resolving GNB address for GTP/UDP tunnel: %v", err)
 	}
 
 	// make dial for UPF.
 	conte := create.TODO()
 	userPlane, err := gtpv1.DialUPlane(conte, localUdp, remoteUdp)
 	if err != nil {
-		return fmt.Errorf("[GNB][GTP] Error in dial between GNB and UPF", err)
+		return fmt.Errorf("[GNB][GTP] Error in dial between GNB and UPF: %v", err)
 	}
 
 	// successful established GTP/UDP tunnel.
@@ -83,15 +83,21 @@ func gtpListen(gnb *context.GNBContext) {
 		// log.Info("[GNB][GTP] Read ", n," bytes for UE ", ue.GetRanUeId()," in GTP tunnel\n")
 
 		// handling data plane.
-		go processingData(ue, gnb, forwardData)
+		go processingData(ue, gnb, teid, forwardData)
 	}
 
 }
 
-func processingData(ue *context.GNBUe, gnb *context.GNBContext, packet []byte) {
+func processingData(ue *context.GNBUe, gnb *context.GNBContext, downlinkTeid uint32, packet []byte) {
 
 	// get connection UE with GNB.
 	ueRawn := gnb.GetUePlane()
+
+	sess := ue.FindPduSessionByDownlinkTeid(downlinkTeid)
+	if sess == nil {
+		log.Info("[GNB][GTP] Session not found for downlink TEID: ", downlinkTeid)
+		return
+	}
 
 	// make ipv4 header.
 	ipHeader := &ipv4.Header{
@@ -104,7 +110,7 @@ func processingData(ue *context.GNBUe, gnb *context.GNBContext, packet []byte) {
 		Protocol: syscall.IPPROTO_IPIP,
 	}
 
-	ueIp := ue.GetIp()
+	ueIp := sess.GetRanUeIP()
 
 	ipHeader.Dst = ueIp
 

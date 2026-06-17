@@ -13,9 +13,10 @@ import (
 	"OmniRAN-Emulator/lib/openapi/models"
 )
 
-func UlNasTransport(ue *context.UEContext, requestType uint8) ([]byte, error) {
+func UlNasTransport(ue *context.UEContext, pduSessionId uint8, requestType uint8) ([]byte, error) {
 
-	pdu := getUlNasTransport_PduSessionEstablishmentRequest(ue.PduSession.Id, requestType, ue.PduSession.Dnn, &ue.PduSession.Snssai)
+	sess := ue.GetPduSession(pduSessionId)
+	pdu := getUlNasTransport_PduSessionEstablishmentRequest(pduSessionId, requestType, sess.Dnn, &sess.Snssai, sess.PduSessionType)
 	if pdu == nil {
 		return nil, fmt.Errorf("Error encoding %s IMSI UE PduSession Establishment Request Msg", ue.UeSecurity.Supi)
 	}
@@ -27,9 +28,9 @@ func UlNasTransport(ue *context.UEContext, requestType uint8) ([]byte, error) {
 	return pdu, nil
 }
 
-func getUlNasTransport_PduSessionEstablishmentRequest(pduSessionId uint8, requestType uint8, dnnString string, sNssai *models.Snssai) (nasPdu []byte) {
+func getUlNasTransport_PduSessionEstablishmentRequest(pduSessionId uint8, requestType uint8, dnnString string, sNssai *models.Snssai, pduSessionType string) (nasPdu []byte) {
 
-	pduSessionEstablishmentRequest := sm_5gs.GetPduSessionEstablishmentRequest(pduSessionId)
+	pduSessionEstablishmentRequest := sm_5gs.GetPduSessionEstablishmentRequest(pduSessionId, pduSessionType)
 
 	m := nas.NewMessage()
 	m.GmmMessage = nas.NewGmmMessage()

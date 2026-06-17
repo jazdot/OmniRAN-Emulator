@@ -9,7 +9,8 @@ import (
 	"OmniRAN-Emulator/lib/nas/nasType"
 )
 
-func GetPduSessionEstablishmentRequest(pduSessionId uint8) (nasPdu []byte) {
+// GetPduSessionEstablishmentRequest builds a PDU Session Establishment Request NAS message with the given session ID and type
+func GetPduSessionEstablishmentRequest(pduSessionId uint8, pduSessionType string) (nasPdu []byte) {
 
 	m := nas.NewMessage()
 	m.GsmMessage = nas.NewGsmMessage()
@@ -24,7 +25,15 @@ func GetPduSessionEstablishmentRequest(pduSessionId uint8) (nasPdu []byte) {
 	pduSessionEstablishmentRequest.IntegrityProtectionMaximumDataRate.SetMaximumDataRatePerUEForUserPlaneIntegrityProtectionForUpLink(0xff)
 
 	pduSessionEstablishmentRequest.PDUSessionType = nasType.NewPDUSessionType(nasMessage.PDUSessionEstablishmentRequestPDUSessionTypeType)
-	pduSessionEstablishmentRequest.PDUSessionType.SetPDUSessionTypeValue(uint8(0x01)) //IPv4 type
+	
+	var typeVal uint8 = 0x01 // default IPv4
+	switch pduSessionType {
+	case "IPv6":
+		typeVal = 0x02
+	case "IPv4v6":
+		typeVal = 0x03
+	}
+	pduSessionEstablishmentRequest.PDUSessionType.SetPDUSessionTypeValue(typeVal)
 
 	pduSessionEstablishmentRequest.ExtendedProtocolConfigurationOptions = nasType.NewExtendedProtocolConfigurationOptions(nasMessage.PDUSessionEstablishmentRequestExtendedProtocolConfigurationOptionsType)
 	protocolConfigurationOptions := nasConvert.NewProtocolConfigurationOptions()

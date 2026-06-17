@@ -20,6 +20,9 @@ func RegistrationUe(conf config.Config, id uint8, wg *sync.WaitGroup) {
 
 	// new UE instance.
 	ue := &context.UEContext{}
+	ue.SetGnbLinkType(conf.GNodeB.LinkType)
+	ue.SetGnbLinkPort(conf.GNodeB.LinkPort)
+	ue.SetGnbControlIp(conf.GNodeB.ControlIF.Ip)
 
 	// new UE context
 	ue.NewRanUeContext(
@@ -34,9 +37,11 @@ func RegistrationUe(conf config.Config, id uint8, wg *sync.WaitGroup) {
 		conf.Ue.Hplmn.Mcc,
 		conf.Ue.Hplmn.Mnc,
 		conf.Ue.Dnn,
+		conf.Ue.PduSessionType,
 		int32(conf.Ue.Snssai.Sst),
 		conf.Ue.Snssai.Sd,
-		id)
+		id,
+		conf.Ue.PduSessions)
 
 	// starting communication with GNB and listen.
 	err := service.InitConn(ue)
@@ -69,6 +74,9 @@ func RegistrationUeMonitor(conf config.Config,
 
 	// new UE instance.
 	ue := &context.UEContext{}
+	ue.SetGnbLinkType(conf.GNodeB.LinkType)
+	ue.SetGnbLinkPort(conf.GNodeB.LinkPort)
+	ue.SetGnbControlIp(conf.GNodeB.ControlIF.Ip)
 
 	// new UE context
 	ue.NewRanUeContext(
@@ -83,9 +91,11 @@ func RegistrationUeMonitor(conf config.Config,
 		conf.Ue.Hplmn.Mcc,
 		conf.Ue.Hplmn.Mnc,
 		conf.Ue.Dnn,
+		conf.Ue.PduSessionType,
 		int32(conf.Ue.Snssai.Sst),
 		conf.Ue.Snssai.Sd,
-		id)
+		id,
+		conf.Ue.PduSessions)
 
 	// starting communication with GNB and listen.
 	err := service.InitConn(ue)

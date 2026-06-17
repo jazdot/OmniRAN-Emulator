@@ -6,18 +6,20 @@ import (
 	"github.com/vishvananda/netlink"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
 	"net"
+	"strings"
+	"syscall"
 )
 
-func InitDataPlane(ue *context.UEContext, message []byte) {
+func InitDataPlane(ue *context.UEContext, pduSessionId uint8, gnbIp []byte) {
 
 	// get UE GNB IP.
-	ue.SetGnbIp(message)
+	ue.SetGnbIp(pduSessionId, gnbIp)
 
 	// create interface for data plane.
-	gatewayIp := ue.GetGatewayIp()
-	ueIp := ue.GetIp()
-	ueGnbIp := ue.GetGnbIp()
-	nameInf := fmt.Sprintf("uetun%d", ue.GetPduSesssionId())
+	gatewayIp := ue.GetGatewayIp(pduSessionId)
+	ueIp := ue.GetIp(pduSessionId)
+	ueGnbIp := ue.GetGnbIp(pduSessionId)
+	nameInf := fmt.Sprintf("uetun%d", pduSessionId)
 
 	newInterface := &netlink.Iptun{
 		LinkAttrs: netlink.LinkAttrs{
@@ -28,65 +30,90 @@ func InitDataPlane(ue *context.UEContext, message []byte) {
 	}
 
 	if err := netlink.LinkAdd(newInterface); err != nil {
-		log.Info("UE][DATA] Error in setting virtual interface", err)
-		return
-	}
-
-	// add an IP address to a link device.
-	addrTun := &netlink.Addr{
-		IPNet: &net.IPNet{
-			IP:   net.ParseIP(ueIp).To4(),
-			Mask: net.IPv4Mask(255, 255, 255, 255),
-		},
-	}
-
-	if err := netlink.AddrAdd(newInterface, addrTun); err != nil {
-		log.Info("[UE][DATA] Error in adding IP for virtual interface", err)
+		log.Info("[UE][DATA] Error in setting virtual interface: ", err)
 		return
 	}
 
 	// Set IP interface up
 	if err := netlink.LinkSetUp(newInterface); err != nil {
-		log.Info("[UE][DATA] Error in setting virtual interface up ", err)
+		log.Info("[UE][DATA] Error in setting virtual interface up: ", err)
 		return
 	}
 
-	// create route in linux to table 1
-	ueRoute := &netlink.Route{
-		LinkIndex: newInterface.Attrs().Index,
-		Src:       net.ParseIP(ueIp).To4(),
-		Dst: &net.IPNet{
-			IP:   net.IPv4zero,
-			Mask: net.IPv4Mask(0, 0, 0, 0),
-		},
-		Table: int(ue.GetPduSesssionId()),
-	}
+	// Parse IP addresses (could be comma-separated for dual-stack)
+	ipStrings := strings.Split(ueIp, ",")
+	for _, ipStr := range ipStrings {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			log.Info("[UE][DATA] Invalid IP address: ", ipStr)
+			continue
+		}
 
-	if err := netlink.RouteAdd(ueRoute); err != nil {
-		log.Info("[UE][DATA] Error in setting route", err)
-		return
-	}
+		var ipNet *net.IPNet
+		var dst *net.IPNet
+		var src net.IP
+		var family int
 
-	// create rule to mapped traffic
-	ueRule := netlink.NewRule()
+		if ip.To4() != nil {
+			src = ip.To4()
+			family = syscall.AF_INET
+			ipNet = &net.IPNet{
+				IP:   src,
+				Mask: net.CIDRMask(32, 32),
+			}
+			dst = &net.IPNet{
+				IP:   net.IPv4zero,
+				Mask: net.CIDRMask(0, 32),
+			}
+		} else {
+			src = ip
+			family = syscall.AF_INET6
+			ipNet = &net.IPNet{
+				IP:   src,
+				Mask: net.CIDRMask(64, 128),
+			}
+			dst = &net.IPNet{
+				IP:   net.IPv6zero,
+				Mask: net.CIDRMask(0, 128),
+			}
+		}
 
-	ueRule.Src = &net.IPNet{
-		IP:   net.ParseIP(ueIp).To4(),
-		Mask: net.IPv4Mask(255, 255, 255, 255),
-	}
+		// add IP address to link device
+		addrTun := &netlink.Addr{
+			IPNet: ipNet,
+		}
+		if err := netlink.AddrAdd(newInterface, addrTun); err != nil {
+			log.Info("[UE][DATA] Error in adding IP ", ipStr, " for virtual interface: ", err)
+			return
+		}
 
-	ueRule.Table = int(ue.GetPduSesssionId())
+		// create route in linux matching PDU table ID
+		ueRoute := netlink.Route{
+			LinkIndex: newInterface.Attrs().Index,
+			Src:       src,
+			Dst:       dst,
+			Table:     int(pduSessionId),
+		}
+		if err := netlink.RouteAdd(&ueRoute); err != nil {
+			log.Info("[UE][DATA] Error in setting route for ", ipStr, ": ", err)
+			return
+		}
+		ue.SetTunRoute(pduSessionId, ueRoute)
 
-	if err := netlink.RuleAdd(ueRule); err != nil {
-		log.Info("[UE][DATA] Error in setting rule", err)
-		return
+		// create policy routing rule for source IP
+		ueRule := netlink.NewRule()
+		ueRule.Src = ipNet
+		ueRule.Family = family
+		ueRule.Table = int(pduSessionId)
+		if err := netlink.RuleAdd(ueRule); err != nil {
+			log.Info("[UE][DATA] Error in setting rule for ", ipStr, ": ", err)
+			return
+		}
+		ue.SetTunRule(pduSessionId, *ueRule)
 	}
 
 	log.Info("[UE][DATA] UE is ready for using data plane")
 
-	// contex of tun interface
-	ue.SetTunInterface(newInterface)
-	ue.SetTunRoute(ueRoute)
-	ue.SetTunRule(ueRule)
-
+	// context of tun interface
+	ue.SetTunInterface(pduSessionId, newInterface)
 }

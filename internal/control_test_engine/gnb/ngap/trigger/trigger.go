@@ -9,11 +9,11 @@ import (
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/sender"
 )
 
-func SendPduSessionResourceSetupResponse(ue *context.GNBUe, gnb *context.GNBContext) {
+func SendPduSessionResourceSetupResponse(ue *context.GNBUe, gnb *context.GNBContext, pduSessionId int64) {
 
 	// send PDU Session Resource Setup Response.
 	gnbIp := gnb.GetGnbIpByData()
-	ngapMsg, err := pdu_session_management.PDUSessionResourceSetupResponse(ue, gnbIp)
+	ngapMsg, err := pdu_session_management.PDUSessionResourceSetupResponse(ue, gnbIp, pduSessionId)
 	if err != nil {
 		log.Fatal("[GNB][NGAP] Error sending PDU Session Resource Setup Response.")
 	}

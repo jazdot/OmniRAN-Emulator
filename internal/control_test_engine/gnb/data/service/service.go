@@ -15,12 +15,12 @@ func InitGatewayGnb(gnb *context.GNBContext) error {
 
 	conn, err := net.ListenPacket("ip4:4", ipGateway)
 	if err != nil {
-		return fmt.Errorf("[GNB][DATA] Error setting listen gateway GNB", err)
+		return fmt.Errorf("[GNB][DATA] Error setting listen gateway GNB: %v", err)
 	}
 
 	dataPlaneConn, err := ipv4.NewRawConn(conn)
 	if err != nil {
-		return fmt.Errorf("[GNB][DATA] Error setting data plane communication with UEs", err)
+		return fmt.Errorf("[GNB][DATA] Error setting data plane communication with UEs: %v", err)
 	}
 
 	// successful established GNB/UE tunnel.
@@ -48,7 +48,7 @@ func gatewayListen(gnb *context.GNBContext) {
 		ipHeader, payload, _, err := conn.ReadFrom(buffer)
 		// log.Info(" [GNB][DATA] Read %d bytes in GNB/UE tunnel", len(payload))
 		if err != nil {
-			log.Info("[GNB][DATA] Error in reading from GNB/UE tunnel: %+v", err)
+			log.Infof("[GNB][DATA] Error in reading from GNB/UE tunnel: %+v", err)
 			return
 		}
 
@@ -62,11 +62,11 @@ func gatewayListen(gnb *context.GNBContext) {
 			return
 		}
 
-		go processingData(ue, gnb, forwardData)
+		go processingData(ue, gnb, ipHeader.Src.String(), forwardData)
 	}
 }
 
-func processingData(ue *context.GNBUe, gnb *context.GNBContext, packet []byte) {
+func processingData(ue *context.GNBUe, gnb *context.GNBContext, srcIp string, packet []byte) {
 
 	// get GTP/UDP connection.
 	conn := gnb.GetN3Plane()
@@ -76,7 +76,13 @@ func processingData(ue *context.GNBUe, gnb *context.GNBContext, packet []byte) {
 	}
 
 	// send Data plane with GTP header.
-	teidUplink := ue.GetTeidUplink()
+	var teidUplink uint32
+	sess := ue.FindPduSessionByIp(srcIp)
+	if sess != nil {
+		teidUplink = sess.GetUplinkTeid()
+	} else {
+		teidUplink = ue.GetTeidUplink()
+	}
 
 	remote := fmt.Sprintf("%s:%d", gnb.GetUpfIp(), gnb.GetUpfPort())
 	upfAddr, err := net.ResolveUDPAddr("udp", remote)

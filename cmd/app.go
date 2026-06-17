@@ -70,9 +70,13 @@ func main() {
 				Name:    "ue",
 				Aliases: []string{"ue"},
 				Usage:   "Testing an ue attached with configuration",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "ue-only", Usage: "Run only the UE (do not start gNodeB in this process)", Value: false},
+				},
 				Action: func(c *cli.Context) error {
 					name := "Testing an ue attached with configuration"
 					cfg := config.Data
+					ueOnly := c.Bool("ue-only")
 
 					log.Info("---------------------------------------")
 					log.Info("[TESTER] Starting test function: ", name)
@@ -81,7 +85,7 @@ func main() {
 					log.Info("[TESTER][GNB] Data interface IP/Port: ", cfg.GNodeB.DataIF.Ip, "/", cfg.GNodeB.DataIF.Port)
 					log.Info("[TESTER][AMF] AMF IP/Port: ", cfg.AMF.Ip, "/", cfg.AMF.Port)
 					log.Info("---------------------------------------")
-					templates.TestAttachUeWithConfiguration()
+					templates.TestAttachUeWithConfiguration(ueOnly)
 					return nil
 				},
 			},
@@ -111,11 +115,13 @@ func main() {
 					"Example for testing multiple UEs: load-test -n 5 \n",
 				Flags: []cli.Flag{
 					&cli.IntFlag{Name: "number-of-ues", Value: 1, Aliases: []string{"n"}},
+					&cli.BoolFlag{Name: "ue-only", Usage: "Run only the UEs (do not start gNodeB in this process)", Value: false},
 				},
 				Action: func(c *cli.Context) error {
 					var numUes int
 					name := "Testing registration of multiple UEs"
 					cfg := config.Data
+					ueOnly := c.Bool("ue-only")
 
 					if c.IsSet("number-of-ues") {
 						numUes = c.Int("number-of-ues")
@@ -131,7 +137,7 @@ func main() {
 					log.Info("[TESTER][GNB] gNodeB data interface IP/Port: ", cfg.GNodeB.DataIF.Ip, "/", cfg.GNodeB.DataIF.Port)
 					log.Info("[TESTER][AMF] AMF IP/Port: ", cfg.AMF.Ip, "/", cfg.AMF.Port)
 					log.Info("---------------------------------------")
-					templates.TestMultiUesInQueue(numUes)
+					templates.TestMultiUesInQueue(numUes, ueOnly)
 
 					return nil
 				},

@@ -31,6 +31,8 @@ func InitGnb(conf config.Config, wg *sync.WaitGroup) {
 		conf.GNodeB.DataIF.Ip,
 		conf.GNodeB.ControlIF.Port,
 		conf.GNodeB.DataIF.Port)
+	gnb.SetLinkType(conf.GNodeB.LinkType)
+	gnb.SetLinkPort(conf.GNodeB.LinkPort)
 
 	// start communication with AMF (server SCTP).
 
@@ -83,6 +85,8 @@ func InitGnbForUeLatency(conf config.Config, sigGnb chan bool, synch chan bool) 
 		conf.GNodeB.DataIF.Ip,
 		conf.GNodeB.ControlIF.Port,
 		conf.GNodeB.DataIF.Port)
+	gnb.SetLinkType(conf.GNodeB.LinkType)
+	gnb.SetLinkPort(conf.GNodeB.LinkPort)
 
 	// start communication with AMF (server SCTP).
 
