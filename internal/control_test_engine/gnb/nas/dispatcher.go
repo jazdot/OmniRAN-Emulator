@@ -1,8 +1,8 @@
 package nas
 
 import (
-	"my5G-RANTester/internal/control_test_engine/gnb/context"
-	"my5G-RANTester/internal/control_test_engine/gnb/nas/handler"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/nas/handler"
 )
 
 func Dispatch(ue *context.GNBUe, message []byte, gnb *context.GNBContext) {

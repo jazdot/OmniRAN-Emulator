@@ -2,8 +2,8 @@ package ngap
 
 import (
 	"fmt"
-	"my5G-RANTester/lib/aper"
-	"my5G-RANTester/lib/ngap/ngapType"
+	"OmniRAN-Emulator/lib/aper"
+	"OmniRAN-Emulator/lib/ngap/ngapType"
 	"reflect"
 	"strings"
 )

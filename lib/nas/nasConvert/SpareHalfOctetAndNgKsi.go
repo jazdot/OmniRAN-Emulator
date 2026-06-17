@@ -1,9 +1,9 @@
 package nasConvert
 
 import (
-	"my5G-RANTester/lib/nas/nasMessage"
-	"my5G-RANTester/lib/nas/nasType"
-	"my5G-RANTester/lib/openapi/models"
+	"OmniRAN-Emulator/lib/nas/nasMessage"
+	"OmniRAN-Emulator/lib/nas/nasType"
+	"OmniRAN-Emulator/lib/openapi/models"
 )
 
 func SpareHalfOctetAndNgksiToModels(ngKsiNas nasType.SpareHalfOctetAndNgksi) (ngKsiModels models.NgKsi) {

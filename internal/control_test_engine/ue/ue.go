@@ -2,12 +2,12 @@ package ue
 
 import (
 	log "github.com/sirupsen/logrus"
-	"my5G-RANTester/config"
-	"my5G-RANTester/internal/control_test_engine/ue/context"
-	"my5G-RANTester/internal/control_test_engine/ue/nas/service"
-	"my5G-RANTester/internal/control_test_engine/ue/nas/trigger"
-	"my5G-RANTester/internal/monitoring"
-	"my5G-RANTester/lib/nas/security"
+	"OmniRAN-Emulator/config"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/service"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/trigger"
+	"OmniRAN-Emulator/internal/monitoring"
+	"OmniRAN-Emulator/lib/nas/security"
 	"os"
 	"os/signal"
 	"sync"

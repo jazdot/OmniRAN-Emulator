@@ -1,9 +1,9 @@
 package ue_context_management
 
 import (
-	"my5G-RANTester/internal/control_test_engine/gnb/context"
-	"my5G-RANTester/lib/ngap"
-	"my5G-RANTester/lib/ngap/ngapType"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	"OmniRAN-Emulator/lib/ngap"
+	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
 
 /*

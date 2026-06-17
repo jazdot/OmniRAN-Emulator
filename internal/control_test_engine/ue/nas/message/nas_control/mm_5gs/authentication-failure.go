@@ -3,9 +3,9 @@ package mm_5gs
 import (
 	"bytes"
 	"fmt"
-	"my5G-RANTester/lib/nas"
-	"my5G-RANTester/lib/nas/nasMessage"
-	"my5G-RANTester/lib/nas/nasType"
+	"OmniRAN-Emulator/lib/nas"
+	"OmniRAN-Emulator/lib/nas/nasMessage"
+	"OmniRAN-Emulator/lib/nas/nasType"
 )
 
 func AuthenticationFailure(cause, eapMsg string, paramAutn []byte) (nasPdu []byte) {

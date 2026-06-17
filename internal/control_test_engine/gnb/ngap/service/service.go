@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"github.com/ishidawataru/sctp"
 	log "github.com/sirupsen/logrus"
-	"my5G-RANTester/internal/control_test_engine/gnb/context"
-	"my5G-RANTester/internal/control_test_engine/gnb/ngap"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap"
 )
 
 func InitConn(amf *context.GNBAmf, gnb *context.GNBContext) error {

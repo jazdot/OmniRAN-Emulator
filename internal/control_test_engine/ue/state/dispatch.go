@@ -1,9 +1,9 @@
 package state
 
 import (
-	"my5G-RANTester/internal/control_test_engine/ue/context"
-	data "my5G-RANTester/internal/control_test_engine/ue/data/service"
-	"my5G-RANTester/internal/control_test_engine/ue/nas"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
+	data "OmniRAN-Emulator/internal/control_test_engine/ue/data/service"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/nas"
 )
 
 func DispatchState(ue *context.UEContext, message []byte) {

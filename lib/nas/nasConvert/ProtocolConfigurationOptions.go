@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"my5G-RANTester/lib/nas/nasMessage"
+	"OmniRAN-Emulator/lib/nas/nasMessage"
 	"net"
 )
 

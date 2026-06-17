@@ -2,7 +2,7 @@ package nasConvert
 
 import (
 	"encoding/hex"
-	"my5G-RANTester/lib/openapi/models"
+	"OmniRAN-Emulator/lib/openapi/models"
 	"reflect"
 )
 

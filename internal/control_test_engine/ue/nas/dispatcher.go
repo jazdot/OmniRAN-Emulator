@@ -2,10 +2,10 @@ package nas
 
 import (
 	log "github.com/sirupsen/logrus"
-	"my5G-RANTester/internal/control_test_engine/ue/context"
-	"my5G-RANTester/internal/control_test_engine/ue/nas/handler"
-	"my5G-RANTester/lib/nas"
-	"my5G-RANTester/lib/nas/security"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/handler"
+	"OmniRAN-Emulator/lib/nas"
+	"OmniRAN-Emulator/lib/nas/security"
 	"reflect"
 )
 

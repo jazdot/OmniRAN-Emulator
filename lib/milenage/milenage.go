@@ -2,7 +2,7 @@ package milenage
 
 import (
 	"fmt"
-	"my5G-RANTester/lib/aes"
+	"OmniRAN-Emulator/lib/aes"
 	"reflect"
 	"strconv"
 )

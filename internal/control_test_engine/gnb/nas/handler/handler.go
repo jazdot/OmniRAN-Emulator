@@ -2,9 +2,9 @@ package handler
 
 import (
 	log "github.com/sirupsen/logrus"
-	"my5G-RANTester/internal/control_test_engine/gnb/context"
-	"my5G-RANTester/internal/control_test_engine/gnb/ngap/message/ngap_control/nas_transport"
-	"my5G-RANTester/internal/control_test_engine/gnb/ngap/message/sender"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/nas_transport"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/sender"
 )
 
 func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBContext) {

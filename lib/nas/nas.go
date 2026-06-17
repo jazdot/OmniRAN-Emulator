@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/davecgh/go-spew/spew"
 	log "github.com/sirupsen/logrus"
-	"my5G-RANTester/lib/nas/nasMessage"
+	"OmniRAN-Emulator/lib/nas/nasMessage"
 	"os"
 )
 

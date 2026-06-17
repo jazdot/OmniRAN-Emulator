@@ -1,7 +1,7 @@
 package nasConvert
 
 import (
-	"my5G-RANTester/lib/nas/nasType"
+	"OmniRAN-Emulator/lib/nas/nasType"
 	"strings"
 )
 

@@ -6,7 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	gtpv1 "github.com/wmnsk/go-gtp/v1"
 	"golang.org/x/net/ipv4"
-	"my5G-RANTester/internal/control_test_engine/gnb/context"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 	"net"
 	"syscall"
 )

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"my5G-RANTester/config"
-	"my5G-RANTester/internal/templates"
+	"OmniRAN-Emulator/config"
+	"OmniRAN-Emulator/internal/templates"
 
 	// "fmt"
 	"github.com/davecgh/go-spew/spew"
@@ -34,7 +34,7 @@ func init() {
 
 	spew.Config.Indent = "\t"
 
-	log.Info("my5G-RANTester version " + version)
+	log.Info("OmniRAN-Emulator version " + version)
 }
 
 func main() {

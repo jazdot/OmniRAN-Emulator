@@ -2,7 +2,7 @@ package sender
 
 import (
 	"fmt"
-	"my5G-RANTester/internal/control_test_engine/ue/context"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
 )
 
 func SendToGnb(ue *context.UEContext, message []byte) {

@@ -2,7 +2,7 @@ package ngapConvert
 
 import (
 	"encoding/hex"
-	"my5G-RANTester/lib/aper"
+	"OmniRAN-Emulator/lib/aper"
 )
 
 func BitStringToHex(bitString *aper.BitString) (hexString string) {

@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
-	"my5G-RANTester/lib/nas"
-	"my5G-RANTester/lib/nas/nasMessage"
-	"my5G-RANTester/lib/nas/nasType"
+	"OmniRAN-Emulator/lib/nas"
+	"OmniRAN-Emulator/lib/nas/nasMessage"
+	"OmniRAN-Emulator/lib/nas/nasType"
 )
 
 func AuthenticationResponse(authenticationResponseParam []uint8, eapMsg string) (nasPdu []byte) {

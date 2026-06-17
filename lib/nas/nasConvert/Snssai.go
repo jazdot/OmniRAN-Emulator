@@ -2,8 +2,8 @@ package nasConvert
 
 import (
 	"encoding/hex"
-	"my5G-RANTester/lib/nas/nasType"
-	"my5G-RANTester/lib/openapi/models"
+	"OmniRAN-Emulator/lib/nas/nasType"
+	"OmniRAN-Emulator/lib/openapi/models"
 )
 
 func SnssaiToModels(nasSnssai *nasType.SNSSAI) (snssai models.Snssai) {

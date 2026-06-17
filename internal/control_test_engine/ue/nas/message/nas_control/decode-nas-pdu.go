@@ -1,8 +1,8 @@
 package nas_control
 
 import (
-	"my5G-RANTester/lib/nas"
-	"my5G-RANTester/lib/ngap/ngapType"
+	"OmniRAN-Emulator/lib/nas"
+	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
 
 func GetNasPduFromDownlink(msg *ngapType.DownlinkNASTransport) (m *nas.Message) {

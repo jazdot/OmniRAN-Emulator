@@ -1,0 +1,11 @@
+# Binaries
+app
+cmd/app
+
+# Go SDK and downloaded archives
+go_sdk/
+go_sdk.tar.gz
+
+# Local logs or configuration overrides
+*.log
+config/config.local.yml

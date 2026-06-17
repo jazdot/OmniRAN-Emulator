@@ -1,7 +1,7 @@
 package nasConvert
 
 import (
-	"my5G-RANTester/lib/openapi/models"
+	"OmniRAN-Emulator/lib/openapi/models"
 )
 
 func LadnToModels(buf []uint8) (dnnValues []string) {

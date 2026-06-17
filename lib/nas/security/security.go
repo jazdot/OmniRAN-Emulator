@@ -5,7 +5,7 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"fmt"
-	"my5G-RANTester/lib/nas/security/snow3g"
+	"OmniRAN-Emulator/lib/nas/security/snow3g"
 
 	"github.com/aead/cmac"
 )

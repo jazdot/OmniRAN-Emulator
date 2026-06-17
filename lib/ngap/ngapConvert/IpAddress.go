@@ -1,8 +1,8 @@
 package ngapConvert
 
 import (
-	"my5G-RANTester/lib/aper"
-	"my5G-RANTester/lib/ngap/ngapType"
+	"OmniRAN-Emulator/lib/aper"
+	"OmniRAN-Emulator/lib/ngap/ngapType"
 	"net"
 )
 

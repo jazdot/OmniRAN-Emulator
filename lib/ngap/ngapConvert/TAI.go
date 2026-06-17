@@ -2,8 +2,8 @@ package ngapConvert
 
 import (
 	"encoding/hex"
-	"my5G-RANTester/lib/ngap/ngapType"
-	"my5G-RANTester/lib/openapi/models"
+	"OmniRAN-Emulator/lib/ngap/ngapType"
+	"OmniRAN-Emulator/lib/openapi/models"
 )
 
 func TaiToModels(tai ngapType.TAI) (modelsTai models.Tai) {

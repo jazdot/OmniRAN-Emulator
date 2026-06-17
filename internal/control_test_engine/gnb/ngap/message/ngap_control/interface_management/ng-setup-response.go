@@ -3,8 +3,8 @@ package interface_management
 import (
 	"fmt"
 	"github.com/ishidawataru/sctp"
-	"my5G-RANTester/lib/ngap"
-	"my5G-RANTester/lib/ngap/ngapType"
+	"OmniRAN-Emulator/lib/ngap"
+	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
 
 func NgSetupResponse(connN2 *sctp.SCTPConn) (*ngapType.NGAPPDU, error) {

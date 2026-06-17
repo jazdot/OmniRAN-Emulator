@@ -3,10 +3,10 @@ package nas_transport
 import (
 	"encoding/hex"
 	"fmt"
-	"my5G-RANTester/internal/control_test_engine/gnb/context"
-	"my5G-RANTester/lib/aper"
-	"my5G-RANTester/lib/ngap"
-	"my5G-RANTester/lib/ngap/ngapType"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	"OmniRAN-Emulator/lib/aper"
+	"OmniRAN-Emulator/lib/ngap"
+	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
 
 var TestPlmn ngapType.PLMNIdentity

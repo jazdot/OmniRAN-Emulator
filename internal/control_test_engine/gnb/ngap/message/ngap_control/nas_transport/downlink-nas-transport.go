@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"github.com/ishidawataru/sctp"
 	log "github.com/sirupsen/logrus"
-	"my5G-RANTester/lib/ngap"
-	"my5G-RANTester/lib/ngap/ngapType"
+	"OmniRAN-Emulator/lib/ngap"
+	"OmniRAN-Emulator/lib/ngap/ngapType"
 	"time"
 )
 

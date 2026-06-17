@@ -2,11 +2,11 @@ package trigger
 
 import (
 	log "github.com/sirupsen/logrus"
-	"my5G-RANTester/internal/control_test_engine/gnb/context"
-	"my5G-RANTester/internal/control_test_engine/gnb/ngap/message/ngap_control/interface_management"
-	"my5G-RANTester/internal/control_test_engine/gnb/ngap/message/ngap_control/pdu_session_management"
-	"my5G-RANTester/internal/control_test_engine/gnb/ngap/message/ngap_control/ue_context_management"
-	"my5G-RANTester/internal/control_test_engine/gnb/ngap/message/sender"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/interface_management"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/pdu_session_management"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/ue_context_management"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/sender"
 )
 
 func SendPduSessionResourceSetupResponse(ue *context.GNBUe, gnb *context.GNBContext) {

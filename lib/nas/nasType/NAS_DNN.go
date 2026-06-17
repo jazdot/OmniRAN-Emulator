@@ -1,7 +1,7 @@
 package nasType
 
 import (
-	"my5G-RANTester/lib/util_3gpp"
+	"OmniRAN-Emulator/lib/util_3gpp"
 )
 
 // DNN 9.11.2.1A

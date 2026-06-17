@@ -3,10 +3,10 @@ package mm_5gs
 import (
 	"bytes"
 	"fmt"
-	"my5G-RANTester/internal/control_test_engine/ue/context"
-	"my5G-RANTester/lib/nas"
-	"my5G-RANTester/lib/nas/nasMessage"
-	"my5G-RANTester/lib/nas/nasType"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
+	"OmniRAN-Emulator/lib/nas"
+	"OmniRAN-Emulator/lib/nas/nasMessage"
+	"OmniRAN-Emulator/lib/nas/nasType"
 )
 
 func GetRegistrationRequest(registrationType uint8, requestedNSSAI *nasType.RequestedNSSAI, uplinkDataStatus *nasType.UplinkDataStatus, capability bool, ue *context.UEContext) (nasPdu []byte) {

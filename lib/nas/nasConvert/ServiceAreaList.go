@@ -2,8 +2,8 @@ package nasConvert
 
 import (
 	"encoding/hex"
-	"my5G-RANTester/lib/nas/nasMessage"
-	"my5G-RANTester/lib/openapi/models"
+	"OmniRAN-Emulator/lib/nas/nasMessage"
+	"OmniRAN-Emulator/lib/openapi/models"
 )
 
 // TS 24.501 9.11.3.49

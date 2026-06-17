@@ -3,7 +3,7 @@ package nasConvert
 import (
 	"encoding/hex"
 	"fmt"
-	"my5G-RANTester/lib/openapi/models"
+	"OmniRAN-Emulator/lib/openapi/models"
 )
 
 //  subclause 9.11.3.53A in 3GPP TS 24.501

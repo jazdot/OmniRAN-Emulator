@@ -1,43 +1,41 @@
+ARG BASE_IMAGE=ubuntu:noble
+
 #---------------------------------------------------------------------
 # BUILDER IMAGE
 #---------------------------------------------------------------------
-ARG BASE_IMAGE=ubuntu:focal
-FROM $BASE_IMAGE as builder
+FROM golang:1.22-bookworm AS builder
 
-RUN apt-get update && apt install wget -y
+WORKDIR /OmniRAN-Emulator
 
-RUN wget https://dl.google.com/go/go1.14.4.linux-amd64.tar.gz && tar -xvf go1.14.4.linux-amd64.tar.gz && mv go /usr/local
-ENV GOROOT=/usr/local/go
-RUN mkdir goproject
-ENV GOPATH=/goproject
-ENV PATH=$GOPATH/bin:$GOROOT/bin:$PATH
+# Copy go.mod and go.sum and download dependencies first (caching layer)
+COPY go.mod go.sum ./
+RUN go mod download
 
-COPY . /my5G-RANTester
-
-RUN cd /my5G-RANTester \
-    && go mod download \
-    && cd cmd && go build -o app
+# Copy source code and build
+COPY . .
+RUN cd cmd && go build -o app
 
 #---------------------------------------------------------------------
 # TARGET IMAGE
 #---------------------------------------------------------------------
-ARG BASE_IMAGE=ubuntu:focal
 FROM $BASE_IMAGE AS my5grantester
 
-RUN apt update && apt install iproute2 iputils-ping iperf3 -y
+# Install necessary runtime dependencies
+RUN apt-get update && apt-get install -y \
+    iproute2 \
+    iputils-ping \
+    iperf3 \
+    && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /usr/local
-COPY --from=builder /usr/local/go .
-ENV GOROOT=/usr/local/go
-RUN mkdir goproject
-ENV GOPATH=/goproject
-ENV PATH=$GOPATH/bin:$GOROOT/bin:$PATH
+# Set up runtime directories
+WORKDIR /OmniRAN-Emulator/config
+COPY --from=builder /OmniRAN-Emulator/docker/config.yml .
 
-WORKDIR /my5G-RANTester/config/
-COPY --from=builder /my5G-RANTester/docker/config.yml .
+WORKDIR /OmniRAN-Emulator/cmd
+COPY --from=builder /OmniRAN-Emulator/cmd/app .
+COPY --from=builder /OmniRAN-Emulator/docker/entrypoint.sh .
 
-WORKDIR /my5G-RANTester/cmd
-COPY --from=builder /my5G-RANTester/cmd/app .
-COPY --from=builder /my5G-RANTester/docker/entrypoint.sh .
+# Ensure entrypoint is executable
+RUN chmod +x entrypoint.sh
 
-ENTRYPOINT ["/my5G-RANTester/cmd/entrypoint.sh"]
+ENTRYPOINT ["/OmniRAN-Emulator/cmd/entrypoint.sh"]

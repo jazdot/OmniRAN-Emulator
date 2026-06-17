@@ -2,10 +2,10 @@ package nas_control
 
 import (
 	"fmt"
-	"my5G-RANTester/internal/control_test_engine/ue/context"
-	"my5G-RANTester/lib/nas"
-	"my5G-RANTester/lib/nas/nasMessage"
-	"my5G-RANTester/lib/nas/security"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
+	"OmniRAN-Emulator/lib/nas"
+	"OmniRAN-Emulator/lib/nas/nasMessage"
+	"OmniRAN-Emulator/lib/nas/security"
 )
 
 func EncodeNasPduWithSecurity(ue *context.UEContext, pdu []byte, securityHeaderType uint8, securityContextAvailable, newSecurityContext bool) ([]byte, error) {

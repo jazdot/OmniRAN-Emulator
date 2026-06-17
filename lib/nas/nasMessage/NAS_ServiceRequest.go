@@ -3,7 +3,7 @@ package nasMessage
 import (
 	"bytes"
 	"encoding/binary"
-	"my5G-RANTester/lib/nas/nasType"
+	"OmniRAN-Emulator/lib/nas/nasType"
 )
 
 type ServiceRequest struct {

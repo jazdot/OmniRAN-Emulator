@@ -4,7 +4,7 @@ import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
-	"my5G-RANTester/internal/control_test_engine/ue/context"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
 	"net"
 )
 

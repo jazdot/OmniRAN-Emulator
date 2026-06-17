@@ -1,7 +1,7 @@
 package nasConvert
 
 import (
-	"my5G-RANTester/lib/nas/nasMessage"
+	"OmniRAN-Emulator/lib/nas/nasMessage"
 )
 
 // TS 24.008 10.5.7.4a

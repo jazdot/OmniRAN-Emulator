@@ -3,12 +3,12 @@ package handler
 import (
 	"fmt"
 	log "github.com/sirupsen/logrus"
-	"my5G-RANTester/internal/control_test_engine/ue/context"
-	"my5G-RANTester/internal/control_test_engine/ue/nas/message/nas_control"
-	"my5G-RANTester/internal/control_test_engine/ue/nas/message/nas_control/mm_5gs"
-	"my5G-RANTester/internal/control_test_engine/ue/nas/message/sender"
-	"my5G-RANTester/lib/nas"
-	"my5G-RANTester/lib/nas/nasMessage"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/nas_control"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/nas_control/mm_5gs"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/sender"
+	"OmniRAN-Emulator/lib/nas"
+	"OmniRAN-Emulator/lib/nas/nasMessage"
 	"time"
 )
 

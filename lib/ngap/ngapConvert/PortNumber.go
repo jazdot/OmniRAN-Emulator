@@ -2,7 +2,7 @@ package ngapConvert
 
 import (
 	"encoding/binary"
-	"my5G-RANTester/lib/ngap/ngapType"
+	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
 
 func PortNumberToInt(port ngapType.PortNumber) (portInt32 int32) {

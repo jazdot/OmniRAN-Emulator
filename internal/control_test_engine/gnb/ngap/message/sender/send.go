@@ -3,7 +3,7 @@ package sender
 import (
 	"fmt"
 	"github.com/ishidawataru/sctp"
-	"my5G-RANTester/lib/ngap/ngapSctp"
+	"OmniRAN-Emulator/lib/ngap/ngapSctp"
 )
 
 func SendToAmF(message []byte, conn *sctp.SCTPConn) error {

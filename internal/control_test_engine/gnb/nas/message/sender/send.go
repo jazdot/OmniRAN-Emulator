@@ -2,7 +2,7 @@ package sender
 
 import (
 	log "github.com/sirupsen/logrus"
-	"my5G-RANTester/internal/control_test_engine/gnb/context"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 )
 
 func SendToUe(ue *context.GNBUe, message []byte) {

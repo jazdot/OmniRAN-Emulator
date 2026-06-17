@@ -2,9 +2,9 @@ package ngapConvert
 
 import (
 	"encoding/hex"
-	"my5G-RANTester/lib/aper"
-	"my5G-RANTester/lib/ngap/ngapType"
-	"my5G-RANTester/lib/openapi/models"
+	"OmniRAN-Emulator/lib/aper"
+	"OmniRAN-Emulator/lib/ngap/ngapType"
+	"OmniRAN-Emulator/lib/openapi/models"
 	"strings"
 )
 

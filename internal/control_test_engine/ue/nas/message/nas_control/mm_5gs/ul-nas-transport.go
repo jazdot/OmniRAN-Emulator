@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"my5G-RANTester/internal/control_test_engine/ue/context"
-	"my5G-RANTester/internal/control_test_engine/ue/nas/message/nas_control"
-	"my5G-RANTester/internal/control_test_engine/ue/nas/message/nas_control/sm_5gs"
-	"my5G-RANTester/lib/nas"
-	"my5G-RANTester/lib/nas/nasMessage"
-	"my5G-RANTester/lib/nas/nasType"
-	"my5G-RANTester/lib/openapi/models"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/nas_control"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/nas_control/sm_5gs"
+	"OmniRAN-Emulator/lib/nas"
+	"OmniRAN-Emulator/lib/nas/nasMessage"
+	"OmniRAN-Emulator/lib/nas/nasType"
+	"OmniRAN-Emulator/lib/openapi/models"
 )
 
 func UlNasTransport(ue *context.UEContext, requestType uint8) ([]byte, error) {

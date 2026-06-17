@@ -2,12 +2,12 @@ package gnb
 
 import (
 	log "github.com/sirupsen/logrus"
-	"my5G-RANTester/config"
-	"my5G-RANTester/internal/control_test_engine/gnb/context"
-	serviceNas "my5G-RANTester/internal/control_test_engine/gnb/nas/service"
-	serviceNgap "my5G-RANTester/internal/control_test_engine/gnb/ngap/service"
-	"my5G-RANTester/internal/control_test_engine/gnb/ngap/trigger"
-	"my5G-RANTester/internal/monitoring"
+	"OmniRAN-Emulator/config"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	serviceNas "OmniRAN-Emulator/internal/control_test_engine/gnb/nas/service"
+	serviceNgap "OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/service"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/trigger"
+	"OmniRAN-Emulator/internal/monitoring"
 	"os"
 	"os/signal"
 	"sync"

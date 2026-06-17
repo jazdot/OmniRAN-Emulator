@@ -2,9 +2,9 @@ package templates
 
 import (
 	log "github.com/sirupsen/logrus"
-	"my5G-RANTester/config"
-	"my5G-RANTester/internal/control_test_engine/gnb"
-	"my5G-RANTester/internal/control_test_engine/ue"
+	"OmniRAN-Emulator/config"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb"
+	"OmniRAN-Emulator/internal/control_test_engine/ue"
 	"sync"
 	"time"
 )
