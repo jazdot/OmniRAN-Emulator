@@ -662,7 +662,7 @@ func HandlerPathSwitchRequestAcknowledge(gnb *context.GNBContext, message *ngapT
 
 					ue, err := gnb.GetGnbUe(ranUeId)
 					if err == nil && ue != nil {
-						gnb.StoreTeid(pduSessionId, ulTeid, ulTeid)
+						gnb.StoreTeid(ulTeid, ue)
 						log.Infof("[GNB][NGAP] Handover Path Switch Acknowledge: Session %d Switched. UPF IP: %v, UL TEID: 0x%08x", pduSessionId, net.IP(upfIp), ulTeid)
 					}
 				}

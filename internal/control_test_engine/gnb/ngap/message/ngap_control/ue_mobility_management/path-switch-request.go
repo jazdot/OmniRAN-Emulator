@@ -34,7 +34,7 @@ func BuildPathSwitchRequest(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, t
 	ie.Value.RANUENGAPID.Value = ranUeNgapID
 	pathSwitchRequestIEs.List = append(pathSwitchRequestIEs.List, ie)
 
-	// SourceAMFUENGAPID (we can populate this with AMF UE NGAP ID)
+	// SourceAMFUENGAPID (populate with the UE's current AMF UE NGAP ID)
 	ie = ngapType.PathSwitchRequestIEs{}
 	ie.Id.Value = ngapType.ProtocolIEIDSourceAMFUENGAPID
 	ie.Criticality.Value = ngapType.CriticalityPresentReject
@@ -62,17 +62,17 @@ func BuildPathSwitchRequest(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, t
 	userLocNR.TAI.TAC.Value = tac
 	pathSwitchRequestIEs.List = append(pathSwitchRequestIEs.List, ie)
 
-	// UESecurityCapabilities
+	// UESecurityCapabilities — field names use lowercase 'e' prefix per ngapType definition
 	ie = ngapType.PathSwitchRequestIEs{}
 	ie.Id.Value = ngapType.ProtocolIEIDUESecurityCapabilities
 	ie.Criticality.Value = ngapType.CriticalityPresentIgnore
 	ie.Value.Present = ngapType.PathSwitchRequestIEsPresentUESecurityCapabilities
 	ie.Value.UESecurityCapabilities = new(ngapType.UESecurityCapabilities)
 	ueSec := ie.Value.UESecurityCapabilities
-	ueSec.NREncryptionAlgorithms.Value = aper.BitString{Bytes: []byte{0xe0, 0x00}, BitLength: 16}
-	ueSec.NRIntegrityProtectionAlgorithms.Value = aper.BitString{Bytes: []byte{0xe0, 0x00}, BitLength: 16}
-	ueSec.EUTRAEncryptionAlgorithms.Value = aper.BitString{Bytes: []byte{0xe0, 0x00}, BitLength: 16}
-	ueSec.EUTRAIntegrityProtectionAlgorithms.Value = aper.BitString{Bytes: []byte{0xe0, 0x00}, BitLength: 16}
+	ueSec.NRencryptionAlgorithms.Value = aper.BitString{Bytes: []byte{0xe0, 0x00}, BitLength: 16}
+	ueSec.NRintegrityProtectionAlgorithms.Value = aper.BitString{Bytes: []byte{0xe0, 0x00}, BitLength: 16}
+	ueSec.EUTRAencryptionAlgorithms.Value = aper.BitString{Bytes: []byte{0xe0, 0x00}, BitLength: 16}
+	ueSec.EUTRAintegrityProtectionAlgorithms.Value = aper.BitString{Bytes: []byte{0xe0, 0x00}, BitLength: 16}
 	pathSwitchRequestIEs.List = append(pathSwitchRequestIEs.List, ie)
 
 	// PDUSessionResourceToBeSwitchedDLList
@@ -86,14 +86,14 @@ func BuildPathSwitchRequest(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, t
 	pduItem := ngapType.PDUSessionResourceToBeSwitchedDLItem{}
 	pduItem.PDUSessionID.Value = int64(pduSessionId)
 
-	// Build PathSwitchRequestTransfer containing transport layer info
+	// Build PathSwitchRequestTransfer and APER-encode it into an OctetString
 	transferPdu := ngapType.PathSwitchRequestTransfer{}
 	transferPdu.DLNGUUPTNLInformation.Present = ngapType.UPTransportLayerInformationPresentGTPTunnel
 	transferPdu.DLNGUUPTNLInformation.GTPTunnel = new(ngapType.GTPTunnel)
 	gtp := transferPdu.DLNGUUPTNLInformation.GTPTunnel
 	gtp.TransportLayerAddress.Value = aper.BitString{
 		Bytes:     gnbIp,
-		BitLength: uint(len(gnbIp) * 8),
+		BitLength: uint64(len(gnbIp) * 8),
 	}
 	gtp.GTPTEID.Value = aper.OctetString(dlTeid)
 
@@ -101,8 +101,9 @@ func BuildPathSwitchRequest(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, t
 		QosFlowIdentifier: ngapType.QosFlowIdentifier{Value: 1},
 	})
 
-	transferBytes, _ := ngap.Encoder(transferPdu)
-	pduItem.PathSwitchRequestTransfer = transferBytes
+	// PathSwitchRequestTransfer is a separate APER-encoded value (OctetString)
+	transferBytes, _ := aper.Marshal(transferPdu)
+	pduItem.PathSwitchRequestTransfer = aper.OctetString(transferBytes)
 
 	pduList.List = append(pduList.List, pduItem)
 	pathSwitchRequestIEs.List = append(pathSwitchRequestIEs.List, ie)
