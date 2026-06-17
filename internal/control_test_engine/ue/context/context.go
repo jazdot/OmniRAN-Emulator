@@ -36,6 +36,8 @@ type UEContext struct {
 	UeSecurity   SECURITY
 	StateMM      int
 	StateSM      int
+	RegistrationType uint8
+	AmfUeNgapId  int64
 	UnixConn     net.Conn
 	PduSession   PDUSession
 	PduSessions  map[uint8]*PDUSession
@@ -113,6 +115,8 @@ func (ue *UEContext) NewRanUeContext(msin string,
 
 	// added UE id.
 	ue.id = id
+
+	ue.RegistrationType = nasMessage.RegistrationType5GSInitialRegistration
 
 	// initialize map
 	ue.PduSessions = make(map[uint8]*PDUSession)
@@ -693,4 +697,23 @@ func (ue *UEContext) GetGnbControlIp() string {
 		return "127.0.0.1"
 	}
 	return ue.gnbControlIp
+}
+
+func (ue *UEContext) SetRegistrationType(regType uint8) {
+	ue.RegistrationType = regType
+}
+
+func (ue *UEContext) GetRegistrationType() uint8 {
+	if ue.RegistrationType == 0 {
+		return nasMessage.RegistrationType5GSInitialRegistration
+	}
+	return ue.RegistrationType
+}
+
+func (ue *UEContext) SetAmfUeId(id int64) {
+	ue.AmfUeNgapId = id
+}
+
+func (ue *UEContext) GetAmfUeId() int64 {
+	return ue.AmfUeNgapId
 }

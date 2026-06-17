@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/binary"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
 	data "OmniRAN-Emulator/internal/control_test_engine/ue/data/service"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas"
@@ -18,6 +19,21 @@ func DispatchState(ue *context.UEContext, message []byte) {
 	firstByte := message[0]
 	if firstByte == 0x7e || firstByte == 0x2e {
 		nas.DispatchNas(ue, message)
+	} else if firstByte == 0x00 {
+		// Control message from GNodeB
+		if len(message) == 2 && message[1] == 0x01 {
+			log.Info("[UE] Received Paging trigger from GNodeB. Initiating Service Request...")
+			pdu, err := mm_5gs.ServiceRequest(ue, nasMessage.ServiceTypeMobileTerminatedServices)
+			if err != nil {
+				log.Errorf("[UE] Error creating Service Request: %v", err)
+				return
+			}
+			sender.SendToGnb(ue, pdu)
+		} else if len(message) == 10 && message[1] == 0x03 {
+			amfUeId := int64(binary.BigEndian.Uint64(message[2:10]))
+			ue.SetAmfUeId(amfUeId)
+			log.Infof("[UE] AMF UE NGAP ID updated from GNodeB: %d", amfUeId)
+		}
 	} else {
 		// It's an IP plane configuration message from GNodeB.
 		// Format: [PDU Session ID (1 byte)] [GNodeB UE IP (remaining bytes)]

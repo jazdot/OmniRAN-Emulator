@@ -45,6 +45,7 @@ type Config struct {
 		Sqn   string `yaml:"sqn"`
 		Dnn            string `yaml:"dnn"`
 		PduSessionType string `yaml:"pdusessiontype"`
+		RegistrationType string `yaml:"registration_type"`
 		Hplmn struct {
 			Mcc string `yaml:"mcc"`
 			Mnc string `yaml:"mnc"`

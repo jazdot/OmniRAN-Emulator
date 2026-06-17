@@ -1,13 +1,17 @@
 package ue
 
 import (
+	"encoding/binary"
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/service"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/trigger"
 	"OmniRAN-Emulator/internal/monitoring"
+	"OmniRAN-Emulator/lib/nas/nasMessage"
 	"OmniRAN-Emulator/lib/nas/security"
+	"net"
 	"os"
 	"os/signal"
 	"sync"
@@ -42,6 +46,18 @@ func RegistrationUe(conf config.Config, id uint8, wg *sync.WaitGroup) {
 		conf.Ue.Snssai.Sd,
 		id,
 		conf.Ue.PduSessions)
+
+	// Parse registration type from config
+	regType := nasMessage.RegistrationType5GSInitialRegistration
+	switch conf.Ue.RegistrationType {
+	case "mobility":
+		regType = nasMessage.RegistrationType5GSMobilityRegistrationUpdating
+	case "periodic":
+		regType = nasMessage.RegistrationType5GSPeriodicRegistrationUpdating
+	case "emergency":
+		regType = nasMessage.RegistrationType5GSEmergencyRegistration
+	}
+	ue.SetRegistrationType(regType)
 
 	// starting communication with GNB and listen.
 	err := service.InitConn(ue)
@@ -97,6 +113,18 @@ func RegistrationUeMonitor(conf config.Config,
 		id,
 		conf.Ue.PduSessions)
 
+	// Parse registration type from config
+	regTypeMonitor := nasMessage.RegistrationType5GSInitialRegistration
+	switch conf.Ue.RegistrationType {
+	case "mobility":
+		regTypeMonitor = nasMessage.RegistrationType5GSMobilityRegistrationUpdating
+	case "periodic":
+		regTypeMonitor = nasMessage.RegistrationType5GSPeriodicRegistrationUpdating
+	case "emergency":
+		regTypeMonitor = nasMessage.RegistrationType5GSEmergencyRegistration
+	}
+	ue.SetRegistrationType(regTypeMonitor)
+
 	// starting communication with GNB and listen.
 	err := service.InitConn(ue)
 	if err != nil {
@@ -129,4 +157,64 @@ func RegistrationUeMonitor(conf config.Config,
 	wg.Done()
 	// ue.Terminate()
 	// os.Exit(0)
+}
+
+func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort int, targetGnbLinkType string) error {
+	log.Infof("[UE] Initiating Handover to Target GNodeB: %s:%d (LinkType: %s)", targetGnbIp, targetGnbPort, targetGnbLinkType)
+
+	// 1. Establish new connection to Target GNodeB
+	var conn net.Conn
+	var err error
+
+	if targetGnbLinkType == "tcp" {
+		addr := fmt.Sprintf("%s:%d", targetGnbIp, targetGnbPort)
+		conn, err = net.Dial("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("error connecting to Target GNodeB via TCP: %w", err)
+		}
+	} else {
+		conn, err = net.Dial("unix", "/tmp/gnb.sock")
+		if err != nil {
+			return fmt.Errorf("error connecting to Target GNodeB via UNIX socket: %w", err)
+		}
+	}
+
+	// 2. Close old connection
+	oldConn := ue.GetUnixConn()
+	if oldConn != nil {
+		_ = oldConn.Close()
+	}
+
+	// 3. Set new connection
+	ue.SetUnixConn(conn)
+
+	// Update GNodeB connection parameters in context
+	ue.SetGnbLinkType(targetGnbLinkType)
+	ue.SetGnbLinkPort(targetGnbPort)
+	ue.SetGnbControlIp(targetGnbIp)
+
+	// 4. Start listening on the new connection
+	go service.UeListen(ue)
+
+	// 5. Send Handover Path Switch Trigger: [0x00, 0x02] [AMF UE ID (8 bytes)] [PDU Session ID (1 byte)]
+	amfUeId := ue.GetAmfUeId()
+	var pduSessionId uint8 = 1
+	for id := range ue.PduSessions {
+		pduSessionId = id
+		break
+	}
+
+	triggerMsg := make([]byte, 11)
+	triggerMsg[0] = 0x00
+	triggerMsg[1] = 0x02
+	binary.BigEndian.PutUint64(triggerMsg[2:10], uint64(amfUeId))
+	triggerMsg[10] = pduSessionId
+
+	_, err = conn.Write(triggerMsg)
+	if err != nil {
+		return fmt.Errorf("error writing handover trigger to target GNodeB: %w", err)
+	}
+
+	log.Infof("[UE] Handover trigger sent successfully to target GNodeB. AMF UE ID: %d, PDU Session ID: %d", amfUeId, pduSessionId)
+	return nil
 }

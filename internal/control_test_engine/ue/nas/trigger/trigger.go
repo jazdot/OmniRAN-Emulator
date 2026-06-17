@@ -4,14 +4,13 @@ import (
 	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/nas_control/mm_5gs"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/sender"
-	"OmniRAN-Emulator/lib/nas/nasMessage"
 )
 
 func InitRegistration(ue *context.UEContext) {
 
 	// registration procedure started.
 	registrationRequest := mm_5gs.GetRegistrationRequest(
-		nasMessage.RegistrationType5GSInitialRegistration,
+		ue.GetRegistrationType(),
 		nil,
 		nil,
 		false,

@@ -632,3 +632,48 @@ func HandlerPaging(gnb *context.GNBContext, message *ngapType.NGAPPDU) {
 		log.Warn("[GNB][NGAP] No active UE socket connection found to page")
 	}
 }
+
+func HandlerPathSwitchRequestAcknowledge(gnb *context.GNBContext, message *ngapType.NGAPPDU) {
+	var ranUeId int64
+	var amfUeId int64
+
+	valueMessage := message.SuccessfulOutcome.Value.PathSwitchRequestAcknowledge
+
+	for _, ies := range valueMessage.ProtocolIEs.List {
+		switch ies.Id.Value {
+		case ngapType.ProtocolIEIDAMFUENGAPID:
+			amfUeId = ies.Value.AMFUENGAPID.Value
+		case ngapType.ProtocolIEIDRANUENGAPID:
+			ranUeId = ies.Value.RANUENGAPID.Value
+		case ngapType.ProtocolIEIDPDUSessionResourceSwitchedList:
+			list := ies.Value.PDUSessionResourceSwitchedList
+			for _, item := range list.List {
+				pduSessionId := uint8(item.PDUSessionID.Value)
+				var transfer ngapType.PathSwitchRequestAcknowledgeTransfer
+				err := aper.UnmarshalWithParams(item.PathSwitchRequestAcknowledgeTransfer, &transfer, "valueExt")
+				if err != nil {
+					log.Info("[GNB][NGAP] Error decoding PathSwitchRequestAcknowledgeTransfer: ", err)
+					continue
+				}
+				if transfer.ULNGUUPTNLInformation.Present == ngapType.UPTransportLayerInformationPresentGTPTunnel {
+					gtp := transfer.ULNGUUPTNLInformation.GTPTunnel
+					upfIp := gtp.TransportLayerAddress.Value.Bytes
+					ulTeid := binary.BigEndian.Uint32(gtp.GTPTEID.Value)
+
+					ue, err := gnb.GetGnbUe(ranUeId)
+					if err == nil && ue != nil {
+						gnb.StoreTeid(pduSessionId, ulTeid, ulTeid)
+						log.Infof("[GNB][NGAP] Handover Path Switch Acknowledge: Session %d Switched. UPF IP: %v, UL TEID: 0x%08x", pduSessionId, net.IP(upfIp), ulTeid)
+					}
+				}
+			}
+		}
+	}
+
+	ue, err := gnb.GetGnbUe(ranUeId)
+	if err == nil && ue != nil {
+		ue.SetAmfUeId(amfUeId)
+		log.Infof("[GNB][NGAP] Handover Completed for UE ID %d", ranUeId)
+	}
+}
+
