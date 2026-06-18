@@ -561,7 +561,13 @@ export default function App() {
       <main className="main-content">
         <header className="top-header">
           <div className="header-title-section">
-            <h1 className="capitalize">{activeTab} Panel</h1>
+            <h1 className="capitalize">
+              {activeTab === 'dashboard' && 'Dashboard Panel'}
+              {activeTab === 'scenarios' && 'Scenario Runner Panel'}
+              {activeTab === 'config' && 'Configuration Panel'}
+              {activeTab === 'logs' && 'Live Console Panel'}
+              {activeTab === 'connectivity' && 'Connectivity Tool Panel'}
+            </h1>
           </div>
 
           <div className="header-status-bar">
@@ -569,11 +575,10 @@ export default function App() {
             {status?.isRunning && (
               <button
                 onClick={stopScenario}
-                className="status-badge"
-                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(239,68,68,0.15)', border: '1px solid var(--color-danger)', color: 'var(--color-danger)' }}
+                className="status-badge stop-badge"
                 title="Stop Scenario"
               >
-                <Trash2 size={14} />
+                <Trash2 size={14} style={{ flexShrink: 0 }} />
                 <span className="font-bold">STOP SCENARIO</span>
               </button>
             )}
@@ -581,11 +586,10 @@ export default function App() {
             {/* Auto-Refresh Toggle Button */}
             <button
               onClick={() => setAutoRefresh(!autoRefresh)}
-              className={`status-badge ${!autoRefresh ? 'border-warning' : ''}`}
-              style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.03)' }}
+              className={`status-badge polling-badge ${!autoRefresh ? 'paused' : ''}`}
               title="Toggle Auto Refresh Polling"
             >
-              <RefreshCw size={14} className={autoRefresh && status?.isRunning ? 'animate-spin' : ''} style={{ color: autoRefresh ? 'var(--color-success)' : 'var(--color-warning)' }} />
+              <RefreshCw size={14} className={autoRefresh && status?.isRunning ? 'animate-spin' : ''} style={{ flexShrink: 0 }} />
               <span className="font-semibold">{autoRefresh ? 'LIVE POLLING' : 'PAUSED'}</span>
             </button>
 
@@ -600,22 +604,20 @@ export default function App() {
                   setBannerFade(false);
                 }
               }}
-              className="status-badge"
-              style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.03)' }}
+              className={`status-badge warnings-badge ${!showBanners ? 'hidden' : ''}`}
               title="Toggle Warning Banners / Info Tips"
             >
-              <AlertTriangle size={14} style={{ color: showBanners ? 'var(--color-warning)' : 'var(--text-muted)' }} />
-              <span className="font-semibold" style={{ color: showBanners ? 'var(--text-primary)' : 'var(--text-muted)' }}>{showBanners ? 'HIDE TIPS' : 'SHOW TIPS'}</span>
+              <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+              <span className="font-semibold">{showBanners ? 'HIDE WARNINGS/TIPS' : 'SHOW WARNINGS/TIPS'}</span>
             </button>
 
             {/* Theme Toggle Button */}
             <button
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className="status-badge"
-              style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.03)' }}
+              className="status-badge theme-badge"
               title="Toggle Theme Mode"
             >
-              {theme === 'dark' ? <Sun size={14} style={{ color: '#fbbf24' }} /> : <Moon size={14} style={{ color: '#6366f1' }} />}
+              {theme === 'dark' ? <Sun size={14} style={{ color: '#fbbf24', flexShrink: 0 }} /> : <Moon size={14} style={{ color: '#6366f1', flexShrink: 0 }} />}
               <span className="font-semibold">{theme === 'dark' ? 'LIGHT' : 'DARK'}</span>
             </button>
 

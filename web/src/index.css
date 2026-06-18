@@ -266,7 +266,7 @@ body {
 
 /* Top Header */
 .top-header {
-  height: 70px;
+  height: 80px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
@@ -297,6 +297,97 @@ body {
   font-weight: 500;
   border: 1px solid var(--border-color);
   background: rgba(255, 255, 255, 0.02);
+}
+
+button.status-badge {
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  max-width: 32px;
+  transition: max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease, border-radius 0.3s ease, background-color 0.2s, border-color 0.2s, color 0.2s;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+}
+
+button.status-badge:hover {
+  max-width: 240px;
+  padding: 0 12px;
+  border-radius: 20px;
+  justify-content: flex-start;
+  width: auto;
+}
+
+button.status-badge span {
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease, margin-left 0.3s ease;
+  margin-left: 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+button.status-badge:hover span {
+  max-width: 180px;
+  opacity: 1;
+  margin-left: 8px;
+}
+
+/* Badge variations on hover */
+button.status-badge.stop-badge {
+  color: var(--color-danger);
+}
+button.status-badge.stop-badge:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+button.status-badge.polling-badge {
+  color: var(--color-success);
+}
+button.status-badge.polling-badge.paused {
+  color: var(--color-warning);
+}
+button.status-badge.polling-badge:hover {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+button.status-badge.polling-badge.paused:hover {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+button.status-badge.warnings-badge {
+  color: #fbbf24;
+}
+button.status-badge.warnings-badge.hidden {
+  color: var(--text-secondary);
+}
+button.status-badge.warnings-badge:hover {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+button.status-badge.warnings-badge.hidden:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--border-color);
+}
+
+button.status-badge.theme-badge {
+  color: var(--text-secondary);
+}
+button.status-badge.theme-badge:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--border-color);
 }
 
 .status-dot {
@@ -425,7 +516,7 @@ body {
 }
 
 .topology-canvas {
-  height: 220px;
+  height: 380px;
   border: 1px dashed rgba(255, 255, 255, 0.05);
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.2);
@@ -919,6 +1010,44 @@ body.light .topology-link.active .link-badge {
 .warning-banner svg {
   flex-shrink: 0;
   margin-top: 2px;
+}
+
+.warning-banner-hidden {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+  background: rgba(245, 158, 11, 0.02);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  padding: 8px 16px;
+  width: fit-content;
+  transition: all 0.3s ease;
+  animation: fadeIn 0.3s ease;
+}
+
+body.light .warning-banner-hidden {
+  background: rgba(245, 158, 11, 0.01) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+.unhide-banners-btn {
+  background: none;
+  border: none;
+  color: var(--color-warning);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font-weight: 600;
+  font-size: 12px;
+  margin-left: 6px;
+  transition: color 0.2s ease;
+}
+
+.unhide-banners-btn:hover {
+  color: #fbbf24;
 }
 
 /* Sidebar Logo Styling */
