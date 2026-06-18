@@ -665,16 +665,18 @@ export default function App() {
         {/* Dynamic Tab Body content */}
         {activeTab === 'dashboard' && (
           <div className="view-body fade-in">
-            <div className="warning-banner">
-              <AlertTriangle size={18} />
-              <div>
-                <strong>Root Permissions Reminder:</strong> Running 5G control and user plane scenarios involves setting up Linux network interfaces (e.g. <code>uetun1</code>) and routing tables. Ensure the backend Go process is running with root privileges (<code>sudo ./app web</code>) to avoid network configuration errors.
+            {showBanners && (
+              <div className={`warning-banner ${bannerFade ? 'fade-out' : ''}`}>
+                <AlertTriangle size={18} />
+                <div>
+                  <strong>Root Permissions Reminder:</strong> Running 5G control and user plane scenarios involves setting up Linux network interfaces (e.g. <code>uetun1</code>) and routing tables. Ensure the backend Go process is running with root privileges (<code>sudo ./app web</code>) to avoid network configuration errors.
+                </div>
               </div>
-            </div>
+            )}
 
             {/* KPI Cards Grid */}
             <div className="stats-grid">
-              <div className="card">
+              <div className="card interactive-kpi primary-hover" onClick={() => setActiveTab('config')} title="Click to edit profile settings">
                 <div className="card-header">
                   <span className="card-title">SIM IMSI</span>
                   <div className="card-icon primary">
@@ -685,7 +687,7 @@ export default function App() {
                 <span className="card-desc">Provisioned subscriber profile identity</span>
               </div>
 
-              <div className="card">
+              <div className="card interactive-kpi success-hover" onClick={() => { const el = document.getElementById('activeUEsTable'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }} title="Click to view active UEs list">
                 <div className="card-header">
                   <span className="card-title">Active UEs Online</span>
                   <div className="card-icon success">
@@ -700,7 +702,7 @@ export default function App() {
                 </span>
               </div>
 
-              <div className="card">
+              <div className="card interactive-kpi info-hover" onClick={() => setActiveTab('connectivity')} title="Click to test core connectivity">
                 <div className="card-header">
                   <span className="card-title">AMF Core Target</span>
                   <div className="card-icon info">
@@ -711,7 +713,7 @@ export default function App() {
                 <span className="card-desc">5G Core control plane SCTP binding</span>
               </div>
 
-              <div className="card">
+              <div className="card interactive-kpi purple-hover" onClick={() => setActiveTab('config')} title="Click to edit slice profile">
                 <div className="card-header">
                   <span className="card-title">Slice Configuration</span>
                   <div className="card-icon purple">
@@ -946,7 +948,7 @@ export default function App() {
 
             {/* Active Connected UEs Table (Richer with MM/SM states) */}
             {activeUEs.length > 0 && (
-              <div className="card" style={{ marginBottom: '20px' }}>
+              <div className="card" id="activeUEsTable" style={{ marginBottom: '20px' }}>
                 <h3 className="panel-title" style={{ marginBottom: '16px', color: 'var(--color-success)' }}>
                   <Cpu size={18} /> Active Registered UEs ({activeUEs.length})
                 </h3>
@@ -1217,12 +1219,14 @@ export default function App() {
 
         {activeTab === 'scenarios' && (
           <div className="view-body fade-in">
-            <div className="warning-banner">
-              <Play size={18} />
-              <div>
-                <strong>Scenario Runner Console:</strong> Triggering a scenario will execute sequential control/data actions in the background. Running logs will automatically stream inside the <strong>Live Console</strong> tab.
+            {showBanners && (
+              <div className={`warning-banner ${bannerFade ? 'fade-out' : ''}`}>
+                <Play size={18} />
+                <div>
+                  <strong>Scenario Runner Console:</strong> Triggering a scenario will execute sequential control/data actions in the background. Running logs will automatically stream inside the <strong>Live Console</strong> tab.
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="scenarios-grid">
               {scenarios.map((scen) => {
