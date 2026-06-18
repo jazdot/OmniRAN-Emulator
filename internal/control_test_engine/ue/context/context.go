@@ -16,6 +16,7 @@ import (
 	"net"
 	"reflect"
 	"regexp"
+	"sync"
 )
 
 // 5GMM main states in the UE.
@@ -201,6 +202,7 @@ func (ue *UEContext) NewRanUeContext(msin string,
 	// added initial state for SM(INACTIVE)
 	ue.SetStateSM_PDU_SESSION_INACTIVE()
 
+	RegisterUE(ue)
 }
 
 func (ue *UEContext) GetUeId() uint8 {
@@ -628,32 +630,36 @@ func (ue *UEContext) GetTunRule(pduSessionId uint8) []netlink.Rule {
 }
 
 func (ue *UEContext) Terminate() {
+	UnregisterUE(ue.id)
 
 	// clean all context of tun interface
 	for _, sess := range ue.PduSessions {
 		if sess.tun != nil {
 			_ = netlink.LinkSetDown(sess.tun)
 			_ = netlink.LinkDel(sess.tun)
+			sess.tun = nil
 		}
 
 		for _, route := range sess.routeTun {
 			r := route
 			_ = netlink.RouteDel(&r)
 		}
+		sess.routeTun = nil
 
 		for _, rule := range sess.ruleTun {
 			ru := rule
 			_ = netlink.RuleDel(&ru)
 		}
+		sess.ruleTun = nil
 	}
 
 	ueUnix := ue.GetUnixConn()
 	if ueUnix != nil {
 		ueUnix.Close()
+		ue.SetUnixConn(nil)
 	}
 
 	log.Info("[UE] UE Terminated")
-
 }
 
 func reverse(s string) string {
@@ -716,4 +722,86 @@ func (ue *UEContext) SetAmfUeId(id int64) {
 
 func (ue *UEContext) GetAmfUeId() int64 {
 	return ue.AmfUeNgapId
+}
+
+// Active UE Registry and helper functions
+var (
+	ActiveUEs   = make(map[uint8]*UEContext)
+	ActiveUEsMu sync.RWMutex
+)
+
+func RegisterUE(ue *UEContext) {
+	ActiveUEsMu.Lock()
+	defer ActiveUEsMu.Unlock()
+	ActiveUEs[ue.id] = ue
+}
+
+func UnregisterUE(id uint8) {
+	ActiveUEsMu.Lock()
+	defer ActiveUEsMu.Unlock()
+	delete(ActiveUEs, id)
+}
+
+func GetActiveUE(id uint8) *UEContext {
+	ActiveUEsMu.RLock()
+	defer ActiveUEsMu.RUnlock()
+	return ActiveUEs[id]
+}
+
+func GetAllActiveUEs() []*UEContext {
+	ActiveUEsMu.RLock()
+	defer ActiveUEsMu.RUnlock()
+	list := make([]*UEContext, 0, len(ActiveUEs))
+	for _, ue := range ActiveUEs {
+		list = append(list, ue)
+	}
+	return list
+}
+
+func GetStateMMDesc(state int) string {
+	switch state {
+	case MM5G_NULL:
+		return "5GMM-NULL"
+	case MM5G_DEREGISTERED:
+		return "5GMM-DEREGISTERED"
+	case MM5G_REGISTERED_INITIATED:
+		return "5GMM-REGISTERED-INITIATED"
+	case MM5G_REGISTERED:
+		return "5GMM-REGISTERED"
+	case MM5G_SERVICE_REQ_INIT:
+		return "5GMM-SERVICE-REQ-INIT"
+	case MM5G_DEREGISTERED_INIT:
+		return "5GMM-DEREGISTERED-INIT"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+func GetStateSMDesc(state int) string {
+	switch state {
+	case SM5G_PDU_SESSION_INACTIVE:
+		return "5GSM-INACTIVE"
+	case SM5G_PDU_SESSION_ACTIVE_PENDING:
+		return "5GSM-ACTIVE-PENDING"
+	case SM5G_PDU_SESSION_ACTIVE:
+		return "5GSM-ACTIVE"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+func (ue *UEContext) SetupPduSession(id uint8, dnn string, pduSessionType string, sst int32, sd string) {
+	sess := ue.GetPduSession(id)
+	if dnn != "" {
+		sess.Dnn = dnn
+	}
+	if pduSessionType != "" {
+		sess.PduSessionType = pduSessionType
+	}
+	if sst != 0 {
+		sess.Snssai.Sst = sst
+	}
+	if sd != "" {
+		sess.Snssai.Sd = sd
+	}
 }

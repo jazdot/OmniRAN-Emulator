@@ -6,30 +6,29 @@ gnodeb:
     ip: "127.0.0.1"
     port: 2152
   plmnlist:
-    mcc: "208"
-    mnc: "93"
+    mcc: "999"
+    mnc: "70"
     tac: "000001"
     gnbid: "000001"
   slicesupportlist:
     sst: "01"
-    sd: "010203"
   link_type: "unix"
   link_port: 9488
 
 ue:
   msin: "0000000001"
-  key: "8baf473f2f8fd09487cccbd7097c6862"
-  opc: "8e27b6af0e692e750f32667a3b14605d"
+  key: "465b5ce8b199b49faa5f0a2ee238a6bc"
+  opc: "e8ed289deba952e4283b54e88e6183ca"
   amf: "8000"
-  sqn: "0000000"
+  sqn: "000000000000"
   dnn: "internet"
   pdusessiontype: "IPv4"
+  registration_type: "initial"
   hplmn:
-    mcc: "208"
-    mnc: "93"
+    mcc: "999"
+    mnc: "70"
   snssai:
-    sst: 01
-    sd: "010203"
+    sst: 1
 
 amfif:
   ip: "127.0.0.1"

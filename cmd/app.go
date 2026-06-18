@@ -3,6 +3,7 @@ package main
 import (
 	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/internal/templates"
+	"OmniRAN-Emulator/internal/webserver"
 
 	// "fmt"
 	"github.com/davecgh/go-spew/spew"
@@ -223,6 +224,112 @@ func main() {
 					log.Info("[TESTER][AMF] AMF IP/Port: ", cfg.AMF.Ip, "/", cfg.AMF.Port)
 					log.Info("---------------------------------------")
 					templates.TestAvailability(time)
+					return nil
+				},
+			},
+		{
+				Name:  "scenario",
+				Usage: "Run real-world 5G scenario tests",
+				Subcommands: []*cli.Command{
+					{
+						Name:  "periodic-reg",
+						Usage: "Periodic Registration Update (T3512 expiry simulation)",
+						Action: func(c *cli.Context) error {
+							log.Info("---------------------------------------")
+							log.Info("[SCENARIO] Periodic Registration Update")
+							log.Info("---------------------------------------")
+							templates.ScenarioPeriodicRegistration()
+							return nil
+						},
+					},
+					{
+						Name:  "mobility-reg",
+						Usage: "Mobility Registration Update (TAU after cell change)",
+						Action: func(c *cli.Context) error {
+							log.Info("---------------------------------------")
+							log.Info("[SCENARIO] Mobility Registration Update")
+							log.Info("---------------------------------------")
+							templates.ScenarioMobilityRegistration()
+							return nil
+						},
+					},
+					{
+						Name:  "emergency-reg",
+						Usage: "Emergency Registration (unauthenticated emergency services)",
+						Action: func(c *cli.Context) error {
+							log.Info("---------------------------------------")
+							log.Info("[SCENARIO] Emergency Registration")
+							log.Info("---------------------------------------")
+							templates.ScenarioEmergencyRegistration()
+							return nil
+						},
+					},
+					{
+						Name:  "handover",
+						Usage: "N2 Handover (Path Switch Request to simulate inter-gNB mobility)",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "target-gnb-ip", Value: "127.0.0.1", Usage: "Target gNB IP for handover"},
+							&cli.IntFlag{Name: "target-gnb-port", Value: 9489, Usage: "Target gNB port for handover"},
+							&cli.IntFlag{Name: "delay", Value: 5, Usage: "Seconds to wait after registration before triggering handover"},
+						},
+						Action: func(c *cli.Context) error {
+							targetIp := c.String("target-gnb-ip")
+							targetPort := c.Int("target-gnb-port")
+							delay := c.Int("delay")
+							log.Info("---------------------------------------")
+							log.Infof("[SCENARIO] N2 Handover → target gNB %s:%d (delay: %ds)", targetIp, targetPort, delay)
+							log.Info("---------------------------------------")
+							templates.ScenarioHandover(targetIp, targetPort, delay)
+							return nil
+						},
+					},
+					{
+						Name:  "full-lifecycle",
+						Usage: "Full UE lifecycle: register → PDU session → idle → service request → deregister",
+						Flags: []cli.Flag{
+							&cli.IntFlag{Name: "idle-seconds", Value: 5, Usage: "Seconds to stay in idle/CM-IDLE before service request"},
+						},
+						Action: func(c *cli.Context) error {
+							idle := c.Int("idle-seconds")
+							log.Info("---------------------------------------")
+							log.Infof("[SCENARIO] Full UE Lifecycle (idle: %ds)", idle)
+							log.Info("---------------------------------------")
+							templates.ScenarioFullLifecycle(idle)
+							return nil
+						},
+					},
+					{
+						Name:  "deregister",
+						Usage: "UE-initiated Deregistration (normal power-off)",
+						Action: func(c *cli.Context) error {
+							log.Info("---------------------------------------")
+							log.Info("[SCENARIO] UE-initiated Deregistration")
+							log.Info("---------------------------------------")
+							templates.ScenarioDeregistration()
+							return nil
+						},
+					},
+				},
+			},
+			{
+				Name:    "web",
+				Aliases: []string{"gui", "dashboard"},
+				Usage:   "Start the Web UI Dashboard and API Server",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "host", Value: "127.0.0.1", Usage: "Host IP to bind the web server"},
+					&cli.IntFlag{Name: "port", Value: 8080, Aliases: []string{"p"}, Usage: "Port to bind the web server"},
+				},
+				Action: func(c *cli.Context) error {
+					host := c.String("host")
+					port := c.Int("port")
+					log.Info("---------------------------------------")
+					log.Info("[TESTER] Starting Web UI Dashboard Server")
+					log.Info("[TESTER] Listening on: http://", host, ":", port)
+					log.Info("---------------------------------------")
+					err := webserver.StartServer(host, port)
+					if err != nil {
+						log.Fatal("Failed to start web server: ", err)
+					}
 					return nil
 				},
 			},
