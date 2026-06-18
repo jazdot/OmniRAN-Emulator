@@ -1,8 +1,8 @@
 # OmniRAN Emulator
 
 <p align="center">
-  <img width="30%" src="docs/media/img/omniran_dark.png#gh-dark-mode-only" alt="OmniRAN Emulator"/>
-  <img width="30%" src="docs/media/img/omniran_light.png#gh-light-mode-only" alt="OmniRAN Emulator"/>
+  <img width="400" src="docs/media/img/omniran_dark.png#gh-dark-mode-only" alt="OmniRAN Emulator Logo"/>
+  <img width="400" src="docs/media/img/omniran_light.png#gh-light-mode-only" alt="OmniRAN Emulator Logo"/>
 </p>
 
 
