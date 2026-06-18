@@ -274,6 +274,7 @@ body {
   padding: 0 32px;
   background: var(--bg-main);
   z-index: 10;
+  flex-shrink: 0;
 }
 
 .header-title-section h1 {
