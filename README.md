@@ -1,8 +1,10 @@
 # OmniRAN Emulator
 
 <p align="center">
-  <img width="30%" src="docs/media/img/omniran_light.png" alt="OmniRAN Emulator"/>
+  <img width="30%" src="docs/media/img/omniran_dark.png#gh-dark-mode-only" alt="OmniRAN Emulator"/>
+  <img width="30%" src="docs/media/img/omniran_light.png#gh-light-mode-only" alt="OmniRAN Emulator"/>
 </p>
+
 
 OmniRAN Emulator is a unified, high-performance 5G network emulation solution that simulates real-world User Equipment (UE) and next-generation NodeB (gNB) behavior. It streamlines 5G core validation by delivering an affordable, scalable, and highly accurate virtual RAN environment for next-generation telecommunication testing.
 
