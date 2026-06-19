@@ -72,7 +72,6 @@ interface RunningGNB {
   mcc: string;
   mnc: string;
   tac: string;
-  connectedUes?: string[];
 }
 
 interface StatusData {
@@ -89,6 +88,20 @@ interface StatusData {
     amfTarget: string;
   };
   runningGnbs?: RunningGNB[];
+  runningUes?: RunningUE[];
+}
+
+interface RunningUE {
+  id: number;
+  supi: string;
+  stateMm: number;
+  stateMmDesc: string;
+  stateSm: number;
+  stateSmDesc: string;
+  gnbControlIp: string;
+  gnbId?: string;
+  gnbProfileName?: string;
+  pduSessions: { id: number; ueIp: string; dnn: string; stateDesc: string }[];
 }
 
 interface Scenario {
@@ -219,18 +232,7 @@ export default function App() {
     amfIp: string;
     amfPort: number;
   }
-  interface RunningUE {
-    id: number;
-    supi: string;
-    stateMm: number;
-    stateMmDesc: string;
-    stateSm: number;
-    stateSmDesc: string;
-    gnbControlIp: string;
-    gnbId?: string;
-    gnbProfileName?: string;
-    pduSessions: { id: number; ueIp: string; dnn: string; stateDesc: string }[];
-  }
+
 
 
   const defaultUEProfile: UEProfile = {
@@ -255,112 +257,6 @@ export default function App() {
   const [fleetActiveSection, setFleetActiveSection] = useState<'ue' | 'gnb' | 'live'>('ue');
   const [ueToLaunch, setUeToLaunch] = useState<string | null>(null);
   const [selectedTargetGnb, setSelectedTargetGnb] = useState<string>('');
-
-  const renderSvgLinks = () => {
-    const links: React.ReactNode[] = [];
-    const gnbs = status?.runningGnbs || [];
-    const ues = status?.runningUes || [];
-    const totalGnbs = gnbs.length;
-    const totalUes = ues.length;
-
-    if (totalGnbs === 0) {
-      const isCoreActive = status?.gnbLinkState && status.gnbLinkState !== 'offline';
-      const strokeColor = isCoreActive ? '#8b5cf6' : '#334155';
-      links.push(
-        <g key="def-n2">
-          <line x1="500" y1="285" x2="850" y2="285" stroke={strokeColor} strokeWidth="3" strokeDasharray="5,5" />
-          {isCoreActive && (
-            <circle r="4" fill="#a78bfa">
-              <animate attributeName="cx" from="500" to="850" dur="3s" repeatCount="indefinite" />
-              <animate attributeName="cy" from="285" to="285" dur="3s" repeatCount="indefinite" />
-            </circle>
-          )}
-        </g>
-      );
-      const isDataActive = status?.isRunning;
-      const strokeDataColor = isDataActive ? '#3b82f6' : '#334155';
-      links.push(
-        <g key="def-n3">
-          <line x1="500" y1="315" x2="850" y2="315" stroke={strokeDataColor} strokeWidth="3" />
-          {isDataActive && (
-            <circle r="4" fill="#60a5fa">
-              <animate attributeName="cx" from="500" to="850" dur="2s" repeatCount="indefinite" />
-              <animate attributeName="cy" from="315" to="315" dur="2s" repeatCount="indefinite" />
-            </circle>
-          )}
-        </g>
-      );
-    } else {
-      gnbs.forEach((g, gIdx) => {
-        const gy = (gIdx + 1) * 600 / (totalGnbs + 1);
-        links.push(
-          <g key={`n2-${g.profileName}`}>
-            <line x1="500" y1={gy - 15} x2="850" y2="285" stroke="#8b5cf6" strokeWidth="2.5" strokeDasharray="4,4" opacity="0.8" />
-            <circle r="3.5" fill="#c084fc">
-              <animate attributeName="cx" from="500" to="850" dur="2.5s" repeatCount="indefinite" />
-              <animate attributeName="cy" from={gy - 15} to="285" dur="2.5s" repeatCount="indefinite" />
-            </circle>
-          </g>
-        );
-
-        const hasActiveSession = ues.some(u => u.gnbProfileName === g.profileName && u.pduSessions && u.pduSessions.length > 0);
-        const strokeColor = hasActiveSession ? '#3b82f6' : '#334155';
-        links.push(
-          <g key={`n3-${g.profileName}`}>
-            <line x1="500" y1={gy + 15} x2="850" y2="315" stroke={strokeColor} strokeWidth="3" opacity={hasActiveSession ? 1 : 0.4} />
-            {hasActiveSession && (
-              <circle r="4.5" fill="#60a5fa">
-                <animate attributeName="cx" from="500" to="850" dur="1.8s" repeatCount="indefinite" />
-                <animate attributeName="cy" from={gy + 15} to="315" dur="1.8s" repeatCount="indefinite" />
-              </circle>
-            )}
-          </g>
-        );
-      });
-    }
-
-    if (totalUes === 0) {
-      const isUeActive = status?.isRunning;
-      const strokeColor = isUeActive ? '#10b981' : '#334155';
-      links.push(
-        <g key="def-uu">
-          <line x1="150" y1="300" x2="500" y2="300" stroke={strokeColor} strokeWidth="3" />
-          {isUeActive && (
-            <circle r="4" fill="#34d399">
-              <animate attributeName="cx" from="150" to="500" dur="2s" repeatCount="indefinite" />
-              <animate attributeName="cy" from="300" to="300" dur="2s" repeatCount="indefinite" />
-            </circle>
-          )}
-        </g>
-      );
-    } else {
-      ues.forEach((u, uIdx) => {
-        const uy = (uIdx + 1) * 600 / (totalUes + 1);
-        let targetGy = 300;
-        if (totalGnbs > 0) {
-          const gIdx = gnbs.findIndex(g => g.profileName === u.gnbProfileName);
-          if (gIdx !== -1) {
-            targetGy = (gIdx + 1) * 600 / (totalGnbs + 1);
-          }
-        }
-        const isRegistered = u.stateMmDesc?.includes('REGISTERED');
-        const strokeColor = isRegistered ? '#10b981' : '#f59e0b';
-        links.push(
-          <g key={`uu-${u.id}`}>
-            <line x1="150" y1={uy} x2="500" y2={targetGy} stroke={strokeColor} strokeWidth="3" opacity="0.9" />
-            {isRegistered && (
-              <circle r="4" fill="#34d399">
-                <animate attributeName="cx" from="150" to="500" dur="2s" repeatCount="indefinite" />
-                <animate attributeName="cy" from={uy} to={targetGy} dur="2s" repeatCount="indefinite" />
-              </circle>
-            )}
-          </g>
-        );
-      });
-    }
-
-    return links;
-  };
 
   const fetchFleetProfiles = async () => {
     try {
@@ -1179,147 +1075,83 @@ export default function App() {
               
               <div className="topology-layout">
                 {/* Left side: Canvas */}
-                <div className="topology-canvas" style={{ position: 'relative' }}>
-                  {(() => {
-                    const totalGnbs = status?.runningGnbs?.length || 0;
-                    const totalUes = status?.runningUes?.length || 0;
-                    return (
-                      <>
-                        {/* SVG Links Layer */}
-                        <svg className="topology-svg" viewBox="0 0 1000 600" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
-                          {renderSvgLinks()}
-                        </svg>
+                <div className="topology-canvas">
+                  {/* UE Node */}
+                  <div 
+                    className={`topology-node clickable-node active ${selectedNode === 'ue' ? 'selected' : ''}`} 
+                    onClick={() => setSelectedNode('ue')}
+                    style={{ '--node-color': '#10b981', '--node-color-glow': 'rgba(16, 185, 129, 0.2)' } as React.CSSProperties}
+                  >
+                    <div className="node-icon-wrapper">
+                      <Cpu />
+                    </div>
+                    <span className="node-label">User Equipment</span>
+                    <span className="node-status-text">
+                      {status?.isRunning || activeUEs.length > 0 ? 'CONNECTED' : 'IDLE'}
+                    </span>
+                  </div>
 
-                        {/* UE Nodes */}
-                        {totalUes === 0 ? (
-                          <div 
-                            className={`topology-node clickable-node active ${selectedNode === 'ue' ? 'selected' : ''}`} 
-                            onClick={() => setSelectedNode('ue')}
-                            style={{ 
-                              position: 'absolute',
-                              left: '15%',
-                              top: '50%',
-                              transform: 'translate(-50%, -50%)',
-                              '--node-color': '#10b981',
-                              '--node-color-glow': 'rgba(16, 185, 129, 0.2)'
-                            } as React.CSSProperties}
-                          >
-                            <div className="node-icon-wrapper">
-                              <Cpu />
-                            </div>
-                            <span className="node-label">User Equipment</span>
-                            <span className="node-status-text">
-                              {status?.isRunning || activeUEs.length > 0 ? 'CONNECTED' : 'IDLE'}
-                            </span>
-                          </div>
-                        ) : (
-                          status.runningUes.map((u, idx) => {
-                            const topPercent = `${(idx + 1) * 100 / (totalUes + 1)}%`;
-                            const isRegistered = u.stateMmDesc?.includes('REGISTERED');
-                            return (
-                              <div 
-                                key={u.id}
-                                className={`topology-node clickable-node active ${selectedNode === 'ue' ? 'selected' : ''}`} 
-                                onClick={() => setSelectedNode('ue')}
-                                style={{ 
-                                  position: 'absolute',
-                                  left: '15%',
-                                  top: topPercent,
-                                  transform: 'translate(-50%, -50%)',
-                                  transition: 'all 0.5s ease',
-                                  '--node-color': isRegistered ? '#10b981' : '#f59e0b',
-                                  '--node-color-glow': isRegistered ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'
-                                } as React.CSSProperties}
-                              >
-                                <div className="node-icon-wrapper">
-                                  <Cpu />
-                                </div>
-                                <span className="node-label">UE-{u.id}</span>
-                                <span className="node-status-text">
-                                  {isRegistered ? 'REGISTERED' : 'PENDING'}
-                                </span>
-                              </div>
-                            );
-                          })
-                        )}
+                  {/* UE -> gNB Link Line (Uu Interface) */}
+                  <div
+                    className={`topology-link link-ue-gnb ${status?.isRunning || activeUEs.length > 0 ? 'active' : ''}`}
+                    style={{ '--from-color': '#10b981', '--to-color': '#6366f1', '--glow-color': 'rgba(99, 102, 241, 0.2)' } as React.CSSProperties}
+                  >
+                    <div className="link-badge">Uu (5G-NR)</div>
+                    <div className="pulse-dot" />
+                  </div>
 
-                        {/* gNodeB Nodes */}
-                        {totalGnbs === 0 ? (
-                          <div
-                            className={`topology-node clickable-node ${status?.gnbLinkState !== 'offline' ? 'active' : ''} ${selectedNode === 'gnb' ? 'selected' : ''}`}
-                            onClick={() => setSelectedNode('gnb')}
-                            style={{ 
-                              position: 'absolute',
-                              left: '50%',
-                              top: '50%',
-                              transform: 'translate(-50%, -50%)',
-                              '--node-color': '#6366f1',
-                              '--node-color-glow': 'rgba(99, 102, 241, 0.2)'
-                            } as React.CSSProperties}
-                          >
-                            <div className="node-icon-wrapper">
-                              <Radio />
-                            </div>
-                            <span className="node-label">gNodeB Cell</span>
-                            <span className="node-status-text">
-                              {status?.gnbLinkState !== 'offline' ? 'ESTABLISHED' : 'OFFLINE'}
-                            </span>
-                          </div>
-                        ) : (
-                          status.runningGnbs.map((g, idx) => {
-                            const topPercent = `${(idx + 1) * 100 / (totalGnbs + 1)}%`;
-                            return (
-                              <div
-                                key={g.profileName}
-                                className={`topology-node clickable-node active ${selectedNode === 'gnb' ? 'selected' : ''}`}
-                                onClick={() => setSelectedNode('gnb')}
-                                style={{ 
-                                  position: 'absolute',
-                                  left: '50%',
-                                  top: topPercent,
-                                  transform: 'translate(-50%, -50%)',
-                                  transition: 'all 0.5s ease',
-                                  '--node-color': '#6366f1',
-                                  '--node-color-glow': 'rgba(99, 102, 241, 0.2)'
-                                } as React.CSSProperties}
-                              >
-                                <div className="node-icon-wrapper">
-                                  <Radio />
-                                </div>
-                                <span className="node-label">{g.profileName}</span>
-                                <span className="node-status-text" style={{ fontSize: '10px' }}>
-                                  ID: {g.gnbId}
-                                </span>
-                              </div>
-                            );
-                          })
-                        )}
+                  {/* gNodeB Node */}
+                  <div
+                    className={`topology-node clickable-node ${status?.gnbLinkState !== 'offline' ? 'active' : ''} ${selectedNode === 'gnb' ? 'selected' : ''}`}
+                    onClick={() => setSelectedNode('gnb')}
+                    style={{ '--node-color': '#6366f1', '--node-color-glow': 'rgba(99, 102, 241, 0.2)' } as React.CSSProperties}
+                  >
+                    <div className="node-icon-wrapper">
+                      <Radio />
+                    </div>
+                    <span className="node-label">gNodeB Cell</span>
+                    <span className="node-status-text">
+                      {status?.gnbLinkState !== 'offline' ? 'ESTABLISHED' : 'OFFLINE'}
+                    </span>
+                  </div>
 
-                        {/* 5G Core Node */}
-                        <div
-                          className={`topology-node clickable-node ${status?.gnbLinkState !== 'offline' || totalGnbs > 0 ? 'active' : ''} ${selectedNode === 'core' ? 'selected' : ''}`}
-                          onClick={() => setSelectedNode('core')}
-                          style={{ 
-                            position: 'absolute',
-                            left: '85%',
-                            top: '50%',
-                            transform: 'translate(-50%, -50%)',
-                            '--node-color': '#8b5cf6',
-                            '--node-color-glow': 'rgba(139, 92, 246, 0.2)'
-                          } as React.CSSProperties}
-                        >
-                          <div className="node-icon-wrapper">
-                            <Server />
-                          </div>
-                          <span className="node-label">5G Core (AMF/UPF)</span>
-                          <span className="node-status-text">
-                            {status?.gnbLinkState !== 'offline' || totalGnbs > 0 ? 'REACHABLE' : 'DISCONNECTED'}
-                          </span>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>  </div>
+                  {/* gNB -> AMF Control Plane Link Line (N2 Interface) */}
+                  <div
+                    className={`topology-link link-n2-control ${
+                      status?.gnbLinkState && status.gnbLinkState !== 'offline' ? 'active' : ''
+                    }`}
+                    style={{ '--from-color': '#6366f1', '--to-color': '#8b5cf6', '--glow-color': 'rgba(139, 92, 246, 0.2)' } as React.CSSProperties}
+                  >
+                    <div className="link-badge">N2 (NGAP/SCTP)</div>
+                    <div className="pulse-dot" />
+                  </div>
+
+                  {/* gNB -> UPF User Plane Link Line (N3 Interface) */}
+                  <div
+                    className={`topology-link link-n3-data ${
+                      status?.isRunning || activeUEs.some(ue => ue.pduSessions && ue.pduSessions.length > 0) ? 'active' : ''
+                    }`}
+                    style={{ '--from-color': '#6366f1', '--to-color': '#8b5cf6', '--glow-color': 'rgba(139, 92, 246, 0.2)' } as React.CSSProperties}
+                  >
+                    <div className="link-badge">N3 (GTP-U/IPIP)</div>
+                    <div className="pulse-dot" />
+                  </div>
+
+                  {/* 5G Core Node */}
+                  <div
+                    className={`topology-node clickable-node ${status?.gnbLinkState && status.gnbLinkState !== 'offline' ? 'active' : ''} ${selectedNode === 'core' ? 'selected' : ''}`}
+                    onClick={() => setSelectedNode('core')}
+                    style={{ '--node-color': '#8b5cf6', '--node-color-glow': 'rgba(139, 92, 246, 0.2)' } as React.CSSProperties}
+                  >
+                    <div className="node-icon-wrapper">
+                      <Server />
+                    </div>
+                    <span className="node-label">5G Core (AMF/UPF)</span>
+                    <span className="node-status-text">
+                      {status?.gnbLinkState && status.gnbLinkState !== 'offline' ? 'REACHABLE' : 'DISCONNECTED'}
+                    </span>
+                  </div>
+                </div>
 
                 {/* Right side: Inspector Panel */}
                 <div className="node-inspector-card">

@@ -211,6 +211,7 @@ type StatusResponse struct {
 	GnbLinkState  string             `json:"gnbLinkState"`
 	ConfigSummary ConfigSummary      `json:"configSummary"`
 	RunningGnbs   []RunningGNBStatus `json:"runningGnbs,omitempty"`
+	RunningUes    []UEStatus         `json:"runningUes,omitempty"`
 }
 
 type NetworkInterface struct {
@@ -291,6 +292,42 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	// Fetch active UEs status
+	runningUEs := make([]UEStatus, 0)
+	ues := ueContext.GetAllActiveUEs()
+	for _, u := range ues {
+		pduSessions := make([]PDUSessionStatus, 0)
+		for _, sess := range u.PduSessions {
+			pduSessions = append(pduSessions, PDUSessionStatus{
+				ID:             sess.Id,
+				UeIP:           u.GetIp(sess.Id),
+				Dnn:            sess.Dnn,
+				PduSessionType: sess.PduSessionType,
+				Sst:            sess.Snssai.Sst,
+				Sd:             sess.Snssai.Sd,
+				State:          sess.State,
+				StateDesc:      ueContext.GetStateSMDesc(sess.State),
+			})
+		}
+		runningUEs = append(runningUEs, UEStatus{
+			ID:               u.GetUeId(),
+			Supi:             u.GetSupi(),
+			StateMM:          u.GetStateMM(),
+			StateMMDesc:      ueContext.GetStateMMDesc(u.GetStateMM()),
+			StateSM:          u.GetStateSM(),
+			StateSMDesc:      ueContext.GetStateSMDesc(u.GetStateSM()),
+			RegistrationType: u.GetRegistrationType(),
+			AmfUeNgapId:      u.GetAmfUeId(),
+			GnbLinkType:      u.GetGnbLinkType(),
+			GnbLinkPort:      u.GetGnbLinkPort(),
+			GnbControlIp:     u.GetGnbControlIp(),
+			GnbId:            u.GetGnbId(),
+			GnbProfileName:   u.GetGnbProfileName(),
+			PduSessions:      pduSessions,
+		})
+	}
+	resp.RunningUes = runningUEs
 
 	// Config summary
 	resp.ConfigSummary = ConfigSummary{
@@ -675,6 +712,8 @@ func handleActiveUEs(w http.ResponseWriter, r *http.Request) {
 			GnbLinkType:      u.GetGnbLinkType(),
 			GnbLinkPort:      u.GetGnbLinkPort(),
 			GnbControlIp:     u.GetGnbControlIp(),
+			GnbId:            u.GetGnbId(),
+			GnbProfileName:   u.GetGnbProfileName(),
 			PduSessions:      pduSessions,
 		})
 	}
