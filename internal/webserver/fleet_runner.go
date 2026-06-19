@@ -38,17 +38,18 @@ type RunningGNBInstance struct {
 
 // RunningGNBStatus is the JSON-serializable representation of a running gNB.
 type RunningGNBStatus struct {
-	ProfileName string `json:"profileName"`
-	GnbId       string `json:"gnbId"`
-	StartedAt   string `json:"startedAt"`
-	State       string `json:"state"`
-	LinkType    string `json:"linkType"`
-	LinkPort    int    `json:"linkPort"`
-	ControlIp   string `json:"controlIp"`
-	SocketPath  string `json:"socketPath,omitempty"`
-	Mcc         string `json:"mcc"`
-	Mnc         string `json:"mnc"`
-	Tac         string `json:"tac"`
+	ProfileName  string   `json:"profileName"`
+	GnbId        string   `json:"gnbId"`
+	StartedAt    string   `json:"startedAt"`
+	State        string   `json:"state"`
+	LinkType     string   `json:"linkType"`
+	LinkPort     int      `json:"linkPort"`
+	ControlIp    string   `json:"controlIp"`
+	SocketPath   string   `json:"socketPath,omitempty"`
+	Mcc          string   `json:"mcc"`
+	Mnc          string   `json:"mnc"`
+	Tac          string   `json:"tac"`
+	ConnectedUes []string `json:"connectedUes"`
 }
 
 var (
@@ -127,20 +128,30 @@ func GetRunningGNBs() []RunningGNBStatus {
 	runningGNBsMu.RLock()
 	defer runningGNBsMu.RUnlock()
 
+	ues := ueContext.GetAllActiveUEs()
+
 	result := make([]RunningGNBStatus, 0, len(runningGNBs))
 	for _, inst := range runningGNBs {
+		connectedUes := make([]string, 0)
+		for _, u := range ues {
+			if u.GetGnbProfileName() == inst.ProfileName {
+				connectedUes = append(connectedUes, fmt.Sprintf("UE-%d", u.GetUeId()))
+			}
+		}
+
 		result = append(result, RunningGNBStatus{
-			ProfileName: inst.ProfileName,
-			GnbId:       inst.GnbId,
-			StartedAt:   inst.StartedAt.Format(time.RFC3339),
-			State:       "running",
-			LinkType:    inst.LinkType,
-			LinkPort:    inst.LinkPort,
-			ControlIp:   inst.ControlIp,
-			SocketPath:  inst.SocketPath,
-			Mcc:         inst.Mcc,
-			Mnc:         inst.Mnc,
-			Tac:         inst.Tac,
+			ProfileName:  inst.ProfileName,
+			GnbId:        inst.GnbId,
+			StartedAt:    inst.StartedAt.Format(time.RFC3339),
+			State:        "running",
+			LinkType:     inst.LinkType,
+			LinkPort:     inst.LinkPort,
+			ControlIp:    inst.ControlIp,
+			SocketPath:   inst.SocketPath,
+			Mcc:          inst.Mcc,
+			Mnc:          inst.Mnc,
+			Tac:          inst.Tac,
+			ConnectedUes: connectedUes,
 		})
 	}
 	return result
@@ -237,6 +248,14 @@ func LaunchUEFromProfile(profileName string, targetGnbProfile string) (uint8, er
 		u.SetGnbSocketPath(socketPath)
 	}
 
+	if targetInstance != nil {
+		u.SetGnbId(targetInstance.GnbId)
+		u.SetGnbProfileName(targetInstance.ProfileName)
+	} else {
+		u.SetGnbId("000001")
+		u.SetGnbProfileName("gNB-Default")
+	}
+
 	u.NewRanUeContext(
 		cfg.Ue.Msin,
 		security.AlgCiphering128NEA0,
@@ -310,6 +329,8 @@ func GetFleetRunningSummary() FleetRunningSummary {
 			GnbLinkType:      u.GetGnbLinkType(),
 			GnbLinkPort:      u.GetGnbLinkPort(),
 			GnbControlIp:     u.GetGnbControlIp(),
+			GnbId:            u.GetGnbId(),
+			GnbProfileName:   u.GetGnbProfileName(),
 			PduSessions:      pduSessions,
 		})
 	}
