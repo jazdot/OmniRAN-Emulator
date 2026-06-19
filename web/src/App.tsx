@@ -72,6 +72,7 @@ interface RunningGNB {
   mcc: string;
   mnc: string;
   tac: string;
+  connectedUes?: string[];
 }
 
 interface StatusData {
@@ -1266,7 +1267,7 @@ export default function App() {
                             </span>
                           </div>
                         ) : (
-                          status.runningUes.map((u, idx) => {
+                          status?.runningUes?.map((u, idx) => {
                             const topPercent = `${(idx + 1) * 100 / (totalUes + 1)}%`;
                             const isRegistered = u.stateMmDesc?.includes('REGISTERED');
                             const isSelected = selectedNode === 'ue' && selectedUeId === u.id;
@@ -1325,7 +1326,7 @@ export default function App() {
                             </span>
                           </div>
                         ) : (
-                          status.runningGnbs.map((g, idx) => {
+                          status?.runningGnbs?.map((g, idx) => {
                             const topPercent = `${(idx + 1) * 100 / (totalGnbs + 1)}%`;
                             const isSelected = selectedNode === 'gnb' && selectedGnbName === g.profileName;
                             return (
@@ -1556,7 +1557,7 @@ export default function App() {
                               <span className="detail-label" style={{ marginBottom: '4px' }}>Connected UEs ({activeGnb.connectedUes?.length || 0})</span>
                               {activeGnb.connectedUes && activeGnb.connectedUes.length > 0 ? (
                                 <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', width: '100%' }}>
-                                  {activeGnb.connectedUes.map(ue => (
+                                  {activeGnb.connectedUes.map((ue: string) => (
                                     <span key={ue} className="fleet-tag" style={{ margin: 0, padding: '2px 6px', fontSize: '11px', background: 'rgba(59, 130, 246, 0.15)', color: 'var(--color-primary)' }}>
                                       {ue}
                                     </span>
@@ -1692,7 +1693,7 @@ export default function App() {
                           <td style={{ padding: '10px' }}>
                             {gnb.connectedUes && gnb.connectedUes.length > 0 ? (
                               <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                                {gnb.connectedUes.map(ue => (
+                                {gnb.connectedUes.map((ue: string) => (
                                   <span key={ue} className="fleet-tag" style={{ margin: 0, padding: '2px 6px', fontSize: '11px', background: 'rgba(59, 130, 246, 0.15)', color: 'var(--color-primary)' }}>
                                     {ue}
                                   </span>
