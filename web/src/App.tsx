@@ -187,6 +187,8 @@ export default function App() {
   const [hoTargetLinkType, setHoTargetLinkType] = useState('unix');
   const [hoTargetSocketPath, setHoTargetSocketPath] = useState('');
   const [selectedTargetGnbName, setSelectedTargetGnbName] = useState('');
+  const [selectedUeId, setSelectedUeId] = useState<number | null>(null);
+  const [selectedGnbName, setSelectedGnbName] = useState<string | null>(null);
 
 
 
@@ -257,6 +259,158 @@ export default function App() {
   const [fleetActiveSection, setFleetActiveSection] = useState<'ue' | 'gnb' | 'live'>('ue');
   const [ueToLaunch, setUeToLaunch] = useState<string | null>(null);
   const [selectedTargetGnb, setSelectedTargetGnb] = useState<string>('');
+
+  const renderSvgLinks = () => {
+    const links: React.ReactNode[] = [];
+    const gnbs = status?.runningGnbs || [];
+    const ues = status?.runningUes || [];
+    const totalGnbs = gnbs.length;
+    const totalUes = ues.length;
+
+    const defs = (
+      <defs key="defs">
+        <linearGradient id="uu-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#10b981" />
+          <stop offset="100%" stopColor="#6366f1" />
+        </linearGradient>
+        <linearGradient id="n2-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#6366f1" stopOpacity="0.4" />
+          <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.4" />
+        </linearGradient>
+        <linearGradient id="n3-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#6366f1" />
+          <stop offset="100%" stopColor="#8b5cf6" />
+        </linearGradient>
+        <filter id="glow-filter" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feComposite in="SourceGraphic" in2="blur" operator="over" />
+        </filter>
+      </defs>
+    );
+    links.push(defs);
+
+    if (totalGnbs === 0) {
+      const isCoreActive = status?.gnbLinkState && status.gnbLinkState !== 'offline';
+      const strokeColor = isCoreActive ? '#8b5cf6' : '#334155';
+      links.push(
+        <g key="def-n2">
+          <line x1="500" y1="285" x2="850" y2="285" stroke={strokeColor} strokeWidth="3" strokeDasharray="5,5" />
+          {isCoreActive && (
+            <circle r="5" fill="#a78bfa" filter="url(#glow-filter)">
+              <animate attributeName="cx" from="500" to="850" dur="3s" repeatCount="indefinite" />
+              <animate attributeName="cy" from="285" to="285" dur="3s" repeatCount="indefinite" />
+            </circle>
+          )}
+        </g>
+      );
+      const isDataActive = status?.isRunning;
+      const strokeDataColor = isDataActive ? '#3b82f6' : '#334155';
+      links.push(
+        <g key="def-n3">
+          <line x1="500" y1="315" x2="850" y2="315" stroke={strokeDataColor} strokeWidth="3" />
+          {isDataActive && (
+            <circle r="5" fill="#60a5fa" filter="url(#glow-filter)">
+              <animate attributeName="cx" from="500" to="850" dur="2s" repeatCount="indefinite" />
+              <animate attributeName="cy" from="315" to="315" dur="2s" repeatCount="indefinite" />
+            </circle>
+          )}
+        </g>
+      );
+    } else {
+      gnbs.forEach((g, gIdx) => {
+        const gy = (gIdx + 1) * 600 / (totalGnbs + 1);
+        links.push(
+          <g key={`n2-${g.profileName}`}>
+            <line x1="500" y1={gy - 15} x2="850" y2="285" stroke="url(#n2-grad)" strokeWidth="2.5" strokeDasharray="4,4" />
+            <circle r="4" fill="#c084fc" filter="url(#glow-filter)">
+              <animate attributeName="cx" from="500" to="850" dur="2.5s" repeatCount="indefinite" />
+              <animate attributeName="cy" from={gy - 15} to="285" dur="2.5s" repeatCount="indefinite" />
+            </circle>
+          </g>
+        );
+
+        const hasActiveSession = ues.some(u => u.gnbProfileName === g.profileName && u.pduSessions && u.pduSessions.length > 0);
+        const strokeColor = hasActiveSession ? 'url(#n3-grad)' : '#334155';
+        links.push(
+          <g key={`n3-${g.profileName}`}>
+            <line x1="500" y1={gy + 15} x2="850" y2="315" stroke={strokeColor} strokeWidth="3" opacity={hasActiveSession ? 1 : 0.4} />
+            {hasActiveSession && (
+              <circle r="5" fill="#60a5fa" filter="url(#glow-filter)">
+                <animate attributeName="cx" from="500" to="850" dur="1.8s" repeatCount="indefinite" />
+                <animate attributeName="cy" from={gy + 15} to="315" dur="1.8s" repeatCount="indefinite" />
+              </circle>
+            )}
+          </g>
+        );
+      });
+    }
+
+    if (totalUes === 0) {
+      const isUeActive = status?.isRunning;
+      const strokeColor = isUeActive ? 'url(#uu-grad)' : '#334155';
+      links.push(
+        <g key="def-uu">
+          <line x1="150" y1="300" x2="500" y2="300" stroke={strokeColor} strokeWidth="3" />
+          {isUeActive && (
+            <circle r="5" fill="#34d399" filter="url(#glow-filter)">
+              <animate attributeName="cx" from="150" to="500" dur="2s" repeatCount="indefinite" />
+              <animate attributeName="cy" from="300" to="300" dur="2s" repeatCount="indefinite" />
+            </circle>
+          )}
+        </g>
+      );
+    } else {
+      ues.forEach((u, uIdx) => {
+        const uy = (uIdx + 1) * 600 / (totalUes + 1);
+        let targetGy = 300;
+        if (totalGnbs > 0) {
+          const gIdx = gnbs.findIndex(g => g.profileName === u.gnbProfileName);
+          if (gIdx !== -1) {
+            targetGy = (gIdx + 1) * 600 / (totalGnbs + 1);
+          }
+        }
+        const isRegistered = u.stateMmDesc?.includes('REGISTERED');
+        const strokeColor = isRegistered ? 'url(#uu-grad)' : '#f59e0b';
+        links.push(
+          <g key={`uu-${u.id}`}>
+            <line x1="150" y1={uy} x2="500" y2={targetGy} stroke={strokeColor} strokeWidth="3" opacity="0.9" />
+            {isRegistered && (
+              <circle r="5" fill="#34d399" filter="url(#glow-filter)">
+                <animate attributeName="cx" from="150" to="500" dur="2s" repeatCount="indefinite" />
+                <animate attributeName="cy" from={uy} to={targetGy} dur="2s" repeatCount="indefinite" />
+              </circle>
+            )}
+          </g>
+        );
+      });
+    }
+
+    return links;
+  };
+
+  const getActiveUeToInspect = () => {
+    const ues = status?.runningUes || [];
+    if (ues.length > 0) {
+      if (selectedUeId !== null) {
+        const u = ues.find(x => x.id === selectedUeId);
+        if (u) return u;
+      }
+      return ues[0];
+    }
+    return null;
+  };
+
+  const getActiveGnbToInspect = () => {
+    const gnbs = status?.runningGnbs || [];
+    if (gnbs.length > 0) {
+      if (selectedGnbName !== null) {
+        const g = gnbs.find(x => x.profileName === selectedGnbName);
+        if (g) return g;
+      }
+      return gnbs[0];
+    }
+    return null;
+  };
 
   const fetchFleetProfiles = async () => {
     try {
@@ -1075,213 +1229,395 @@ export default function App() {
               
               <div className="topology-layout">
                 {/* Left side: Canvas */}
-                <div className="topology-canvas">
-                  {/* UE Node */}
-                  <div 
-                    className={`topology-node clickable-node active ${selectedNode === 'ue' ? 'selected' : ''}`} 
-                    onClick={() => setSelectedNode('ue')}
-                    style={{ '--node-color': '#10b981', '--node-color-glow': 'rgba(16, 185, 129, 0.2)' } as React.CSSProperties}
-                  >
-                    <div className="node-icon-wrapper">
-                      <Cpu />
-                    </div>
-                    <span className="node-label">User Equipment</span>
-                    <span className="node-status-text">
-                      {status?.isRunning || activeUEs.length > 0 ? 'CONNECTED' : 'IDLE'}
-                    </span>
-                  </div>
+                <div className="topology-canvas" style={{ position: 'relative' }}>
+                  {(() => {
+                    const totalGnbs = status?.runningGnbs?.length || 0;
+                    const totalUes = status?.runningUes?.length || 0;
+                    return (
+                      <>
+                        {/* SVG Links Layer */}
+                        <svg className="topology-svg" viewBox="0 0 1000 600" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+                          {renderSvgLinks()}
+                        </svg>
 
-                  {/* UE -> gNB Link Line (Uu Interface) */}
-                  <div
-                    className={`topology-link link-ue-gnb ${status?.isRunning || activeUEs.length > 0 ? 'active' : ''}`}
-                    style={{ '--from-color': '#10b981', '--to-color': '#6366f1', '--glow-color': 'rgba(99, 102, 241, 0.2)' } as React.CSSProperties}
-                  >
-                    <div className="link-badge">Uu (5G-NR)</div>
-                    <div className="pulse-dot" />
-                  </div>
+                        {/* UE Nodes */}
+                        {totalUes === 0 ? (
+                          <div 
+                            className={`topology-node clickable-node active ${selectedNode === 'ue' ? 'selected' : ''}`} 
+                            onClick={() => {
+                              setSelectedNode('ue');
+                              setSelectedUeId(null);
+                            }}
+                            style={{ 
+                              position: 'absolute',
+                              left: '15%',
+                              top: '50%',
+                              transform: 'translate(-50%, -50%)',
+                              '--node-color': '#10b981',
+                              '--node-color-glow': 'rgba(16, 185, 129, 0.2)'
+                            } as React.CSSProperties}
+                          >
+                            <div className="node-icon-wrapper">
+                              <Cpu />
+                            </div>
+                            <span className="node-label">User Equipment</span>
+                            <span className="node-status-text">
+                              {status?.isRunning || activeUEs.length > 0 ? 'CONNECTED' : 'IDLE'}
+                            </span>
+                          </div>
+                        ) : (
+                          status.runningUes.map((u, idx) => {
+                            const topPercent = `${(idx + 1) * 100 / (totalUes + 1)}%`;
+                            const isRegistered = u.stateMmDesc?.includes('REGISTERED');
+                            const isSelected = selectedNode === 'ue' && selectedUeId === u.id;
+                            return (
+                              <div 
+                                key={u.id}
+                                className={`topology-node clickable-node active ${isSelected ? 'selected' : ''}`} 
+                                onClick={() => {
+                                  setSelectedNode('ue');
+                                  setSelectedUeId(u.id);
+                                }}
+                                style={{ 
+                                  position: 'absolute',
+                                  left: '15%',
+                                  top: topPercent,
+                                  transform: 'translate(-50%, -50%)',
+                                  '--node-color': isRegistered ? '#10b981' : '#f59e0b',
+                                  '--node-color-glow': isRegistered ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'
+                                } as React.CSSProperties}
+                              >
+                                <div className="node-icon-wrapper">
+                                  <Cpu />
+                                </div>
+                                <span className="node-label">UE-{u.id}</span>
+                                <span className="node-status-text">
+                                  {isRegistered ? 'REGISTERED' : 'PENDING'}
+                                </span>
+                              </div>
+                            );
+                          })
+                        )}
 
-                  {/* gNodeB Node */}
-                  <div
-                    className={`topology-node clickable-node ${status?.gnbLinkState !== 'offline' ? 'active' : ''} ${selectedNode === 'gnb' ? 'selected' : ''}`}
-                    onClick={() => setSelectedNode('gnb')}
-                    style={{ '--node-color': '#6366f1', '--node-color-glow': 'rgba(99, 102, 241, 0.2)' } as React.CSSProperties}
-                  >
-                    <div className="node-icon-wrapper">
-                      <Radio />
-                    </div>
-                    <span className="node-label">gNodeB Cell</span>
-                    <span className="node-status-text">
-                      {status?.gnbLinkState !== 'offline' ? 'ESTABLISHED' : 'OFFLINE'}
-                    </span>
-                  </div>
+                        {/* gNodeB Nodes */}
+                        {totalGnbs === 0 ? (
+                          <div
+                            className={`topology-node clickable-node ${status?.gnbLinkState !== 'offline' ? 'active' : ''} ${selectedNode === 'gnb' ? 'selected' : ''}`}
+                            onClick={() => {
+                              setSelectedNode('gnb');
+                              setSelectedGnbName(null);
+                            }}
+                            style={{ 
+                              position: 'absolute',
+                              left: '50%',
+                              top: '50%',
+                              transform: 'translate(-50%, -50%)',
+                              '--node-color': '#6366f1',
+                              '--node-color-glow': 'rgba(99, 102, 241, 0.2)'
+                            } as React.CSSProperties}
+                          >
+                            <div className="node-icon-wrapper">
+                              <Radio />
+                            </div>
+                            <span className="node-label">gNodeB Cell</span>
+                            <span className="node-status-text">
+                              {status?.gnbLinkState !== 'offline' ? 'ESTABLISHED' : 'OFFLINE'}
+                            </span>
+                          </div>
+                        ) : (
+                          status.runningGnbs.map((g, idx) => {
+                            const topPercent = `${(idx + 1) * 100 / (totalGnbs + 1)}%`;
+                            const isSelected = selectedNode === 'gnb' && selectedGnbName === g.profileName;
+                            return (
+                              <div
+                                key={g.profileName}
+                                className={`topology-node clickable-node active ${isSelected ? 'selected' : ''}`}
+                                onClick={() => {
+                                  setSelectedNode('gnb');
+                                  setSelectedGnbName(g.profileName);
+                                }}
+                                style={{ 
+                                  position: 'absolute',
+                                  left: '50%',
+                                  top: topPercent,
+                                  transform: 'translate(-50%, -50%)',
+                                  '--node-color': '#6366f1',
+                                  '--node-color-glow': 'rgba(99, 102, 241, 0.2)'
+                                } as React.CSSProperties}
+                              >
+                                <div className="node-icon-wrapper">
+                                  <Radio />
+                                </div>
+                                <span className="node-label">{g.profileName}</span>
+                                <span className="node-status-text" style={{ fontSize: '10px' }}>
+                                  ID: {g.gnbId}
+                                </span>
+                              </div>
+                            );
+                          })
+                        )}
 
-                  {/* gNB -> AMF Control Plane Link Line (N2 Interface) */}
-                  <div
-                    className={`topology-link link-n2-control ${
-                      status?.gnbLinkState && status.gnbLinkState !== 'offline' ? 'active' : ''
-                    }`}
-                    style={{ '--from-color': '#6366f1', '--to-color': '#8b5cf6', '--glow-color': 'rgba(139, 92, 246, 0.2)' } as React.CSSProperties}
-                  >
-                    <div className="link-badge">N2 (NGAP/SCTP)</div>
-                    <div className="pulse-dot" />
-                  </div>
-
-                  {/* gNB -> UPF User Plane Link Line (N3 Interface) */}
-                  <div
-                    className={`topology-link link-n3-data ${
-                      status?.isRunning || activeUEs.some(ue => ue.pduSessions && ue.pduSessions.length > 0) ? 'active' : ''
-                    }`}
-                    style={{ '--from-color': '#6366f1', '--to-color': '#8b5cf6', '--glow-color': 'rgba(139, 92, 246, 0.2)' } as React.CSSProperties}
-                  >
-                    <div className="link-badge">N3 (GTP-U/IPIP)</div>
-                    <div className="pulse-dot" />
-                  </div>
-
-                  {/* 5G Core Node */}
-                  <div
-                    className={`topology-node clickable-node ${status?.gnbLinkState && status.gnbLinkState !== 'offline' ? 'active' : ''} ${selectedNode === 'core' ? 'selected' : ''}`}
-                    onClick={() => setSelectedNode('core')}
-                    style={{ '--node-color': '#8b5cf6', '--node-color-glow': 'rgba(139, 92, 246, 0.2)' } as React.CSSProperties}
-                  >
-                    <div className="node-icon-wrapper">
-                      <Server />
-                    </div>
-                    <span className="node-label">5G Core (AMF/UPF)</span>
-                    <span className="node-status-text">
-                      {status?.gnbLinkState && status.gnbLinkState !== 'offline' ? 'REACHABLE' : 'DISCONNECTED'}
-                    </span>
-                  </div>
+                        {/* 5G Core Node */}
+                        <div
+                          className={`topology-node clickable-node ${status?.gnbLinkState !== 'offline' || totalGnbs > 0 ? 'active' : ''} ${selectedNode === 'core' ? 'selected' : ''}`}
+                          onClick={() => setSelectedNode('core')}
+                          style={{ 
+                            position: 'absolute',
+                            left: '85%',
+                            top: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            '--node-color': '#8b5cf6',
+                            '--node-color-glow': 'rgba(139, 92, 246, 0.2)'
+                          } as React.CSSProperties}
+                        >
+                          <div className="node-icon-wrapper">
+                            <Server />
+                          </div>
+                          <span className="node-label">5G Core (AMF/UPF)</span>
+                          <span className="node-status-text">
+                            {status?.gnbLinkState !== 'offline' || totalGnbs > 0 ? 'REACHABLE' : 'DISCONNECTED'}
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {/* Right side: Inspector Panel */}
                 <div className="node-inspector-card">
-                  {selectedNode === 'ue' && (
-                    <>
-                      <h4 className="inspector-title" style={{ color: 'var(--color-success)' }}>
-                        <Cpu size={14} /> UE Node Inspector
-                      </h4>
-                      <div className="inspector-details">
-                        <div className="detail-row">
-                          <span className="detail-label">IMSI</span>
-                          <span className="detail-val font-mono">{status?.configSummary?.ueImsi || '999700000000001'}</span>
-                        </div>
-                        <div className="detail-row">
-                          <span className="detail-label">SUCI</span>
-                          <span className="detail-val font-mono" style={{ fontSize: '11px' }}>
-                            {status?.isRunning ? `suci-0-999-70-0-0-0-${status?.configSummary?.ueImsi?.slice(-5) || '00001'}` : 'None'}
-                          </span>
-                        </div>
-                        <div className="detail-row">
-                          <span className="detail-label">5G-GUTI</span>
-                          <span className="detail-val font-mono" style={{ fontSize: '11px' }}>
-                            {status?.isRunning ? `guti-999-70-0001-${status?.configSummary?.ueImsi?.slice(-4) || '0001'}` : 'None'}
-                          </span>
-                        </div>
-                        <div className="detail-row">
-                          <span className="detail-label">5GMM State</span>
-                          <span className="detail-val font-semibold" style={{ color: status?.isRunning ? 'var(--color-success)' : 'var(--text-muted)' }}>
-                            {status?.isRunning ? '5GMM-REGISTERED' : '5GMM-DEREGISTERED'}
-                          </span>
-                        </div>
-                        <div className="detail-row">
-                          <span className="detail-label">5GMM Connection</span>
-                          <span className="detail-val font-semibold" style={{ color: status?.isRunning ? 'var(--color-success)' : 'var(--text-muted)' }}>
-                            {status?.isRunning ? 'CONNECTED (N1)' : 'IDLE'}
-                          </span>
-                        </div>
-                        <div className="detail-row">
-                          <span className="detail-label">RRC State</span>
-                          <span className="detail-val font-semibold" style={{ color: status?.isRunning ? 'var(--color-success)' : 'var(--text-muted)' }}>
-                            {status?.isRunning ? 'RRC-CONNECTED' : 'RRC-IDLE'}
-                          </span>
-                        </div>
-                        <div className="detail-row">
-                          <span className="detail-label">Active Tunnels</span>
-                          <span className="detail-val font-mono">{activeTuns.length}</span>
-                        </div>
-                        {activeTuns.length > 0 && (
-                          <div className="detail-row-nested">
-                            <span className="detail-label">Interface IPs:</span>
-                            <span className="detail-val font-mono" style={{ fontSize: '10px' }}>
-                              {activeTuns.map(t => `${t.name}: ${t.ips ? t.ips.map(ip => ip.split('/')[0]).join(', ') : 'Pending'}`).join(', ')}
+                  {selectedNode === 'ue' && (() => {
+                    const activeUe = getActiveUeToInspect();
+                    if (activeUe) {
+                      return (
+                        <>
+                          <h4 className="inspector-title" style={{ color: 'var(--color-success)' }}>
+                            <Cpu size={14} /> UE-{activeUe.id} Inspector
+                          </h4>
+                          <div className="inspector-details" style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                            <div className="detail-row">
+                              <span className="detail-label">SUPI</span>
+                              <span className="detail-val font-mono">{activeUe.supi}</span>
+                            </div>
+                            <div className="detail-row">
+                              <span className="detail-label">SUCI</span>
+                              <span className="detail-val font-mono" style={{ fontSize: '11px' }}>
+                                {`suci-0-999-70-0-0-0-${activeUe.supi.slice(-5)}`}
+                              </span>
+                            </div>
+                            <div className="detail-row">
+                              <span className="detail-label">5G-GUTI</span>
+                              <span className="detail-val font-mono" style={{ fontSize: '11px' }}>
+                                {`guti-999-70-0001-${activeUe.supi.slice(-4)}`}
+                              </span>
+                            </div>
+                            <div className="detail-row">
+                              <span className="detail-label">5GMM State</span>
+                              <span className="detail-val font-semibold" style={{ color: activeUe.stateMmDesc?.includes('REGISTERED') ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                                {activeUe.stateMmDesc}
+                              </span>
+                            </div>
+                            <div className="detail-row">
+                              <span className="detail-label">5GMM Connection</span>
+                              <span className="detail-val font-semibold" style={{ color: activeUe.stateMmDesc?.includes('REGISTERED') ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                                {activeUe.stateMmDesc?.includes('REGISTERED') ? 'CONNECTED (N1)' : 'IDLE'}
+                              </span>
+                            </div>
+                            <div className="detail-row">
+                              <span className="detail-label">RRC State</span>
+                              <span className="detail-val font-semibold" style={{ color: activeUe.stateMmDesc?.includes('REGISTERED') ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                                {activeUe.stateMmDesc?.includes('REGISTERED') ? 'RRC-CONNECTED' : 'RRC-IDLE'}
+                              </span>
+                            </div>
+                            <div className="detail-row">
+                              <span className="detail-label">Connected Cell</span>
+                              <span className="detail-val font-semibold" style={{ color: 'var(--color-primary)' }}>
+                                {activeUe.gnbProfileName ? `${activeUe.gnbProfileName} (${activeUe.gnbId || '—'})` : '—'}
+                              </span>
+                            </div>
+                            <div className="detail-row" style={{ flexDirection: 'column', alignItems: 'flex-start', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px', marginTop: '8px' }}>
+                              <span className="detail-label" style={{ marginBottom: '4px' }}>PDU Sessions ({activeUe.pduSessions?.length || 0})</span>
+                              {activeUe.pduSessions && activeUe.pduSessions.length > 0 ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
+                                  {activeUe.pduSessions.map(s => (
+                                    <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', width: '100%' }}>
+                                      <span style={{ color: 'var(--color-info)' }}>PDU #{s.id} ({s.dnn}):</span>
+                                      <span className="font-mono ml-auto" style={{ marginRight: '6px' }}>{s.ueIp || '—'}</span>
+                                      <span className={`fleet-state-badge sm ${s.stateDesc?.includes('ACTIVE') ? 'registered' : 'pending'}`}>{s.stateDesc}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="detail-val" style={{ color: 'var(--text-muted)', fontSize: '11px' }}>None</span>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      );
+                    }
+                    return (
+                      <>
+                        <h4 className="inspector-title" style={{ color: 'var(--color-success)' }}>
+                          <Cpu size={14} /> UE Node Inspector
+                        </h4>
+                        <div className="inspector-details">
+                          <div className="detail-row">
+                            <span className="detail-label">IMSI</span>
+                            <span className="detail-val font-mono">{status?.configSummary?.ueImsi || '999700000000001'}</span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">SUCI</span>
+                            <span className="detail-val font-mono" style={{ fontSize: '11px' }}>
+                              {status?.isRunning ? `suci-0-999-70-0-0-0-${status?.configSummary?.ueImsi?.slice(-5) || '00001'}` : 'None'}
                             </span>
                           </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-
-                  {selectedNode === 'gnb' && (
-                    <>
-                      <h4 className="inspector-title" style={{ color: 'var(--color-primary)' }}>
-                        <Radio size={14} /> gNodeB Cell Inspector
-                      </h4>
-                      <div className="inspector-details" style={{ maxHeight: '350px', overflowY: 'auto' }}>
-                        {status?.runningGnbs && status.runningGnbs.length > 0 ? (
-                          status.runningGnbs.map((g, idx) => (
-                            <div key={g.profileName} style={{ marginBottom: idx < status.runningGnbs!.length - 1 ? '16px' : '0', borderBottom: idx < status.runningGnbs!.length - 1 ? '1px dashed var(--border-color)' : 'none', paddingBottom: idx < status.runningGnbs!.length - 1 ? '16px' : '0' }}>
-                              <div style={{ fontWeight: 'bold', color: 'var(--color-primary)', marginBottom: '8px', fontSize: '13px' }}>
-                                Cell #{idx + 1}: {g.profileName}
-                              </div>
-                              <div className="detail-row">
-                                <span className="detail-label">gNodeB ID</span>
-                                <span className="detail-val font-mono">{g.gnbId}</span>
-                              </div>
-                              <div className="detail-row">
-                                <span className="detail-label">PLMN ID</span>
-                                <span className="detail-val font-mono">{g.mcc}-{g.mnc}</span>
-                              </div>
-                              <div className="detail-row">
-                                <span className="detail-label">TAC</span>
-                                <span className="detail-val font-mono">{g.tac}</span>
-                              </div>
-                              <div className="detail-row">
-                                <span className="detail-label">Link Mode</span>
-                                <span className="detail-val font-semibold uppercase">{g.linkType}</span>
-                              </div>
-                              <div className="detail-row">
-                                <span className="detail-label">N2 Connection</span>
-                                <span className="detail-val font-semibold" style={{ color: 'var(--color-success)' }}>
-                                  CONNECTED
-                                </span>
-                              </div>
+                          <div className="detail-row">
+                            <span className="detail-label">5G-GUTI</span>
+                            <span className="detail-val font-mono" style={{ fontSize: '11px' }}>
+                              {status?.isRunning ? `guti-999-70-0001-${status?.configSummary?.ueImsi?.slice(-4) || '0001'}` : 'None'}
+                            </span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">5GMM State</span>
+                            <span className="detail-val font-semibold" style={{ color: status?.isRunning ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                              {status?.isRunning ? '5GMM-REGISTERED' : '5GMM-DEREGISTERED'}
+                            </span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">5GMM Connection</span>
+                            <span className="detail-val font-semibold" style={{ color: status?.isRunning ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                              {status?.isRunning ? 'CONNECTED (N1)' : 'IDLE'}
+                            </span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">RRC State</span>
+                            <span className="detail-val font-semibold" style={{ color: status?.isRunning ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                              {status?.isRunning ? 'RRC-CONNECTED' : 'RRC-IDLE'}
+                            </span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">Connected Cell</span>
+                            <span className="detail-val font-semibold" style={{ color: 'var(--color-primary)' }}>
+                              {status?.isRunning ? 'gNB-Default (000001)' : '—'}
+                            </span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">Active Tunnels</span>
+                            <span className="detail-val font-mono">{activeTuns.length}</span>
+                          </div>
+                          {activeTuns.length > 0 && (
+                            <div className="detail-row-nested">
+                              <span className="detail-label">Interface IPs:</span>
+                              <span className="detail-val font-mono" style={{ fontSize: '10px' }}>
+                                {activeTuns.map(t => `${t.name}: ${t.ips ? t.ips.map(ip => ip.split('/')[0]).join(', ') : 'Pending'}`).join(', ')}
+                              </span>
                             </div>
-                          ))
-                        ) : (
-                          <>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+
+                  {selectedNode === 'gnb' && (() => {
+                    const activeGnb = getActiveGnbToInspect();
+                    if (activeGnb) {
+                      return (
+                        <>
+                          <h4 className="inspector-title" style={{ color: 'var(--color-primary)' }}>
+                            <Radio size={14} /> gNodeB Inspector
+                          </h4>
+                          <div className="inspector-details" style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                            <div className="detail-row">
+                              <span className="detail-label">Profile Name</span>
+                              <span className="detail-val font-semibold">{activeGnb.profileName}</span>
+                            </div>
                             <div className="detail-row">
                               <span className="detail-label">gNodeB ID</span>
-                              <span className="detail-val font-mono">0001FF (511)</span>
+                              <span className="detail-val font-mono">{activeGnb.gnbId}</span>
                             </div>
                             <div className="detail-row">
                               <span className="detail-label">PLMN ID</span>
-                              <span className="detail-val font-mono">
-                                {configData ? `${configData.GNodeB?.PlmnList?.Mcc || '999'}-${configData.GNodeB?.PlmnList?.Mnc || '70'}` : '999-70'}
-                              </span>
+                              <span className="detail-val font-mono">{activeGnb.mcc}-{activeGnb.mnc}</span>
                             </div>
                             <div className="detail-row">
                               <span className="detail-label">TAC</span>
-                              <span className="detail-val font-mono">
-                                {configData ? configData.GNodeB?.PlmnList?.Tac || '0001' : '0001'}
-                              </span>
+                              <span className="detail-val font-mono">{activeGnb.tac}</span>
                             </div>
                             <div className="detail-row">
                               <span className="detail-label">Link Mode</span>
-                              <span className="detail-val font-semibold uppercase">
-                                {configData ? configData.GNodeB?.LinkType : 'unix'}
-                              </span>
+                              <span className="detail-val font-semibold uppercase">{activeGnb.linkType}</span>
                             </div>
                             <div className="detail-row">
                               <span className="detail-label">N2 Connection</span>
-                              <span className="detail-val font-semibold" style={{ color: status?.gnbLinkState !== 'offline' ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                                {status?.gnbLinkState === 'listening' ? 'TCP LISTENING' : status?.gnbLinkState === 'socket_active' ? 'SOCKET ACTIVE' : 'OFFLINE'}
+                              <span className="detail-val font-semibold" style={{ color: 'var(--color-success)' }}>
+                                CONNECTED
                               </span>
                             </div>
-                          </>
-                        )}
-                      </div>
-                    </>
-                  )}
+                            <div className="detail-row" style={{ flexDirection: 'column', alignItems: 'flex-start', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px', marginTop: '8px' }}>
+                              <span className="detail-label" style={{ marginBottom: '4px' }}>Connected UEs ({activeGnb.connectedUes?.length || 0})</span>
+                              {activeGnb.connectedUes && activeGnb.connectedUes.length > 0 ? (
+                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', width: '100%' }}>
+                                  {activeGnb.connectedUes.map(ue => (
+                                    <span key={ue} className="fleet-tag" style={{ margin: 0, padding: '2px 6px', fontSize: '11px', background: 'rgba(59, 130, 246, 0.15)', color: 'var(--color-primary)' }}>
+                                      {ue}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="detail-val" style={{ color: 'var(--text-muted)', fontSize: '11px' }}>None</span>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      );
+                    }
+                    return (
+                      <>
+                        <h4 className="inspector-title" style={{ color: 'var(--color-primary)' }}>
+                          <Radio size={14} /> gNodeB Cell Inspector
+                        </h4>
+                        <div className="inspector-details" style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                          <div className="detail-row">
+                            <span className="detail-label">gNodeB ID</span>
+                            <span className="detail-val font-mono">0001FF (511)</span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">PLMN ID</span>
+                            <span className="detail-val font-mono">
+                              {configData ? `${configData.GNodeB?.PlmnList?.Mcc || '999'}-${configData.GNodeB?.PlmnList?.Mnc || '70'}` : '999-70'}
+                            </span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">TAC</span>
+                            <span className="detail-val font-mono">
+                              {configData ? configData.GNodeB?.PlmnList?.Tac || '0001' : '0001'}
+                            </span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">Link Mode</span>
+                            <span className="detail-val font-semibold uppercase">
+                              {configData ? configData.GNodeB?.LinkType : 'unix'}
+                            </span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-label">N2 Connection</span>
+                            <span className="detail-val font-semibold" style={{ color: status?.gnbLinkState !== 'offline' ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                              {status?.gnbLinkState === 'listening' ? 'TCP LISTENING' : status?.gnbLinkState === 'socket_active' ? 'SOCKET ACTIVE' : 'OFFLINE'}
+                            </span>
+                          </div>
+                          <div className="detail-row" style={{ flexDirection: 'column', alignItems: 'flex-start', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px', marginTop: '8px' }}>
+                            <span className="detail-label" style={{ marginBottom: '4px' }}>Connected UEs</span>
+                            {status?.isRunning || activeUEs.length > 0 ? (
+                              <span className="fleet-tag" style={{ margin: 0, padding: '2px 6px', fontSize: '11px', background: 'rgba(59, 130, 246, 0.15)', color: 'var(--color-primary)' }}>
+                                UE-Default
+                              </span>
+                            ) : (
+                              <span className="detail-val" style={{ color: 'var(--text-muted)', fontSize: '11px' }}>None</span>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   {selectedNode === 'core' && (
                     <>
@@ -1338,6 +1674,7 @@ export default function App() {
                         <th style={{ padding: '10px' }}>TAC</th>
                         <th style={{ padding: '10px' }}>Link Type</th>
                         <th style={{ padding: '10px' }}>Socket Path / Port</th>
+                        <th style={{ padding: '10px' }}>Connected UEs</th>
                         <th style={{ padding: '10px' }}>Status</th>
                       </tr>
                     </thead>
@@ -1351,6 +1688,19 @@ export default function App() {
                           <td style={{ padding: '10px', textTransform: 'uppercase' }}>{gnb.linkType}</td>
                           <td style={{ padding: '10px', fontFamily: 'monospace', fontSize: '13px' }}>
                             {gnb.linkType === 'unix' ? gnb.socketPath : gnb.linkPort}
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            {gnb.connectedUes && gnb.connectedUes.length > 0 ? (
+                              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                {gnb.connectedUes.map(ue => (
+                                  <span key={ue} className="fleet-tag" style={{ margin: 0, padding: '2px 6px', fontSize: '11px', background: 'rgba(59, 130, 246, 0.15)', color: 'var(--color-primary)' }}>
+                                    {ue}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>None</span>
+                            )}
                           </td>
                           <td style={{ padding: '10px' }}>
                             <span style={{ 
@@ -1386,6 +1736,7 @@ export default function App() {
                         <th style={{ padding: '10px' }}>SUPI / IMSI</th>
                         <th style={{ padding: '10px' }}>5GMM State</th>
                         <th style={{ padding: '10px' }}>AMF UE NGAP ID</th>
+                        <th style={{ padding: '10px' }}>Connected Cell</th>
                         <th style={{ padding: '10px' }}>PDU Sessions (IP Address)</th>
                         <th style={{ padding: '10px', textAlign: 'right' }}>Control</th>
                       </tr>
@@ -1410,6 +1761,9 @@ export default function App() {
                               </span>
                             </td>
                             <td style={{ padding: '10px', fontFamily: 'monospace' }}>{ue.amfUeNgapId || 'N/A'}</td>
+                            <td style={{ padding: '10px' }}>
+                              {ue.gnbProfileName ? `${ue.gnbProfileName} (${ue.gnbId || '—'})` : '—'}
+                            </td>
                             <td style={{ padding: '10px' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 {ue.pduSessions && ue.pduSessions.map((pdu: any) => (
@@ -1611,34 +1965,45 @@ export default function App() {
                       </>
                     )}
 
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        className="btn btn-primary"
-                        onClick={() => triggerUeAction('handover', {
-                          targetGnbIp: hoTargetIp,
-                          targetGnbPort: hoTargetPort,
-                          targetGnbLinkType: hoTargetLinkType,
-                          targetGnbSocketPath: hoTargetSocketPath
-                        })}
-                        style={{ flex: 1, padding: '6px 12px', fontSize: '13px' }}
-                        disabled={fleetRunning.runningGnbs?.length > 0 && !selectedTargetGnbName}
-                      >
-                        N2 HO
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        onClick={() => triggerUeAction('xn-handover', {
-                          targetGnbIp: hoTargetIp,
-                          targetGnbPort: hoTargetPort,
-                          targetGnbLinkType: hoTargetLinkType,
-                          targetGnbSocketPath: hoTargetSocketPath
-                        })}
-                        style={{ flex: 1, padding: '6px 12px', fontSize: '13px', backgroundColor: 'var(--accent-color)' }}
-                        disabled={fleetRunning.runningGnbs?.length > 0 && !selectedTargetGnbName}
-                      >
-                        Xn HO
-                      </button>
-                    </div>
+                    {(() => {
+                      const targetGnbObj = fleetRunning.runningGnbs?.find(g => g.profileName === selectedTargetGnbName);
+                      const targetGnbId = targetGnbObj?.gnbId || "";
+                      const targetGnbName = targetGnbObj?.profileName || "";
+                      return (
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => triggerUeAction('handover', {
+                              targetGnbIp: hoTargetIp,
+                              targetGnbPort: hoTargetPort,
+                              targetGnbLinkType: hoTargetLinkType,
+                              targetGnbSocketPath: hoTargetSocketPath,
+                              targetGnbId: targetGnbId,
+                              targetGnbName: targetGnbName
+                            })}
+                            style={{ flex: 1, padding: '6px 12px', fontSize: '13px' }}
+                            disabled={fleetRunning.runningGnbs?.length > 0 && !selectedTargetGnbName}
+                          >
+                            N2 HO
+                          </button>
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => triggerUeAction('xn-handover', {
+                              targetGnbIp: hoTargetIp,
+                              targetGnbPort: hoTargetPort,
+                              targetGnbLinkType: hoTargetLinkType,
+                              targetGnbSocketPath: hoTargetSocketPath,
+                              targetGnbId: targetGnbId,
+                              targetGnbName: targetGnbName
+                            })}
+                            style={{ flex: 1, padding: '6px 12px', fontSize: '13px', backgroundColor: 'var(--accent-color)' }}
+                            disabled={fleetRunning.runningGnbs?.length > 0 && !selectedTargetGnbName}
+                          >
+                            Xn HO
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -2524,7 +2889,7 @@ export default function App() {
                             </div>
                             <div className="fleet-ue-card-body">
                               <div className="fleet-ue-detail"><span>SUPI</span><code>{u.supi}</code></div>
-                              <div className="fleet-ue-detail"><span>gNB</span><code>{u.gnbControlIp}</code></div>
+                              <div className="fleet-ue-detail"><span>Connected Cell</span><code>{u.gnbProfileName ? `${u.gnbProfileName} (${u.gnbId || '—'})` : u.gnbControlIp}</code></div>
                               <div className="fleet-ue-detail"><span>SM State</span><code>{u.stateSmDesc}</code></div>
                               {u.pduSessions?.length > 0 && (
                                 <div className="fleet-pdu-list">
@@ -2566,6 +2931,18 @@ export default function App() {
                             <div className="fleet-gnb-body">
                               <div className="fleet-ue-detail"><span>gNB-ID</span><code>{g.gnbId}</code></div>
                               <div className="fleet-ue-detail"><span>Started</span><code>{new Date(g.startedAt).toLocaleTimeString()}</code></div>
+                              <div className="fleet-ue-detail" style={{ flexDirection: 'column', alignItems: 'flex-start', marginTop: '6px' }}>
+                                <span style={{ marginBottom: '4px' }}>Connected UEs ({g.connectedUes?.length || 0})</span>
+                                {g.connectedUes && g.connectedUes.length > 0 ? (
+                                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                    {g.connectedUes.map(ue => (
+                                      <span key={ue} className="fleet-tag" style={{ margin: 0 }}>{ue}</span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <code style={{ fontSize: '11px', color: 'var(--text-muted)' }}>None</code>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -2628,6 +3005,9 @@ export default function App() {
                           disabled={!controlUeId || !selectedTargetGnbName}
                           onClick={async () => {
                             if (!controlUeId) return;
+                            const targetGnbObj = fleetRunning.runningGnbs?.find(g => g.profileName === selectedTargetGnbName);
+                            const targetGnbId = targetGnbObj?.gnbId || "";
+                            const targetGnbName = targetGnbObj?.profileName || "";
                             try {
                               const res = await fetch(`${API_BASE}/ue/action`, {
                                 method: 'POST',
@@ -2638,7 +3018,9 @@ export default function App() {
                                   targetGnbIp: hoTargetIp,
                                   targetGnbPort: hoTargetPort,
                                   targetGnbLinkType: hoTargetLinkType,
-                                  targetGnbSocketPath: hoTargetSocketPath
+                                  targetGnbSocketPath: hoTargetSocketPath,
+                                  targetGnbId: targetGnbId,
+                                  targetGnbName: targetGnbName
                                 })
                               });
                               if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
@@ -2654,6 +3036,9 @@ export default function App() {
                           disabled={!controlUeId || !selectedTargetGnbName}
                           onClick={async () => {
                             if (!controlUeId) return;
+                            const targetGnbObj = fleetRunning.runningGnbs?.find(g => g.profileName === selectedTargetGnbName);
+                            const targetGnbId = targetGnbObj?.gnbId || "";
+                            const targetGnbName = targetGnbObj?.profileName || "";
                             try {
                               const res = await fetch(`${API_BASE}/ue/action`, {
                                 method: 'POST',
@@ -2664,7 +3049,9 @@ export default function App() {
                                   targetGnbIp: hoTargetIp,
                                   targetGnbPort: hoTargetPort,
                                   targetGnbLinkType: hoTargetLinkType,
-                                  targetGnbSocketPath: hoTargetSocketPath
+                                  targetGnbSocketPath: hoTargetSocketPath,
+                                  targetGnbId: targetGnbId,
+                                  targetGnbName: targetGnbName
                                 })
                               });
                               if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
