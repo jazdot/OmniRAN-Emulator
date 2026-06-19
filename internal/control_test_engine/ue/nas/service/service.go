@@ -24,9 +24,10 @@ func InitConn(ue *context.UEContext) error {
 			return fmt.Errorf("[UE] Error on Dial TCP with server %s: %v", addr, err)
 		}
 	} else {
-		conn, err = net.Dial("unix", "/tmp/gnb.sock")
+		socketPath := ue.GetGnbSocketPath()
+		conn, err = net.Dial("unix", socketPath)
 		if err != nil {
-			return fmt.Errorf("[UE] Error on Dial UNIX with server: %v", err)
+			return fmt.Errorf("[UE] Error on Dial UNIX with server on %s: %v", socketPath, err)
 		}
 	}
 

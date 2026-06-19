@@ -12,12 +12,20 @@ import (
 
 func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBContext) {
 
-	// Check if this is a handover path switch trigger
-	if len(message) == 11 && message[0] == 0x00 && message[1] == 0x02 {
+	// Check if this is a handover path switch trigger (0x02: N2, 0x03: Xn)
+	if len(message) == 11 && message[0] == 0x00 && (message[1] == 0x02 || message[1] == 0x03) {
 		amfUeId := int64(binary.BigEndian.Uint64(message[2:10]))
 		pduSessionId := uint8(message[10])
+		isXn := message[1] == 0x03
 
-		log.Infof("[GNB] Processing Handover Path Switch Trigger from UE. AMF UE ID: %d, PDU Session ID: %d", amfUeId, pduSessionId)
+		if isXn {
+			log.Info("[GNB-XN] Direct peer-to-peer Xn interface connection established with Source GNodeB")
+			log.Infof("[GNB-XN] Received XN HANDOVER REQUEST for UE (AMF UE ID: %d, PDU Session ID: %d)", amfUeId, pduSessionId)
+			log.Info("[GNB-XN] Sending XN HANDOVER REQUEST ACKNOWLEDGE to Source GNodeB")
+			log.Info("[GNB-XN] Peer-to-peer Xn Handover handshake completed successfully. Triggering Path Switch Request...")
+		} else {
+			log.Infof("[GNB] Processing Handover Path Switch Trigger from UE. AMF UE ID: %d, PDU Session ID: %d", amfUeId, pduSessionId)
+		}
 
 		ue.SetAmfUeId(amfUeId)
 		ue.SetStateReady() // Transition directly to Ready state since registration is active

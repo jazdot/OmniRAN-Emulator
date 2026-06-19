@@ -1,0 +1,95 @@
+{
+  "ueProfiles": [
+    {
+      "name": "UE-test",
+      "msin": "0000000001",
+      "key": "465B5CE8B199B49FAA5F0A2EE238A6BC",
+      "opc": "E8ED289DEBA952E4283B54E88E6183CA",
+      "amf": "8000",
+      "sqn": "000000000000",
+      "dnn": "internet",
+      "pduSessionType": "IPv4v6",
+      "registrationType": "initial",
+      "hplmn": {
+        "mcc": "999",
+        "mnc": "70"
+      },
+      "snssai": {
+        "sst": 1,
+        "sd": ""
+      }
+    },
+    {
+      "name": "UE-test-Copy",
+      "msin": "0000000002",
+      "key": "465B5CE8B199B49FAA5F0A2EE238A6BC",
+      "opc": "E8ED289DEBA952E4283B54E88E6183CA",
+      "amf": "8000",
+      "sqn": "000000000000",
+      "dnn": "internet",
+      "pduSessionType": "IPv4v6",
+      "registrationType": "initial",
+      "hplmn": {
+        "mcc": "999",
+        "mnc": "70"
+      },
+      "snssai": {
+        "sst": 1,
+        "sd": ""
+      }
+    }
+  ],
+  "gnbProfiles": [
+    {
+      "name": "gNB-West",
+      "gnbId": "000002",
+      "mcc": "999",
+      "mnc": "70",
+      "tac": "000001",
+      "sliceSst": "01",
+      "sliceSd": "",
+      "controlIp": "127.0.0.1",
+      "controlPort": 9487,
+      "dataIp": "127.0.0.1",
+      "dataPort": 2152,
+      "linkType": "unix",
+      "linkPort": 9488,
+      "amfIp": "127.0.0.1",
+      "amfPort": 38412
+    },
+    {
+      "name": "gNB-West-Copy",
+      "gnbId": "000003",
+      "mcc": "999",
+      "mnc": "70",
+      "tac": "000001",
+      "sliceSst": "01",
+      "sliceSd": "",
+      "controlIp": "127.0.0.1",
+      "controlPort": 9489,
+      "dataIp": "127.0.0.1",
+      "dataPort": 2152,
+      "linkType": "unix",
+      "linkPort": 9490,
+      "amfIp": "127.0.0.1",
+      "amfPort": 38412
+    },
+    {
+      "name": "gNB-West-Copy-Copy",
+      "gnbId": "000004",
+      "mcc": "999",
+      "mnc": "70",
+      "tac": "000001",
+      "sliceSst": "01",
+      "sliceSd": "",
+      "controlIp": "127.0.0.1",
+      "controlPort": 9490,
+      "dataIp": "127.0.0.1",
+      "dataPort": 2153,
+      "linkType": "unix",
+      "linkPort": 9491,
+      "amfIp": "127.0.0.1",
+      "amfPort": 38412
+    }
+  ]
+}

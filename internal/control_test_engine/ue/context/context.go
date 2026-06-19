@@ -46,6 +46,9 @@ type UEContext struct {
 	gnbLinkType  string
 	gnbLinkPort  int
 	gnbControlIp string
+	gnbSocketPath string
+	gnbId          string
+	gnbProfileName string
 }
 
 type Amf struct {
@@ -705,6 +708,17 @@ func (ue *UEContext) GetGnbControlIp() string {
 	return ue.gnbControlIp
 }
 
+func (ue *UEContext) SetGnbSocketPath(path string) {
+	ue.gnbSocketPath = path
+}
+
+func (ue *UEContext) GetGnbSocketPath() string {
+	if ue.gnbSocketPath == "" {
+		return "/tmp/gnb.sock"
+	}
+	return ue.gnbSocketPath
+}
+
 func (ue *UEContext) SetRegistrationType(regType uint8) {
 	ue.RegistrationType = regType
 }
@@ -804,4 +818,26 @@ func (ue *UEContext) SetupPduSession(id uint8, dnn string, pduSessionType string
 	if sd != "" {
 		sess.Snssai.Sd = sd
 	}
+}
+
+func (ue *UEContext) SetGnbId(id string) {
+	ue.gnbId = id
+}
+
+func (ue *UEContext) GetGnbId() string {
+	if ue.gnbId == "" {
+		return "000001"
+	}
+	return ue.gnbId
+}
+
+func (ue *UEContext) SetGnbProfileName(name string) {
+	ue.gnbProfileName = name
+}
+
+func (ue *UEContext) GetGnbProfileName() string {
+	if ue.gnbProfileName == "" {
+		return "gNB-Default"
+	}
+	return ue.gnbProfileName
 }

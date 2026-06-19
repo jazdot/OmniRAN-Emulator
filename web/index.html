@@ -7,6 +7,17 @@
     <title>web</title>
   </head>
   <body>
+    <script>
+      (function() {
+        const saved = localStorage.getItem('theme');
+        const theme = (saved === 'dark' || saved === 'light') ? saved : 'light';
+        if (theme === 'light') {
+          document.body.classList.add('light');
+        } else {
+          document.body.classList.remove('light');
+        }
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

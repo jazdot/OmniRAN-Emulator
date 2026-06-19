@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -80,6 +81,19 @@ func (h *WebLogHook) UnregisterClient(ch chan string) {
 
 // StartServer starts the Go HTTP backend and serves the embedded Web UI.
 func StartServer(host string, port int) error {
+	// Clean up stale socket files on startup
+	if files, err := filepath.Glob("/tmp/gnb_*.sock"); err == nil {
+		for _, f := range files {
+			_ = os.Remove(f)
+		}
+	}
+	_ = os.Remove("/tmp/gnb.sock")
+
+	// Initialize fleet config from disk
+	if err := config.LoadFleet(); err != nil {
+		logrus.Warnf("[WEB] Failed to load fleet config: %v (starting with empty fleet)", err)
+	}
+
 	mux := http.NewServeMux()
 
 	// REST API Routes
@@ -92,6 +106,17 @@ func StartServer(host string, port int) error {
 	mux.HandleFunc("/api/ue/action", handleUEAction)
 	mux.HandleFunc("/api/ping", handlePingTest)
 	mux.HandleFunc("/api/logs/stream", handleLogStream)
+
+	// Fleet Manager API Routes
+	mux.HandleFunc("/api/fleet/ue", handleFleetUEProfiles)
+	mux.HandleFunc("/api/fleet/ue/", handleFleetUEProfileDelete)
+	mux.HandleFunc("/api/fleet/gnb", handleFleetGNBProfiles)
+	mux.HandleFunc("/api/fleet/gnb/", handleFleetGNBProfileDelete)
+	mux.HandleFunc("/api/fleet/launch/ue", handleFleetLaunchUE)
+	mux.HandleFunc("/api/fleet/launch/gnb", handleFleetLaunchGNB)
+	mux.HandleFunc("/api/fleet/stop/ue", handleFleetStopUE)
+	mux.HandleFunc("/api/fleet/stop/gnb/", handleFleetStopGNB)
+	mux.HandleFunc("/api/fleet/running", handleFleetRunning)
 
 	// Embedded static React files
 	assetsFS, err := fs.Sub(web.Assets, "dist")
@@ -185,6 +210,7 @@ type StatusResponse struct {
 	Interfaces    []NetworkInterface `json:"interfaces"`
 	GnbLinkState  string             `json:"gnbLinkState"`
 	ConfigSummary ConfigSummary      `json:"configSummary"`
+	RunningGnbs   []RunningGNBStatus `json:"runningGnbs,omitempty"`
 }
 
 type NetworkInterface struct {
@@ -231,22 +257,38 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Check if local gNodeB socket/port is listening
 	cfg := config.Data
-	if cfg.GNodeB.LinkType == "tcp" {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.GNodeB.LinkPort), 100*time.Millisecond)
-		if err == nil {
-			resp.GnbLinkState = "listening"
-			conn.Close()
-		} else {
-			resp.GnbLinkState = "offline"
-		}
+
+	// Check if local gNodeB socket/port is listening
+	runningGNBsMu.RLock()
+	hasFleetGNBs := len(runningGNBs) > 0
+	runningGNBsMu.RUnlock()
+
+	if hasFleetGNBs {
+		resp.GnbLinkState = "socket_active"
+		resp.RunningGnbs = GetRunningGNBs()
 	} else {
-		// UNIX socket check
-		if _, err := os.Stat("/tmp/gnb.sock"); err == nil {
-			resp.GnbLinkState = "socket_active"
+		if cfg.GNodeB.LinkType == "tcp" {
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.GNodeB.LinkPort), 100*time.Millisecond)
+			if err == nil {
+				resp.GnbLinkState = "listening"
+				conn.Close()
+			} else {
+				resp.GnbLinkState = "offline"
+			}
 		} else {
-			resp.GnbLinkState = "offline"
+			// UNIX socket check - actively dial to see if alive or stale
+			conn, err := net.DialTimeout("unix", "/tmp/gnb.sock", 50*time.Millisecond)
+			if err == nil {
+				resp.GnbLinkState = "socket_active"
+				conn.Close()
+			} else {
+				// Clean up stale socket file if it exists but connection was refused
+				if _, statErr := os.Stat("/tmp/gnb.sock"); statErr == nil {
+					_ = os.Remove("/tmp/gnb.sock")
+				}
+				resp.GnbLinkState = "offline"
+			}
 		}
 	}
 
@@ -556,15 +598,17 @@ type PDUSessionStatus struct {
 }
 
 type ActionRequest struct {
-	UeId          uint8  `json:"ueId"`
-	Action        string `json:"action"`
-	PduSessionId  uint8  `json:"pduSessionId"`
-	Dnn           string `json:"dnn"`
-	Sst           int32  `json:"sst"`
-	Sd            string `json:"sd"`
-	SessionType   string `json:"sessionType"`
-	TargetGnbIP   string `json:"targetGnbIp"`
-	TargetGnbPort int    `json:"targetGnbPort"`
+	UeId                uint8  `json:"ueId"`
+	Action              string `json:"action"`
+	PduSessionId        uint8  `json:"pduSessionId"`
+	Dnn                 string `json:"dnn"`
+	Sst                 int32  `json:"sst"`
+	Sd                  string `json:"sd"`
+	SessionType         string `json:"sessionType"`
+	TargetGnbIP         string `json:"targetGnbIp"`
+	TargetGnbPort       int    `json:"targetGnbPort"`
+	TargetGnbLinkType   string `json:"targetGnbLinkType"`
+	TargetGnbSocketPath string `json:"targetGnbSocketPath"`
 }
 
 func handleScenarioStop(w http.ResponseWriter, r *http.Request) {
@@ -704,7 +748,7 @@ func handleUEAction(w http.ResponseWriter, r *http.Request) {
 		sender.SendToGnb(u, ulNasTransport)
 		logrus.Infof("[WEB][ACTION] Secondary PDU Session establishment sent for ID %d", req.PduSessionId)
 
-	case "handover":
+	case "handover", "xn-handover":
 		ip := req.TargetGnbIP
 		if ip == "" {
 			ip = "127.0.0.1"
@@ -713,12 +757,23 @@ func handleUEAction(w http.ResponseWriter, r *http.Request) {
 		if port == 0 {
 			port = 9489
 		}
-		err := ue.TriggerHandover(u, ip, port, u.GetGnbLinkType())
+		linkType := req.TargetGnbLinkType
+		if linkType == "" {
+			linkType = u.GetGnbLinkType()
+		}
+		socketPath := req.TargetGnbSocketPath
+		isXn := req.Action == "xn-handover"
+
+		err := ue.TriggerHandover(u, ip, port, linkType, socketPath, isXn)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Handover trigger failed: %v", err), http.StatusInternalServerError)
 			return
 		}
-		logrus.Infof("[WEB][ACTION] Handover triggered successfully to %s:%d", ip, port)
+		if isXn {
+			logrus.Infof("[WEB][ACTION] Xn Handover triggered successfully to %s:%d (SocketPath: %s)", ip, port, socketPath)
+		} else {
+			logrus.Infof("[WEB][ACTION] Handover triggered successfully to %s:%d (SocketPath: %s)", ip, port, socketPath)
+		}
 
 	default:
 		http.Error(w, fmt.Sprintf("Unsupported action: %s", req.Action), http.StatusBadRequest)
@@ -727,4 +782,250 @@ func handleUEAction(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"success"}`))
+}
+
+// ─── Fleet Manager API Handlers ────────────────────────────────────────────────
+
+// handleFleetUEProfiles handles GET (list) and POST (upsert) for UE profiles.
+func handleFleetUEProfiles(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		fleet := config.GetFleet()
+		_ = json.NewEncoder(w).Encode(fleet.UEProfiles)
+
+	case http.MethodPost:
+		var p config.UEProfile
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := config.ValidateUEProfile(p); err != nil {
+			http.Error(w, fmt.Sprintf("Validation error: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := config.UpsertUEProfile(p); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to save UE profile: %v", err), http.StatusInternalServerError)
+			return
+		}
+		logrus.Infof("[FLEET] UE profile '%s' saved", p.Name)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"saved"}`))
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleFleetUEProfileDelete handles DELETE /api/fleet/ue/{name}
+func handleFleetUEProfileDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := r.URL.Path[len("/api/fleet/ue/"):]
+	if name == "" {
+		http.Error(w, "Profile name required", http.StatusBadRequest)
+		return
+	}
+	if err := config.DeleteUEProfile(name); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	logrus.Infof("[FLEET] UE profile '%s' deleted", name)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"deleted"}`))
+}
+
+// handleFleetGNBProfiles handles GET (list) and POST (upsert) for gNB profiles.
+func handleFleetGNBProfiles(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		fleet := config.GetFleet()
+		_ = json.NewEncoder(w).Encode(fleet.GNBProfiles)
+
+	case http.MethodPost:
+		var p config.GNBProfile
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := config.ValidateGNBProfile(p); err != nil {
+			http.Error(w, fmt.Sprintf("Validation error: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := config.UpsertGNBProfile(p); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to save gNB profile: %v", err), http.StatusInternalServerError)
+			return
+		}
+		logrus.Infof("[FLEET] gNB profile '%s' saved", p.Name)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"saved"}`))
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleFleetGNBProfileDelete handles DELETE /api/fleet/gnb/{name}
+func handleFleetGNBProfileDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := r.URL.Path[len("/api/fleet/gnb/"):]
+	if name == "" {
+		http.Error(w, "Profile name required", http.StatusBadRequest)
+		return
+	}
+	// Cannot delete a running gNB profile
+	if IsGNBProfileRunning(name) {
+		http.Error(w, fmt.Sprintf("gNB profile '%s' is currently running — stop it first", name), http.StatusConflict)
+		return
+	}
+	if err := config.DeleteGNBProfile(name); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	logrus.Infof("[FLEET] gNB profile '%s' deleted", name)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"deleted"}`))
+}
+
+// FleetLaunchRequest carries the profile name to launch.
+type FleetLaunchRequest struct {
+	ProfileName    string `json:"profileName"`
+	GnbProfileName string `json:"gnbProfileName"`
+}
+
+// FleetLaunchUEResponse includes the assigned UE ID.
+type FleetLaunchUEResponse struct {
+	Status  string `json:"status"`
+	UeId    uint8  `json:"ueId"`
+	Supi    string `json:"supi,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// handleFleetLaunchUE handles POST /api/fleet/launch/ue
+func handleFleetLaunchUE(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req FleetLaunchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	if req.ProfileName == "" {
+		http.Error(w, "profileName is required", http.StatusBadRequest)
+		return
+	}
+
+	ueID, err := LaunchUEFromProfile(req.ProfileName, req.GnbProfileName)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to launch UE: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(FleetLaunchUEResponse{
+		Status:  "launched",
+		UeId:    ueID,
+		Message: fmt.Sprintf("UE %d registration initiated", ueID),
+	})
+}
+
+// handleFleetLaunchGNB handles POST /api/fleet/launch/gnb
+func handleFleetLaunchGNB(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req FleetLaunchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	if req.ProfileName == "" {
+		http.Error(w, "profileName is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := LaunchGNBProfile(req.ProfileName); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to launch gNB: %v", err), http.StatusConflict)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"launched"}`))
+}
+
+// FleetStopUERequest carries the UE ID to stop.
+type FleetStopUERequest struct {
+	UeId uint8 `json:"ueId"`
+}
+
+// handleFleetStopUE handles POST /api/fleet/stop/ue with body {"ueId": N}
+func handleFleetStopUE(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req FleetStopUERequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	u := ueContext.GetActiveUE(req.UeId)
+	if u == nil {
+		http.Error(w, fmt.Sprintf("UE %d is not active", req.UeId), http.StatusNotFound)
+		return
+	}
+
+	go u.Terminate()
+	logrus.Infof("[FLEET] Terminated UE %d", req.UeId)
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"terminated"}`))
+}
+
+// handleFleetStopGNB handles POST /api/fleet/stop/gnb/{name}
+func handleFleetStopGNB(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	name := r.URL.Path[len("/api/fleet/stop/gnb/"):]
+	if name == "" {
+		http.Error(w, "Profile name required in URL path", http.StatusBadRequest)
+		return
+	}
+
+	if err := StopGNBProfile(name); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"stopping"}`))
+}
+
+// handleFleetRunning handles GET /api/fleet/running — returns live fleet state.
+func handleFleetRunning(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	summary := GetFleetRunningSummary()
+	_ = json.NewEncoder(w).Encode(summary)
 }

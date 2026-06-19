@@ -60,6 +60,20 @@ interface NetworkInterface {
   ips: string[];
 }
 
+interface RunningGNB {
+  profileName: string;
+  gnbId: string;
+  startedAt: string;
+  state: string;
+  linkType: string;
+  linkPort: number;
+  controlIp: string;
+  socketPath?: string;
+  mcc: string;
+  mnc: string;
+  tac: string;
+}
+
 interface StatusData {
   isRunning: boolean;
   runningName: string;
@@ -73,6 +87,7 @@ interface StatusData {
     gnbControl: string;
     amfTarget: string;
   };
+  runningGnbs?: RunningGNB[];
 }
 
 interface Scenario {
@@ -88,8 +103,11 @@ interface LogMsg {
 }
 
 export default function App() {
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity'>('dashboard');
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    const saved = localStorage.getItem('theme');
+    return (saved === 'dark' || saved === 'light') ? saved : 'light';
+  });
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity' | 'fleet'>('dashboard');
   const [selectedNode, setSelectedNode] = useState<'ue' | 'gnb' | 'core' | null>('ue');
 
   const [showBanners, setShowBanners] = useState(true);
@@ -113,6 +131,7 @@ export default function App() {
 
   // Toggle theme class on body
   useEffect(() => {
+    localStorage.setItem('theme', theme);
     if (theme === 'light') {
       document.body.classList.add('light');
     } else {
@@ -151,6 +170,9 @@ export default function App() {
   const [newPduType, setNewPduType] = useState('IPv4');
   const [hoTargetIp, setHoTargetIp] = useState('127.0.0.1');
   const [hoTargetPort, setHoTargetPort] = useState(9489);
+  const [hoTargetLinkType, setHoTargetLinkType] = useState('unix');
+  const [hoTargetSocketPath, setHoTargetSocketPath] = useState('');
+  const [selectedTargetGnbName, setSelectedTargetGnbName] = useState('');
 
 
 
@@ -165,7 +187,312 @@ export default function App() {
     socketsClean: 'loading'
   });
 
+  // Fleet Manager State
+  interface UEProfile {
+    name: string;
+    msin: string;
+    key: string;
+    opc: string;
+    amf: string;
+    sqn: string;
+    dnn: string;
+    pduSessionType: string;
+    registrationType: string;
+    hplmn: { mcc: string; mnc: string };
+    snssai: { sst: number; sd: string };
+  }
+  interface GNBProfile {
+    name: string;
+    gnbId: string;
+    mcc: string;
+    mnc: string;
+    tac: string;
+    sliceSst: string;
+    sliceSd: string;
+    controlIp: string;
+    controlPort: number;
+    dataIp: string;
+    dataPort: number;
+    linkType: string;
+    linkPort: number;
+    amfIp: string;
+    amfPort: number;
+  }
+  interface RunningUE {
+    id: number;
+    supi: string;
+    stateMm: number;
+    stateMmDesc: string;
+    stateSm: number;
+    stateSmDesc: string;
+    gnbControlIp: string;
+    pduSessions: { id: number; ueIp: string; dnn: string; stateDesc: string }[];
+  }
+
+
+  const defaultUEProfile: UEProfile = {
+    name: '', msin: '', key: '', opc: '', amf: '8000', sqn: '000000000000',
+    dnn: 'internet', pduSessionType: 'IPv4', registrationType: 'initial',
+    hplmn: { mcc: '999', mnc: '70' }, snssai: { sst: 1, sd: '' }
+  };
+  const defaultGNBProfile: GNBProfile = {
+    name: '', gnbId: '', mcc: '999', mnc: '70', tac: '000001', sliceSst: '01', sliceSd: '',
+    controlIp: '127.0.0.1', controlPort: 9487, dataIp: '127.0.0.1', dataPort: 2152,
+    linkType: 'unix', linkPort: 9488, amfIp: '127.0.0.1', amfPort: 38412
+  };
+
+  const [ueProfiles, setUEProfiles] = useState<UEProfile[]>([]);
+  const [gnbProfiles, setGNBProfiles] = useState<GNBProfile[]>([]);
+  const [showUEForm, setShowUEForm] = useState(false);
+  const [showGNBForm, setShowGNBForm] = useState(false);
+  const [editingUE, setEditingUE] = useState<UEProfile>(defaultUEProfile);
+  const [editingGNB, setEditingGNB] = useState<GNBProfile>(defaultGNBProfile);
+  const [fleetRunning, setFleetRunning] = useState<{ runningUes: RunningUE[]; runningGnbs: RunningGNB[] }>({ runningUes: [], runningGnbs: [] });
+  const [fleetMsg, setFleetMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [fleetActiveSection, setFleetActiveSection] = useState<'ue' | 'gnb' | 'live'>('ue');
+  const [ueToLaunch, setUeToLaunch] = useState<string | null>(null);
+  const [selectedTargetGnb, setSelectedTargetGnb] = useState<string>('');
+
+  const fetchFleetProfiles = async () => {
+    try {
+      const [ueRes, gnbRes] = await Promise.all([
+        fetch(`${API_BASE}/fleet/ue`),
+        fetch(`${API_BASE}/fleet/gnb`)
+      ]);
+      if (ueRes.ok) setUEProfiles(await ueRes.json());
+      if (gnbRes.ok) setGNBProfiles(await gnbRes.json());
+    } catch {}
+  };
+
+  const fetchFleetRunning = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/fleet/running`);
+      if (res.ok) setFleetRunning(await res.json());
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (activeTab === 'fleet') {
+      fetchFleetProfiles();
+      fetchFleetRunning();
+      const iv = setInterval(fetchFleetRunning, 2000);
+      return () => clearInterval(iv);
+    }
+  }, [activeTab]);
+
+  const showFleetMsg = (text: string, type: 'success' | 'error') => {
+    setFleetMsg({ text, type });
+    setTimeout(() => setFleetMsg(null), 4000);
+  };
+
+  const saveUEProfile = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/fleet/ue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingUE)
+      });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`UE profile '${editingUE.name}' saved`, 'success');
+      setShowUEForm(false);
+      setEditingUE(defaultUEProfile);
+      fetchFleetProfiles();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const saveGNBProfile = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/fleet/gnb`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingGNB)
+      });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`gNB profile '${editingGNB.name}' saved`, 'success');
+      setShowGNBForm(false);
+      setEditingGNB(defaultGNBProfile);
+      fetchFleetProfiles();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const deleteUEProfile = async (name: string) => {
+    if (!confirm(`Delete UE profile '${name}'?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/fleet/ue/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`Profile '${name}' deleted`, 'success');
+      fetchFleetProfiles();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const deleteGNBProfile = async (name: string) => {
+    if (!confirm(`Delete gNB profile '${name}'?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/fleet/gnb/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`Profile '${name}' deleted`, 'success');
+      fetchFleetProfiles();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const duplicateUEProfile = async (profile: UEProfile) => {
+    try {
+      // 1. Generate unique name
+      let newName = `${profile.name}-Copy`;
+      let counter = 1;
+      while (ueProfiles.some(p => p.name === newName)) {
+        newName = `${profile.name}-Copy${counter}`;
+        counter++;
+      }
+
+      // 2. Generate unique MSIN
+      let msinVal = parseInt(profile.msin, 10);
+      if (isNaN(msinVal)) msinVal = 1000000000;
+      let newMsin = profile.msin;
+      do {
+        msinVal++;
+        newMsin = msinVal.toString().padStart(profile.msin.length, '0');
+      } while (ueProfiles.some(p => p.msin === newMsin));
+
+      // 3. Clone and save
+      const cloned: UEProfile = {
+        ...profile,
+        name: newName,
+        msin: newMsin
+      };
+
+      const res = await fetch(`${API_BASE}/fleet/ue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cloned)
+      });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`Duplicated to profile '${newName}' (MSIN: ${newMsin})`, 'success');
+      fetchFleetProfiles();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const duplicateGNBProfile = async (profile: GNBProfile) => {
+    try {
+      // 1. Generate unique name
+      let newName = `${profile.name}-Copy`;
+      let counter = 1;
+      while (gnbProfiles.some(p => p.name === newName)) {
+        newName = `${profile.name}-Copy${counter}`;
+        counter++;
+      }
+
+      // 2. Generate unique gNB ID
+      let gnbIdVal = parseInt(profile.gnbId, 16);
+      if (isNaN(gnbIdVal)) gnbIdVal = 1;
+      let newGnbId = profile.gnbId;
+      do {
+        gnbIdVal++;
+        newGnbId = gnbIdVal.toString(16).toUpperCase().padStart(profile.gnbId.length, '0');
+      } while (gnbProfiles.some(p => p.gnbId === newGnbId));
+
+      // 3. Generate unique ports for controlPort, linkPort, dataPort
+      let newControlPort = profile.controlPort;
+      while (gnbProfiles.some(p => p.controlPort === newControlPort)) {
+        newControlPort++;
+      }
+      let newLinkPort = profile.linkPort;
+      while (gnbProfiles.some(p => p.linkPort === newLinkPort)) {
+        newLinkPort++;
+      }
+      let newDataPort = profile.dataPort;
+      while (gnbProfiles.some(p => p.dataPort === newDataPort)) {
+        newDataPort++;
+      }
+
+      // 4. Clone and save
+      const cloned: GNBProfile = {
+        ...profile,
+        name: newName,
+        gnbId: newGnbId,
+        controlPort: newControlPort,
+        linkPort: newLinkPort,
+        dataPort: newDataPort
+      };
+
+      const res = await fetch(`${API_BASE}/fleet/gnb`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cloned)
+      });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`Duplicated to profile '${newName}' (gNB-ID: ${newGnbId})`, 'success');
+      fetchFleetProfiles();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const launchUEProfile = async (name: string, gnbProfileName?: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/fleet/launch/ue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileName: name, gnbProfileName })
+      });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      const data = await res.json();
+      showFleetMsg(`UE launched: ID ${data.ueId} — ${data.message}`, 'success');
+      setFleetActiveSection('live');
+      fetchFleetRunning();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const handleLaunchUEClick = (name: string) => {
+    const hasFleetGnbs = fleetRunning.runningGnbs && fleetRunning.runningGnbs.length > 0;
+    const isDefaultGnbActive = status?.gnbLinkState && status.gnbLinkState !== 'offline';
+
+    if (hasFleetGnbs) {
+      setUeToLaunch(name);
+      setSelectedTargetGnb(fleetRunning.runningGnbs[0].profileName);
+    } else if (isDefaultGnbActive) {
+      launchUEProfile(name);
+    } else {
+      showFleetMsg('Cannot launch UE. No active gNodeB cell detected. Please launch a gNodeB first.', 'error');
+    }
+  };
+
+  const launchGNBProfile = async (name: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/fleet/launch/gnb`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileName: name })
+      });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`gNB '${name}' launched successfully`, 'success');
+      setFleetActiveSection('live');
+      fetchFleetRunning();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const stopFleetUE = async (ueId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/fleet/stop/ue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ueId })
+      });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`UE ${ueId} terminated`, 'success');
+      fetchFleetRunning();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const stopFleetGNB = async (name: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/fleet/stop/gnb/${encodeURIComponent(name)}`, { method: 'POST' });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`gNB '${name}' stopping...`, 'success');
+      fetchFleetRunning();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
   const consoleEndRef = useRef<HTMLDivElement>(null);
+
 
   // Fetch emulator status
   const fetchStatus = async () => {
@@ -549,6 +876,13 @@ export default function App() {
             <Network />
             <span>Connectivity Tool</span>
           </li>
+          <li
+            className={`nav-item ${activeTab === 'fleet' ? 'active' : ''}`}
+            onClick={() => setActiveTab('fleet')}
+          >
+            <Radio />
+            <span>Fleet Manager</span>
+          </li>
         </nav>
 
         <div className="sidebar-footer">
@@ -567,6 +901,7 @@ export default function App() {
               {activeTab === 'config' && 'Configuration Panel'}
               {activeTab === 'logs' && 'Live Console Panel'}
               {activeTab === 'connectivity' && 'Connectivity Tool Panel'}
+              {activeTab === 'fleet' && 'Fleet Manager'}
             </h1>
           </div>
 
@@ -747,13 +1082,13 @@ export default function App() {
                     </div>
                     <span className="node-label">User Equipment</span>
                     <span className="node-status-text">
-                      {status?.isRunning ? 'CONNECTED' : 'IDLE'}
+                      {status?.isRunning || activeUEs.length > 0 ? 'CONNECTED' : 'IDLE'}
                     </span>
                   </div>
 
                   {/* UE -> gNB Link Line (Uu Interface) */}
                   <div
-                    className={`topology-link link-ue-gnb ${status?.isRunning ? 'active' : ''}`}
+                    className={`topology-link link-ue-gnb ${status?.isRunning || activeUEs.length > 0 ? 'active' : ''}`}
                     style={{ '--from-color': '#10b981', '--to-color': '#6366f1', '--glow-color': 'rgba(99, 102, 241, 0.2)' } as React.CSSProperties}
                   >
                     <div className="link-badge">Uu (5G-NR)</div>
@@ -789,7 +1124,7 @@ export default function App() {
                   {/* gNB -> UPF User Plane Link Line (N3 Interface) */}
                   <div
                     className={`topology-link link-n3-data ${
-                      status?.isRunning ? 'active' : ''
+                      status?.isRunning || activeUEs.some(ue => ue.pduSessions && ue.pduSessions.length > 0) ? 'active' : ''
                     }`}
                     style={{ '--from-color': '#6366f1', '--to-color': '#8b5cf6', '--glow-color': 'rgba(139, 92, 246, 0.2)' } as React.CSSProperties}
                   >
@@ -876,35 +1211,69 @@ export default function App() {
                       <h4 className="inspector-title" style={{ color: 'var(--color-primary)' }}>
                         <Radio size={14} /> gNodeB Cell Inspector
                       </h4>
-                      <div className="inspector-details">
-                        <div className="detail-row">
-                          <span className="detail-label">gNodeB ID</span>
-                          <span className="detail-val font-mono">0001FF (511)</span>
-                        </div>
-                        <div className="detail-row">
-                          <span className="detail-label">PLMN ID</span>
-                          <span className="detail-val font-mono">
-                            {configData ? `${configData.GNodeB?.PlmnList?.Mcc || '999'}-${configData.GNodeB?.PlmnList?.Mnc || '70'}` : '999-70'}
-                          </span>
-                        </div>
-                        <div className="detail-row">
-                          <span className="detail-label">TAC</span>
-                          <span className="detail-val font-mono">
-                            {configData ? configData.GNodeB?.PlmnList?.Tac || '0001' : '0001'}
-                          </span>
-                        </div>
-                        <div className="detail-row">
-                          <span className="detail-label">Link Mode</span>
-                          <span className="detail-val font-semibold uppercase">
-                            {configData ? configData.GNodeB?.LinkType : 'unix'}
-                          </span>
-                        </div>
-                        <div className="detail-row">
-                          <span className="detail-label">N2 Connection</span>
-                          <span className="detail-val font-semibold" style={{ color: status?.gnbLinkState !== 'offline' ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                            {status?.gnbLinkState === 'listening' ? 'TCP LISTENING' : status?.gnbLinkState === 'socket_active' ? 'SOCKET ACTIVE' : 'OFFLINE'}
-                          </span>
-                        </div>
+                      <div className="inspector-details" style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                        {status?.runningGnbs && status.runningGnbs.length > 0 ? (
+                          status.runningGnbs.map((g, idx) => (
+                            <div key={g.profileName} style={{ marginBottom: idx < status.runningGnbs!.length - 1 ? '16px' : '0', borderBottom: idx < status.runningGnbs!.length - 1 ? '1px dashed var(--border-color)' : 'none', paddingBottom: idx < status.runningGnbs!.length - 1 ? '16px' : '0' }}>
+                              <div style={{ fontWeight: 'bold', color: 'var(--color-primary)', marginBottom: '8px', fontSize: '13px' }}>
+                                Cell #{idx + 1}: {g.profileName}
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">gNodeB ID</span>
+                                <span className="detail-val font-mono">{g.gnbId}</span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">PLMN ID</span>
+                                <span className="detail-val font-mono">{g.mcc}-{g.mnc}</span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">TAC</span>
+                                <span className="detail-val font-mono">{g.tac}</span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">Link Mode</span>
+                                <span className="detail-val font-semibold uppercase">{g.linkType}</span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">N2 Connection</span>
+                                <span className="detail-val font-semibold" style={{ color: 'var(--color-success)' }}>
+                                  CONNECTED
+                                </span>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <>
+                            <div className="detail-row">
+                              <span className="detail-label">gNodeB ID</span>
+                              <span className="detail-val font-mono">0001FF (511)</span>
+                            </div>
+                            <div className="detail-row">
+                              <span className="detail-label">PLMN ID</span>
+                              <span className="detail-val font-mono">
+                                {configData ? `${configData.GNodeB?.PlmnList?.Mcc || '999'}-${configData.GNodeB?.PlmnList?.Mnc || '70'}` : '999-70'}
+                              </span>
+                            </div>
+                            <div className="detail-row">
+                              <span className="detail-label">TAC</span>
+                              <span className="detail-val font-mono">
+                                {configData ? configData.GNodeB?.PlmnList?.Tac || '0001' : '0001'}
+                              </span>
+                            </div>
+                            <div className="detail-row">
+                              <span className="detail-label">Link Mode</span>
+                              <span className="detail-val font-semibold uppercase">
+                                {configData ? configData.GNodeB?.LinkType : 'unix'}
+                              </span>
+                            </div>
+                            <div className="detail-row">
+                              <span className="detail-label">N2 Connection</span>
+                              <span className="detail-val font-semibold" style={{ color: status?.gnbLinkState !== 'offline' ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                                {status?.gnbLinkState === 'listening' ? 'TCP LISTENING' : status?.gnbLinkState === 'socket_active' ? 'SOCKET ACTIVE' : 'OFFLINE'}
+                              </span>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </>
                   )}
@@ -947,6 +1316,56 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* Active Connected gNodeBs Table */}
+            {status?.runningGnbs && status.runningGnbs.length > 0 && (
+              <div className="card" id="activeGnbsTable" style={{ marginBottom: '20px' }}>
+                <h3 className="panel-title" style={{ marginBottom: '16px', color: 'var(--color-primary)' }}>
+                  <Radio size={18} /> Active Fleet gNodeB Cells ({status.runningGnbs.length})
+                </h3>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-secondary)', textAlign: 'left' }}>
+                        <th style={{ padding: '10px' }}>Profile Name</th>
+                        <th style={{ padding: '10px' }}>gNodeB ID</th>
+                        <th style={{ padding: '10px' }}>PLMN</th>
+                        <th style={{ padding: '10px' }}>TAC</th>
+                        <th style={{ padding: '10px' }}>Link Type</th>
+                        <th style={{ padding: '10px' }}>Socket Path / Port</th>
+                        <th style={{ padding: '10px' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {status.runningGnbs.map((gnb) => (
+                        <tr key={gnb.profileName} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)' }}>
+                          <td style={{ padding: '10px', fontWeight: 'bold', color: 'var(--color-primary)' }}>{gnb.profileName}</td>
+                          <td style={{ padding: '10px', fontFamily: 'monospace' }}>{gnb.gnbId}</td>
+                          <td style={{ padding: '10px' }}>{gnb.mcc}-{gnb.mnc}</td>
+                          <td style={{ padding: '10px', fontFamily: 'monospace' }}>{gnb.tac}</td>
+                          <td style={{ padding: '10px', textTransform: 'uppercase' }}>{gnb.linkType}</td>
+                          <td style={{ padding: '10px', fontFamily: 'monospace', fontSize: '13px' }}>
+                            {gnb.linkType === 'unix' ? gnb.socketPath : gnb.linkPort}
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            <span style={{ 
+                              padding: '2px 8px', 
+                              borderRadius: '4px', 
+                              fontSize: '12px', 
+                              fontWeight: 'semibold',
+                              background: 'rgba(16, 185, 129, 0.1)', 
+                              color: 'var(--color-success)'
+                            }}>
+                              ACTIVE
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* Active Connected UEs Table (Richer with MM/SM states) */}
             {activeUEs.length > 0 && (
@@ -1137,36 +1556,84 @@ export default function App() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     <h4 style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>N2 Path Switch Handover</h4>
                     
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label style={{ fontSize: '11px' }}>Target gNB IP</label>
-                      <input
-                        type="text"
-                        value={hoTargetIp}
-                        onChange={(e) => setHoTargetIp(e.target.value)}
-                        style={{ padding: '6px' }}
-                      />
-                    </div>
+                    {fleetRunning.runningGnbs && fleetRunning.runningGnbs.length > 0 ? (
+                      <div className="form-group" style={{ marginBottom: '10px' }}>
+                        <label style={{ fontSize: '11px' }}>Target gNB</label>
+                        <select
+                          value={selectedTargetGnbName}
+                          onChange={(e) => {
+                            const name = e.target.value;
+                            setSelectedTargetGnbName(name);
+                            const gnb = fleetRunning.runningGnbs.find(g => g.profileName === name);
+                            if (gnb) {
+                              setHoTargetIp(gnb.controlIp);
+                              setHoTargetPort(gnb.linkPort || 9489);
+                              setHoTargetLinkType(gnb.linkType);
+                              setHoTargetSocketPath(gnb.socketPath || '');
+                            }
+                          }}
+                          style={{ padding: '6px', width: '100%', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                        >
+                          <option value="">-- Select Target gNB --</option>
+                          {fleetRunning.runningGnbs.map(g => (
+                            <option key={g.profileName} value={g.profileName}>
+                              {g.profileName} ({g.gnbId}) - {g.linkType === 'unix' ? 'UNIX' : `${g.controlIp}:${g.linkPort}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '11px' }}>Target gNB IP</label>
+                          <input
+                            type="text"
+                            value={hoTargetIp}
+                            onChange={(e) => setHoTargetIp(e.target.value)}
+                            style={{ padding: '6px' }}
+                          />
+                        </div>
 
-                    <div className="form-group" style={{ marginBottom: '15px' }}>
-                      <label style={{ fontSize: '11px' }}>Target gNB Port</label>
-                      <input
-                        type="number"
-                        value={hoTargetPort}
-                        onChange={(e) => setHoTargetPort(parseInt(e.target.value) || 9489)}
-                        style={{ padding: '6px' }}
-                      />
-                    </div>
+                        <div className="form-group" style={{ marginBottom: '15px' }}>
+                          <label style={{ fontSize: '11px' }}>Target gNB Port</label>
+                          <input
+                            type="number"
+                            value={hoTargetPort}
+                            onChange={(e) => setHoTargetPort(parseInt(e.target.value) || 9489)}
+                            style={{ padding: '6px' }}
+                          />
+                        </div>
+                      </>
+                    )}
 
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => triggerUeAction('handover', {
-                        targetGnbIp: hoTargetIp,
-                        targetGnbPort: hoTargetPort
-                      })}
-                      style={{ padding: '6px 12px', fontSize: '13px' }}
-                    >
-                      Trigger Handover
-                    </button>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => triggerUeAction('handover', {
+                          targetGnbIp: hoTargetIp,
+                          targetGnbPort: hoTargetPort,
+                          targetGnbLinkType: hoTargetLinkType,
+                          targetGnbSocketPath: hoTargetSocketPath
+                        })}
+                        style={{ flex: 1, padding: '6px 12px', fontSize: '13px' }}
+                        disabled={fleetRunning.runningGnbs?.length > 0 && !selectedTargetGnbName}
+                      >
+                        N2 HO
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => triggerUeAction('xn-handover', {
+                          targetGnbIp: hoTargetIp,
+                          targetGnbPort: hoTargetPort,
+                          targetGnbLinkType: hoTargetLinkType,
+                          targetGnbSocketPath: hoTargetSocketPath
+                        })}
+                        style={{ flex: 1, padding: '6px 12px', fontSize: '13px', backgroundColor: 'var(--accent-color)' }}
+                        disabled={fleetRunning.runningGnbs?.length > 0 && !selectedTargetGnbName}
+                      >
+                        Xn HO
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1874,6 +2341,536 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* ─── Fleet Manager Tab ───────────────────────────────────────────── */}
+        {activeTab === 'fleet' && (
+          <div className="view-body fade-in">
+
+            {/* Fleet Toast */}
+            {fleetMsg && (
+              <div className={`fleet-toast ${fleetMsg.type}`}>
+                {fleetMsg.text}
+              </div>
+            )}
+
+            {/* Section Tabs */}
+            <div className="fleet-section-tabs">
+              <button
+                className={`fleet-stab ${fleetActiveSection === 'ue' ? 'active' : ''}`}
+                onClick={() => setFleetActiveSection('ue')}
+              >
+                <Cpu size={14} /> UE Profiles
+                <span className="fleet-badge">{ueProfiles.length}</span>
+              </button>
+              <button
+                className={`fleet-stab ${fleetActiveSection === 'gnb' ? 'active' : ''}`}
+                onClick={() => setFleetActiveSection('gnb')}
+              >
+                <Radio size={14} /> gNB Profiles
+                <span className="fleet-badge">{gnbProfiles.length}</span>
+              </button>
+              <button
+                className={`fleet-stab ${fleetActiveSection === 'live' ? 'active' : ''}`}
+                onClick={() => { setFleetActiveSection('live'); fetchFleetRunning(); }}
+              >
+                <Activity size={14} /> Live Fleet
+                <span className={`fleet-badge ${(fleetRunning.runningUes?.length || 0) + (fleetRunning.runningGnbs?.length || 0) > 0 ? 'active' : ''}`}>
+                  {(fleetRunning.runningUes?.length || 0) + (fleetRunning.runningGnbs?.length || 0)}
+                </span>
+              </button>
+            </div>
+
+            {/* ── UE Profiles Section ── */}
+            {fleetActiveSection === 'ue' && (
+              <div className="fleet-panel">
+                <div className="fleet-panel-header">
+                  <h3><Cpu size={16}/> User Equipment Profiles</h3>
+                  <button className="btn btn-primary btn-sm" onClick={() => { setEditingUE(defaultUEProfile); setShowUEForm(true); }}>
+                    + Add UE Profile
+                  </button>
+                </div>
+                <p className="fleet-hint">Save UE identities here. Each profile is persisted in <code>config/fleet.json</code>. Launch as many as needed simultaneously.</p>
+
+                {/* UE Form Overlay moved to root */}
+
+                {/* Target GNB Selection Overlay moved to root */}
+
+                {/* UE Profiles Table */}
+                {ueProfiles.length === 0 ? (
+                  <div className="fleet-empty">No UE profiles yet. Create one to get started.</div>
+                ) : (
+                  <div className="fleet-table-wrapper">
+                    <table className="fleet-table">
+                      <thead>
+                        <tr>
+                          <th>Name</th><th>IMSI</th><th>Key</th><th>DNN</th><th>Slice</th><th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ueProfiles.map(p => (
+                          <tr key={p.name}>
+                            <td><strong>{p.name}</strong></td>
+                            <td className="mono">{p.hplmn.mcc}{p.hplmn.mnc}{p.msin}</td>
+                            <td className="mono masked">{p.key.substring(0, 8)}···</td>
+                            <td>{p.dnn}</td>
+                            <td>SST:{p.snssai.sst}{p.snssai.sd ? ` SD:${p.snssai.sd}` : ''}</td>
+                            <td>
+                              <div className="fleet-action-btns">
+                                <button className="btn btn-xs btn-success" onClick={() => handleLaunchUEClick(p.name)} title="Launch UE">▶ Launch</button>
+                                <button className="btn btn-xs btn-ghost" onClick={() => duplicateUEProfile(p)} title="Duplicate">📋</button>
+                                <button className="btn btn-xs btn-ghost" onClick={() => { setEditingUE(p); setShowUEForm(true); }} title="Edit">✏</button>
+                                <button className="btn btn-xs btn-danger" onClick={() => deleteUEProfile(p.name)} title="Delete">🗑</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── gNB Profiles Section ── */}
+            {fleetActiveSection === 'gnb' && (
+              <div className="fleet-panel">
+                <div className="fleet-panel-header">
+                  <h3><Radio size={16}/> gNodeB Profiles</h3>
+                  <button className="btn btn-primary btn-sm" onClick={() => { setEditingGNB(defaultGNBProfile); setShowGNBForm(true); }}>
+                    + Add gNB Profile
+                  </button>
+                </div>
+                <p className="fleet-hint">Each gNB profile launches an independent gNodeB with a unique ID that connects to the 5G Core. Multiple gNBs enable handover scenarios.</p>
+
+                {/* GNB Form Overlay moved to root */}
+
+                {/* GNB Profiles Table */}
+                {gnbProfiles.length === 0 ? (
+                  <div className="fleet-empty">No gNB profiles yet. Create one to launch a virtual gNodeB.</div>
+                ) : (
+                  <div className="fleet-table-wrapper">
+                    <table className="fleet-table">
+                      <thead>
+                        <tr>
+                          <th>Name</th><th>gNB-ID</th><th>PLMN</th><th>AMF Target</th><th>Link</th><th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gnbProfiles.map(p => (
+                          <tr key={p.name}>
+                            <td><strong>{p.name}</strong></td>
+                            <td className="mono">{p.gnbId}</td>
+                            <td>{p.mcc}-{p.mnc} TAC:{p.tac}</td>
+                            <td className="mono">{p.amfIp}:{p.amfPort}</td>
+                            <td><span className={`fleet-tag ${p.linkType}`}>{p.linkType.toUpperCase()}</span></td>
+                            <td>
+                              <div className="fleet-action-btns">
+                                <button
+                                  className="btn btn-xs btn-success"
+                                  onClick={() => launchGNBProfile(p.name)}
+                                  disabled={fleetRunning.runningGnbs?.some(g => g.profileName === p.name)}
+                                  title={fleetRunning.runningGnbs?.some(g => g.profileName === p.name) ? 'Already running' : 'Launch gNB'}
+                                >
+                                  {fleetRunning.runningGnbs?.some(g => g.profileName === p.name) ? '● Running' : '▶ Launch'}
+                                </button>
+                                <button className="btn btn-xs btn-ghost" onClick={() => duplicateGNBProfile(p)} title="Duplicate">📋</button>
+                                <button className="btn btn-xs btn-ghost" onClick={() => { setEditingGNB(p); setShowGNBForm(true); }} title="Edit">✏</button>
+                                <button className="btn btn-xs btn-danger" onClick={() => deleteGNBProfile(p.name)} disabled={fleetRunning.runningGnbs?.some(g => g.profileName === p.name)}>🗑</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Live Fleet Section ── */}
+            {fleetActiveSection === 'live' && (
+              <div className="fleet-panel">
+                <div className="fleet-panel-header">
+                  <h3><Activity size={16}/> Live Fleet Status</h3>
+                  <button className="btn btn-ghost btn-sm" onClick={fetchFleetRunning}>
+                    <RefreshCw size={13}/> Refresh
+                  </button>
+                </div>
+
+                <div className="fleet-live-grid">
+                  {/* Active UEs */}
+                  <div className="fleet-live-section">
+                    <h4 className="fleet-live-title">
+                      <Cpu size={14}/> Active User Equipment
+                      <span className="fleet-badge ml-2">{fleetRunning.runningUes?.length || 0}</span>
+                    </h4>
+                    {!fleetRunning.runningUes?.length ? (
+                      <div className="fleet-empty-sm">No active UEs. Launch a UE profile to start.</div>
+                    ) : (
+                      <div className="fleet-ue-cards">
+                        {fleetRunning.runningUes.map(u => (
+                          <div key={u.id} className="fleet-ue-card">
+                            <div className="fleet-ue-card-header">
+                              <span className="fleet-ue-id">UE-{u.id}</span>
+                              <span className={`fleet-state-badge ${u.stateMmDesc.includes('REGISTERED') && !u.stateMmDesc.includes('INIT') ? 'registered' : 'pending'}`}>
+                                {u.stateMmDesc}
+                              </span>
+                              <button className="btn btn-xs btn-danger ml-auto" onClick={() => stopFleetUE(u.id)}>■ Stop</button>
+                            </div>
+                            <div className="fleet-ue-card-body">
+                              <div className="fleet-ue-detail"><span>SUPI</span><code>{u.supi}</code></div>
+                              <div className="fleet-ue-detail"><span>gNB</span><code>{u.gnbControlIp}</code></div>
+                              <div className="fleet-ue-detail"><span>SM State</span><code>{u.stateSmDesc}</code></div>
+                              {u.pduSessions?.length > 0 && (
+                                <div className="fleet-pdu-list">
+                                  {u.pduSessions.map(s => (
+                                    <div key={s.id} className="fleet-pdu-item">
+                                      <span>PDU-{s.id}</span>
+                                      <code>{s.ueIp || '—'}</code>
+                                      <span className="fleet-tag">{s.dnn}</span>
+                                      <span className={`fleet-state-badge sm ${s.stateDesc.includes('ACTIVE') ? 'registered' : 'pending'}`}>{s.stateDesc}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Active gNBs */}
+                  <div className="fleet-live-section">
+                    <h4 className="fleet-live-title">
+                      <Radio size={14}/> Active gNodeBs
+                      <span className="fleet-badge ml-2">{fleetRunning.runningGnbs?.length || 0}</span>
+                    </h4>
+                    {!fleetRunning.runningGnbs?.length ? (
+                      <div className="fleet-empty-sm">No active gNBs. Launch a gNB profile to start.</div>
+                    ) : (
+                      <div className="fleet-gnb-cards">
+                        {fleetRunning.runningGnbs.map(g => (
+                          <div key={g.profileName} className="fleet-gnb-card">
+                            <div className="fleet-gnb-header">
+                              <Radio size={14} className="text-blue"/>
+                              <strong>{g.profileName}</strong>
+                              <span className="fleet-state-badge registered">● RUNNING</span>
+                              <button className="btn btn-xs btn-danger ml-auto" onClick={() => stopFleetGNB(g.profileName)}>■ Stop</button>
+                            </div>
+                            <div className="fleet-gnb-body">
+                              <div className="fleet-ue-detail"><span>gNB-ID</span><code>{g.gnbId}</code></div>
+                              <div className="fleet-ue-detail"><span>Started</span><code>{new Date(g.startedAt).toLocaleTimeString()}</code></div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Handover Control Panel */}
+                {(fleetRunning.runningUes?.length > 0) && (
+                  <div className="fleet-handover-panel">
+                    <h4 className="fleet-live-title"><Layers size={14}/> Handover Control</h4>
+                    <p className="fleet-hint" style={{ margin: '8px 0 12px 0' }}>
+                      Select a registered UE and a target gNodeB cell to trigger N2 or Xn handover procedures.
+                    </p>
+                    <div className="fleet-ho-form">
+                      <div className="form-group" style={{ flex: 1, minWidth: '160px' }}>
+                        <label>UE ID</label>
+                        <select className="form-input" value={controlUeId ?? ''} onChange={e => setControlUeId(Number(e.target.value))}>
+                          <option value="">Select UE</option>
+                          {fleetRunning.runningUes.map(u => (
+                            <option key={u.id} value={u.id}>UE-{u.id} ({u.supi})</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="form-group" style={{ flex: 1, minWidth: '200px' }}>
+                        <label>Target gNB</label>
+                        {fleetRunning.runningGnbs && fleetRunning.runningGnbs.length > 0 ? (
+                          <select
+                            className="form-input"
+                            value={selectedTargetGnbName}
+                            onChange={(e) => {
+                              const name = e.target.value;
+                              setSelectedTargetGnbName(name);
+                              const gnb = fleetRunning.runningGnbs.find(g => g.profileName === name);
+                              if (gnb) {
+                                setHoTargetIp(gnb.controlIp);
+                                setHoTargetPort(gnb.linkPort || 9489);
+                                setHoTargetLinkType(gnb.linkType);
+                                setHoTargetSocketPath(gnb.socketPath || '');
+                              }
+                            }}
+                          >
+                            <option value="">Select Target gNB</option>
+                            {fleetRunning.runningGnbs.map(g => (
+                              <option key={g.profileName} value={g.profileName}>
+                                {g.profileName} ({g.gnbId}) - {g.linkType === 'unix' ? 'UNIX' : `${g.controlIp}:${g.linkPort}`}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input className="form-input" disabled placeholder="No running gNBs" />
+                        )}
+                      </div>
+
+                      <div className="form-group" style={{ flex: '0 0 auto', alignSelf: 'flex-end', display: 'flex', gap: '8px' }}>
+                        <button
+                          className="btn btn-primary"
+                          disabled={!controlUeId || !selectedTargetGnbName}
+                          onClick={async () => {
+                            if (!controlUeId) return;
+                            try {
+                              const res = await fetch(`${API_BASE}/ue/action`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  ueId: controlUeId,
+                                  action: 'handover',
+                                  targetGnbIp: hoTargetIp,
+                                  targetGnbPort: hoTargetPort,
+                                  targetGnbLinkType: hoTargetLinkType,
+                                  targetGnbSocketPath: hoTargetSocketPath
+                                })
+                              });
+                              if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+                              showFleetMsg(`N2 Handover triggered for UE-${controlUeId} → ${selectedTargetGnbName}`, 'success');
+                            } catch(e) { showFleetMsg(`Error: ${e}`, 'error'); }
+                          }}
+                        >
+                          Trigger N2 Handover
+                        </button>
+                        <button
+                          className="btn btn-primary"
+                          style={{ backgroundColor: 'var(--accent-color)' }}
+                          disabled={!controlUeId || !selectedTargetGnbName}
+                          onClick={async () => {
+                            if (!controlUeId) return;
+                            try {
+                              const res = await fetch(`${API_BASE}/ue/action`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  ueId: controlUeId,
+                                  action: 'xn-handover',
+                                  targetGnbIp: hoTargetIp,
+                                  targetGnbPort: hoTargetPort,
+                                  targetGnbLinkType: hoTargetLinkType,
+                                  targetGnbSocketPath: hoTargetSocketPath
+                                })
+                              });
+                              if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+                              showFleetMsg(`Xn Handover triggered for UE-${controlUeId} → ${selectedTargetGnbName}`, 'success');
+                            } catch(e) { showFleetMsg(`Error: ${e}`, 'error'); }
+                          }}
+                        >
+                          Trigger Xn Handover
+                        </button>
+                      </div>
+                    </div>
+                    <div className="fleet-info-box">
+                      <strong>ℹ Handover Support:</strong> Both <strong>N2 Path Switch Handover</strong> (via AMF path switch) and <strong>Xn Handover</strong> (direct peer-to-peer Xn interface signaling followed by path switch) are supported.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+          </div>
+        )}
+      {/* Fleet Form Overlays (Rendered at root layout to prevent transform/clipping side effects) */}
+      {showUEForm && (
+        <div className="fleet-form-overlay">
+          <div className="fleet-form-card">
+            <div className="fleet-form-header">
+              <h4>{editingUE.name && ueProfiles.find(p => p.name === editingUE.name) ? `Edit: ${editingUE.name}` : 'New UE Profile'}</h4>
+              <button className="fleet-form-close" onClick={() => setShowUEForm(false)}>✕</button>
+            </div>
+            <div className="fleet-form-body">
+              <div className="fleet-form-grid">
+                <div className="form-group">
+                  <label>Profile Name *</label>
+                  <input className="form-input" value={editingUE.name} onChange={e => setEditingUE({...editingUE, name: e.target.value})} placeholder="e.g. UE-Alpha" />
+                </div>
+                <div className="form-group">
+                  <label>MSIN (8–10 digits) *</label>
+                  <input className="form-input" value={editingUE.msin} onChange={e => setEditingUE({...editingUE, msin: e.target.value})} placeholder="0000000001" />
+                </div>
+                <div className="form-group">
+                  <label>Key (32 hex chars) *</label>
+                  <input className="form-input" value={editingUE.key} onChange={e => setEditingUE({...editingUE, key: e.target.value})} placeholder="465b5ce8b199b49faa5f0a2ee238a6bc" />
+                </div>
+                <div className="form-group">
+                  <label>OPC (32 hex chars) *</label>
+                  <input className="form-input" value={editingUE.opc} onChange={e => setEditingUE({...editingUE, opc: e.target.value})} placeholder="e8ed289deba952e4283b54e88e6183ca" />
+                </div>
+                <div className="form-group">
+                  <label>AMF (4 hex) *</label>
+                  <input className="form-input" value={editingUE.amf} onChange={e => setEditingUE({...editingUE, amf: e.target.value})} placeholder="8000" />
+                </div>
+                <div className="form-group">
+                  <label>SQN (12 hex) *</label>
+                  <input className="form-input" value={editingUE.sqn} onChange={e => setEditingUE({...editingUE, sqn: e.target.value})} placeholder="000000000000" />
+                </div>
+                <div className="form-group">
+                  <label>HPLMN MCC</label>
+                  <input className="form-input" value={editingUE.hplmn.mcc} onChange={e => setEditingUE({...editingUE, hplmn: {...editingUE.hplmn, mcc: e.target.value}})} placeholder="999" />
+                </div>
+                <div className="form-group">
+                  <label>HPLMN MNC</label>
+                  <input className="form-input" value={editingUE.hplmn.mnc} onChange={e => setEditingUE({...editingUE, hplmn: {...editingUE.hplmn, mnc: e.target.value}})} placeholder="70" />
+                </div>
+                <div className="form-group">
+                  <label>DNN</label>
+                  <input className="form-input" value={editingUE.dnn} onChange={e => setEditingUE({...editingUE, dnn: e.target.value})} placeholder="internet" />
+                </div>
+                <div className="form-group">
+                  <label>PDU Session Type</label>
+                  <select className="form-input" value={editingUE.pduSessionType} onChange={e => setEditingUE({...editingUE, pduSessionType: e.target.value})}>
+                    <option>IPv4</option><option>IPv6</option><option>IPv4v6</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Slice SST</label>
+                  <input className="form-input" type="number" value={editingUE.snssai.sst} onChange={e => setEditingUE({...editingUE, snssai: {...editingUE.snssai, sst: Number(e.target.value)}})} />
+                </div>
+                <div className="form-group">
+                  <label>Slice SD (6 hex, optional)</label>
+                  <input className="form-input" value={editingUE.snssai.sd} onChange={e => setEditingUE({...editingUE, snssai: {...editingUE.snssai, sst: editingUE.snssai.sst, sd: e.target.value}})} placeholder="010203 or empty" />
+                </div>
+              </div>
+            </div>
+            <div className="fleet-form-actions">
+              <button className="btn btn-ghost" onClick={() => setShowUEForm(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveUEProfile}>Save Profile</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {ueToLaunch && (
+        <div className="fleet-form-overlay">
+          <div className="fleet-form-card" style={{ maxWidth: '400px' }}>
+            <div className="fleet-form-header">
+              <h4>Select Target gNodeB</h4>
+              <button className="fleet-form-close" onClick={() => setUeToLaunch(null)}>✕</button>
+            </div>
+            <div className="fleet-form-body" style={{ padding: '20px' }}>
+              <p style={{ marginBottom: '16px', fontSize: '14px', opacity: 0.85 }}>
+                Choose which running gNodeB cell the UE <strong>{ueToLaunch}</strong> should register with:
+              </p>
+              <div className="form-group" style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.7 }}>
+                  Target gNodeB
+                </label>
+                <select 
+                  className="form-input" 
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-main)' }}
+                  value={selectedTargetGnb} 
+                  onChange={e => setSelectedTargetGnb(e.target.value)}
+                >
+                  {fleetRunning.runningGnbs.map(g => (
+                    <option key={g.profileName} value={g.profileName}>
+                      {g.profileName} (gNB-ID: {g.gnbId})
+                    </option>
+                  ))}
+                  <option value="">Default gNodeB (/tmp/gnb.sock)</option>
+                </select>
+              </div>
+            </div>
+            <div className="fleet-form-actions">
+              <button className="btn btn-ghost" onClick={() => setUeToLaunch(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={() => {
+                launchUEProfile(ueToLaunch, selectedTargetGnb);
+                setUeToLaunch(null);
+              }}>
+                Connect & Launch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGNBForm && (
+        <div className="fleet-form-overlay">
+          <div className="fleet-form-card">
+            <div className="fleet-form-header">
+              <h4>{editingGNB.name && gnbProfiles.find(p => p.name === editingGNB.name) ? `Edit: ${editingGNB.name}` : 'New gNB Profile'}</h4>
+              <button className="fleet-form-close" onClick={() => setShowGNBForm(false)}>✕</button>
+            </div>
+            <div className="fleet-form-body">
+              <div className="fleet-form-grid">
+                <div className="form-group">
+                  <label>Profile Name *</label>
+                  <input className="form-input" value={editingGNB.name} onChange={e => setEditingGNB({...editingGNB, name: e.target.value})} placeholder="e.g. gNB-West" />
+                </div>
+                <div className="form-group">
+                  <label>gNB-ID (hex) *</label>
+                  <input className="form-input" value={editingGNB.gnbId} onChange={e => setEditingGNB({...editingGNB, gnbId: e.target.value})} placeholder="000001" />
+                </div>
+                <div className="form-group">
+                  <label>MCC</label>
+                  <input className="form-input" value={editingGNB.mcc} onChange={e => setEditingGNB({...editingGNB, mcc: e.target.value})} placeholder="999" />
+                </div>
+                <div className="form-group">
+                  <label>MNC</label>
+                  <input className="form-input" value={editingGNB.mnc} onChange={e => setEditingGNB({...editingGNB, mnc: e.target.value})} placeholder="70" />
+                </div>
+                <div className="form-group">
+                  <label>TAC</label>
+                  <input className="form-input" value={editingGNB.tac} onChange={e => setEditingGNB({...editingGNB, tac: e.target.value})} placeholder="000001" />
+                </div>
+                <div className="form-group">
+                  <label>Slice SST</label>
+                  <input className="form-input" value={editingGNB.sliceSst} onChange={e => setEditingGNB({...editingGNB, sliceSst: e.target.value})} placeholder="01" />
+                </div>
+                <div className="form-group">
+                  <label>Control IF IP *</label>
+                  <input className="form-input" value={editingGNB.controlIp} onChange={e => setEditingGNB({...editingGNB, controlIp: e.target.value})} placeholder="127.0.0.1" />
+                </div>
+                <div className="form-group">
+                  <label>Control IF Port *</label>
+                  <input className="form-input" type="number" value={editingGNB.controlPort} onChange={e => setEditingGNB({...editingGNB, controlPort: Number(e.target.value)})} />
+                </div>
+                <div className="form-group">
+                  <label>Data IF IP</label>
+                  <input className="form-input" value={editingGNB.dataIp} onChange={e => setEditingGNB({...editingGNB, dataIp: e.target.value})} placeholder="127.0.0.1" />
+                </div>
+                <div className="form-group">
+                  <label>Data IF Port</label>
+                  <input className="form-input" type="number" value={editingGNB.dataPort} onChange={e => setEditingGNB({...editingGNB, dataPort: Number(e.target.value)})} />
+                </div>
+                <div className="form-group">
+                  <label>Link Type</label>
+                  <select className="form-input" value={editingGNB.linkType} onChange={e => setEditingGNB({...editingGNB, linkType: e.target.value})}>
+                    <option value="unix">UNIX Socket</option>
+                    <option value="tcp">TCP</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Link Port *</label>
+                  <input className="form-input" type="number" value={editingGNB.linkPort} onChange={e => setEditingGNB({...editingGNB, linkPort: Number(e.target.value)})} />
+                </div>
+                <div className="form-group">
+                  <label>AMF IP *</label>
+                  <input className="form-input" value={editingGNB.amfIp} onChange={e => setEditingGNB({...editingGNB, amfIp: e.target.value})} placeholder="127.0.0.1" />
+                </div>
+                <div className="form-group">
+                  <label>AMF Port *</label>
+                  <input className="form-input" type="number" value={editingGNB.amfPort} onChange={e => setEditingGNB({...editingGNB, amfPort: Number(e.target.value)})} />
+                </div>
+              </div>
+            </div>
+            <div className="fleet-form-actions">
+              <button className="btn btn-ghost" onClick={() => setShowGNBForm(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveGNBProfile}>Save Profile</button>
+            </div>
+          </div>
+        </div>
+      )}
       </main>
     </div>
   );

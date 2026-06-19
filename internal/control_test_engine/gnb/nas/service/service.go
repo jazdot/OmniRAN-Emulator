@@ -21,11 +21,12 @@ func InitServer(gnb *context.GNBContext) error {
 		log.Infof("[GNB] TCP/NAS service is running on %s", addr)
 	} else {
 		// initiated GNB server with unix sockets.
-		ln, err = net.Listen("unix", "/tmp/gnb.sock")
+		socketPath := gnb.GetSocketPath()
+		ln, err = net.Listen("unix", socketPath)
 		if err != nil {
-			return fmt.Errorf("UNIX Listen error: %v", err)
+			return fmt.Errorf("UNIX Listen error on %s: %v", socketPath, err)
 		}
-		log.Info("[GNB] UNIX/NAS service is running on /tmp/gnb.sock")
+		log.Infof("[GNB] UNIX/NAS service is running on %s", socketPath)
 	}
 
 	gnb.SetListener(ln)

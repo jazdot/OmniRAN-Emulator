@@ -159,8 +159,8 @@ func RegistrationUeMonitor(conf config.Config,
 	// os.Exit(0)
 }
 
-func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort int, targetGnbLinkType string) error {
-	log.Infof("[UE] Initiating Handover to Target GNodeB: %s:%d (LinkType: %s)", targetGnbIp, targetGnbPort, targetGnbLinkType)
+func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort int, targetGnbLinkType string, targetGnbSocketPath string, isXn bool, targetGnbId string, targetGnbName string) error {
+	log.Infof("[UE] Initiating Handover to Target GNodeB: %s:%d (LinkType: %s, SocketPath: %s, isXn: %t, targetGnbId: %s, targetGnbName: %s)", targetGnbIp, targetGnbPort, targetGnbLinkType, targetGnbSocketPath, isXn, targetGnbId, targetGnbName)
 
 	// 1. Establish new connection to Target GNodeB
 	var conn net.Conn
@@ -173,9 +173,13 @@ func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort in
 			return fmt.Errorf("error connecting to Target GNodeB via TCP: %w", err)
 		}
 	} else {
-		conn, err = net.Dial("unix", "/tmp/gnb.sock")
+		socketPath := targetGnbSocketPath
+		if socketPath == "" {
+			socketPath = "/tmp/gnb.sock"
+		}
+		conn, err = net.Dial("unix", socketPath)
 		if err != nil {
-			return fmt.Errorf("error connecting to Target GNodeB via UNIX socket: %w", err)
+			return fmt.Errorf("error connecting to Target GNodeB via UNIX socket %s: %w", socketPath, err)
 		}
 	}
 
@@ -192,11 +196,20 @@ func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort in
 	ue.SetGnbLinkType(targetGnbLinkType)
 	ue.SetGnbLinkPort(targetGnbPort)
 	ue.SetGnbControlIp(targetGnbIp)
+	if targetGnbLinkType == "unix" {
+		ue.SetGnbSocketPath(targetGnbSocketPath)
+	}
+	if targetGnbId != "" {
+		ue.SetGnbId(targetGnbId)
+	}
+	if targetGnbName != "" {
+		ue.SetGnbProfileName(targetGnbName)
+	}
 
 	// 4. Start listening on the new connection
 	go service.UeListen(ue)
 
-	// 5. Send Handover Path Switch Trigger: [0x00, 0x02] [AMF UE ID (8 bytes)] [PDU Session ID (1 byte)]
+	// 5. Send Handover Path Switch Trigger: [0x00, 0x02/0x03] [AMF UE ID (8 bytes)] [PDU Session ID (1 byte)]
 	amfUeId := ue.GetAmfUeId()
 	var pduSessionId uint8 = 1
 	for id := range ue.PduSessions {
@@ -206,7 +219,11 @@ func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort in
 
 	triggerMsg := make([]byte, 11)
 	triggerMsg[0] = 0x00
-	triggerMsg[1] = 0x02
+	if isXn {
+		triggerMsg[1] = 0x03
+	} else {
+		triggerMsg[1] = 0x02
+	}
 	binary.BigEndian.PutUint64(triggerMsg[2:10], uint64(amfUeId))
 	triggerMsg[10] = pduSessionId
 
@@ -215,6 +232,10 @@ func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort in
 		return fmt.Errorf("error writing handover trigger to target GNodeB: %w", err)
 	}
 
-	log.Infof("[UE] Handover trigger sent successfully to target GNodeB. AMF UE ID: %d, PDU Session ID: %d", amfUeId, pduSessionId)
+	if isXn {
+		log.Infof("[UE] Xn Handover trigger sent successfully to target GNodeB. AMF UE ID: %d, PDU Session ID: %d", amfUeId, pduSessionId)
+	} else {
+		log.Infof("[UE] Handover trigger sent successfully to target GNodeB. AMF UE ID: %d, PDU Session ID: %d", amfUeId, pduSessionId)
+	}
 	return nil
 }

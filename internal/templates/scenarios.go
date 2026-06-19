@@ -251,7 +251,7 @@ func ScenarioHandover(targetGnbIp string, targetGnbPort int, delaySec int) {
 
 	// Trigger handover path switch
 	log.Infof("[SCENARIO][STEP 3] Triggering N2 Handover to %s:%d ...", targetGnbIp, targetGnbPort)
-	if err := ue.TriggerHandover(u, targetGnbIp, targetGnbPort, cfg.GNodeB.LinkType); err != nil {
+	if err := ue.TriggerHandover(u, targetGnbIp, targetGnbPort, cfg.GNodeB.LinkType, "", false, "", ""); err != nil {
 		log.Errorf("[SCENARIO] Handover trigger failed: %v", err)
 		log.Warn("[SCENARIO] Note: For inter-gNB handover, start a second gNB instance on the target address/port first.")
 	} else {

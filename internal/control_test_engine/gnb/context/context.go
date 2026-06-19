@@ -51,6 +51,7 @@ type ControlInfo struct {
 	n2           *sctp.SCTPConn
 	linkType     string
 	linkPort     int
+	socketPath   string
 }
 
 func (gnb *GNBContext) NewRanGnbContext(gnbId, mcc, mnc, tac, sst, sd, ip, ipData string, port, portData int) {
@@ -527,4 +528,15 @@ func (gnb *GNBContext) GetLinkPort() int {
 		return 9488
 	}
 	return gnb.controlInfo.linkPort
+}
+
+func (gnb *GNBContext) SetSocketPath(socketPath string) {
+	gnb.controlInfo.socketPath = socketPath
+}
+
+func (gnb *GNBContext) GetSocketPath() string {
+	if gnb.controlInfo.socketPath == "" {
+		return "/tmp/gnb.sock"
+	}
+	return gnb.controlInfo.socketPath
 }
