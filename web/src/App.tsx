@@ -2936,7 +2936,7 @@ export default function App() {
                                 <span style={{ marginBottom: '4px' }}>Connected UEs ({g.connectedUes?.length || 0})</span>
                                 {g.connectedUes && g.connectedUes.length > 0 ? (
                                   <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                                    {g.connectedUes.map(ue => (
+                                    {g.connectedUes.map((ue: string) => (
                                       <span key={ue} className="fleet-tag" style={{ margin: 0 }}>{ue}</span>
                                     ))}
                                   </div>
