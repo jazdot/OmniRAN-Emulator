@@ -517,10 +517,10 @@ button.status-badge.theme-badge:hover {
 }
 
 .topology-canvas {
-  height: 380px;
+  height: 480px;
   border: 1px dashed rgba(255, 255, 255, 0.05);
   border-radius: 12px;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.25);
   display: flex;
   align-items: center;
   justify-content: space-around;
@@ -555,6 +555,7 @@ button.status-badge.theme-badge:hover {
 .node-icon-wrapper {
   width: 64px;
   height: 64px;
+  flex-shrink: 0;
   border-radius: 50%;
   background: rgba(15, 23, 42, 0.8);
   border: 2px solid var(--border-color);
@@ -1739,10 +1740,25 @@ body.light .fleet-toast.error { background: rgba(220, 38, 38, 0.1); color: #dc26
   box-shadow: 0 0 16px var(--node-color-glow), 0 0 0 2px var(--bg-primary), 0 0 0 4px #3b82f6 !important;
 }
 
-.topology-node.clickable-node:hover {
+/* Direct absolute children fallback */
+.topology-canvas > .topology-node.clickable-node:hover {
   transform: translate(-50%, -50%) scale(1.08) !important;
 }
 
-.topology-node.clickable-node:active {
+.topology-canvas > .topology-node.clickable-node:active {
   transform: translate(-50%, -50%) scale(0.96) !important;
+}
+
+/* SVG foreignObject nodes */
+foreignObject .topology-node.clickable-node {
+  transform-origin: 50% 100px;
+  transition: transform var(--transition-fast);
+}
+
+foreignObject .topology-node.clickable-node:hover {
+  transform: scale(1.08) !important;
+}
+
+foreignObject .topology-node.clickable-node:active {
+  transform: scale(0.96) !important;
 }

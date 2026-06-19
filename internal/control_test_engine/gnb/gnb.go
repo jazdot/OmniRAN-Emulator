@@ -234,8 +234,9 @@ func InitGnbForAvaibility(conf config.Config,
 // The gnbSocketPath allows specifying a unique socket to avoid conflicts between
 // multiple gNBs running simultaneously (e.g. /tmp/gnb_<gnbId>.sock).
 // The returned channel will receive an error (or nil) when the gNB exits.
-func InitGnbFleet(conf config.Config, ctx stdctx.Context, gnbSocketPath string) <-chan error {
+func InitGnbFleet(conf config.Config, ctx stdctx.Context, gnbSocketPath string) (*gnbContext.GNBContext, <-chan error) {
 	errCh := make(chan error, 1)
+	g := &gnbContext.GNBContext{}
 
 	go func() {
 		defer close(errCh)
@@ -246,8 +247,6 @@ func InitGnbFleet(conf config.Config, ctx stdctx.Context, gnbSocketPath string) 
 			_ = os.Remove(gnbSocketPath)
 		}
 
-		// instance new gnb
-		g := &gnbContext.GNBContext{}
 		if gnbSocketPath != "" {
 			g.SetSocketPath(gnbSocketPath)
 		}
@@ -296,5 +295,5 @@ func InitGnbFleet(conf config.Config, ctx stdctx.Context, gnbSocketPath string) 
 		errCh <- nil
 	}()
 
-	return errCh
+	return g, errCh
 }

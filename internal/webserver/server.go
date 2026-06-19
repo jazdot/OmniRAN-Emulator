@@ -293,10 +293,10 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fetch active UEs status
 	runningUEs := make([]UEStatus, 0)
 	ues := ueContext.GetAllActiveUEs()
 	for _, u := range ues {
+		resolveUeConnectionDetails(u)
 		pduSessions := make([]PDUSessionStatus, 0)
 		for _, sess := range u.PduSessions {
 			pduSessions = append(pduSessions, PDUSessionStatus{
@@ -686,6 +686,7 @@ func handleActiveUEs(w http.ResponseWriter, r *http.Request) {
 	resp := make([]UEStatus, 0)
 
 	for _, u := range ues {
+		resolveUeConnectionDetails(u)
 		pduSessions := make([]PDUSessionStatus, 0)
 		for _, sess := range u.PduSessions {
 			pduSessions = append(pduSessions, PDUSessionStatus{

@@ -102,6 +102,7 @@ interface RunningUE {
   gnbControlIp: string;
   gnbId?: string;
   gnbProfileName?: string;
+  amfUeNgapId?: number;
   pduSessions: { id: number; ueIp: string; dnn: string; stateDesc: string }[];
 }
 
@@ -123,7 +124,7 @@ export default function App() {
     return (saved === 'dark' || saved === 'light') ? saved : 'light';
   });
   const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity' | 'fleet'>('dashboard');
-  const [selectedNode, setSelectedNode] = useState<'ue' | 'gnb' | 'core' | null>('ue');
+  const [selectedNode, setSelectedNode] = useState<'ue' | 'gnb' | 'amf' | 'upf' | 'dn' | 'uu-link' | 'n2-link' | 'n3-link' | 'n6-link' | null>('ue');
 
   const [showBanners, setShowBanners] = useState(true);
   const [bannerFade, setBannerFade] = useState(false);
@@ -275,12 +276,16 @@ export default function App() {
           <stop offset="100%" stopColor="#6366f1" />
         </linearGradient>
         <linearGradient id="n2-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#6366f1" stopOpacity="0.4" />
-          <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.4" />
+          <stop offset="0%" stopColor="#6366f1" stopOpacity="0.8" />
+          <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.8" />
         </linearGradient>
         <linearGradient id="n3-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#6366f1" />
-          <stop offset="100%" stopColor="#8b5cf6" />
+          <stop offset="0%" stopColor="#6366f1" stopOpacity="0.8" />
+          <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.8" />
+        </linearGradient>
+        <linearGradient id="n6-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#3b82f6" />
+          <stop offset="100%" stopColor="#06b6d4" />
         </linearGradient>
         <filter id="glow-filter" x="-20%" y="-20%" width="140%" height="140%">
           <feGaussianBlur stdDeviation="3" result="blur" />
@@ -290,103 +295,394 @@ export default function App() {
     );
     links.push(defs);
 
+    const renderBadge = (key: string, midX: number, midY: number, label: string, type: 'uu-link' | 'n2-link' | 'n3-link' | 'n6-link', color: string, active: boolean, onClick: () => void) => {
+      const isSelected = selectedNode === type;
+      return (
+        <g key={`badge-${key}`} style={{ pointerEvents: 'auto', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+          <rect
+            x={midX - 45}
+            y={midY - 10}
+            width="90"
+            height="20"
+            rx="10"
+            fill="rgba(15, 23, 42, 0.95)"
+            stroke={isSelected ? '#3b82f6' : active ? color : '#334155'}
+            strokeWidth={isSelected ? 2 : 1}
+            filter={active ? "url(#glow-filter)" : ""}
+            style={{ transition: 'all 0.2s' }}
+          />
+          <text
+            x={midX}
+            y={midY + 4}
+            textAnchor="middle"
+            fill={active ? "#ffffff" : "#94a3b8"}
+            fontSize="9"
+            fontWeight="bold"
+            fontFamily="monospace"
+          >
+            {label}
+          </text>
+        </g>
+      );
+    };
+
     if (totalGnbs === 0) {
-      const isCoreActive = status?.gnbLinkState && status.gnbLinkState !== 'offline';
-      const strokeColor = isCoreActive ? '#8b5cf6' : '#334155';
+      const isGnbActive = !!(status?.gnbLinkState && status.gnbLinkState !== 'offline');
+      const strokeN2 = isGnbActive ? 'url(#n2-grad)' : '#334155';
       links.push(
         <g key="def-n2">
-          <line x1="500" y1="285" x2="850" y2="285" stroke={strokeColor} strokeWidth="3" strokeDasharray="5,5" />
-          {isCoreActive && (
-            <circle r="5" fill="#a78bfa" filter="url(#glow-filter)">
-              <animate attributeName="cx" from="500" to="850" dur="3s" repeatCount="indefinite" />
-              <animate attributeName="cy" from="285" to="285" dur="3s" repeatCount="indefinite" />
+          <path d="M 530 288 C 610 288, 700 200, 788 200" fill="none" stroke={strokeN2} strokeWidth="3" strokeDasharray={isGnbActive ? "none" : "4,4"} opacity={isGnbActive ? 1 : 0.4} />
+          {isGnbActive && (
+            <circle r="4" fill="#a78bfa" filter="url(#glow-filter)">
+              <animateMotion dur="3s" repeatCount="indefinite" path="M 530 288 C 610 288, 700 200, 788 200" />
             </circle>
           )}
         </g>
       );
-      const isDataActive = status?.isRunning && activeUEs.some(ue => ue.pduSessions && ue.pduSessions.some((s: any) => s.stateDesc?.includes('ACTIVE')));
-      const strokeDataColor = isDataActive ? '#3b82f6' : '#334155';
+      links.push(renderBadge('def-n2', 660, 244, 'N2 (NGAP)', 'n2-link', '#8b5cf6', isGnbActive, () => setSelectedNode('n2-link')));
+
+      const hasActiveSession = activeUEs.some(ue => ue.pduSessions && ue.pduSessions.some((s: any) => s.stateDesc?.includes('ACTIVE')));
+      const strokeN3 = hasActiveSession ? 'url(#n3-grad)' : '#334155';
       links.push(
         <g key="def-n3">
-          <line x1="500" y1="315" x2="850" y2="315" stroke={strokeDataColor} strokeWidth="3" />
-          {isDataActive && (
-            <circle r="5" fill="#60a5fa" filter="url(#glow-filter)">
-              <animate attributeName="cx" from="500" to="850" dur="2s" repeatCount="indefinite" />
-              <animate attributeName="cy" from="315" to="315" dur="2s" repeatCount="indefinite" />
+          <path d="M 530 312 C 610 312, 700 400, 788 400" fill="none" stroke={strokeN3} strokeWidth="3" opacity={hasActiveSession ? 1 : 0.4} />
+          {hasActiveSession && (
+            <circle r="4" fill="#60a5fa" filter="url(#glow-filter)">
+              <animateMotion dur="2.5s" repeatCount="indefinite" path="M 530 312 C 610 312, 700 400, 788 400" />
             </circle>
           )}
         </g>
       );
-    } else {
-      gnbs.forEach((g, gIdx) => {
-        const gy = (gIdx + 1) * 600 / (totalGnbs + 1);
-        links.push(
-          <g key={`n2-${g.profileName}`}>
-            <line x1="500" y1={gy - 15} x2="850" y2="285" stroke="url(#n2-grad)" strokeWidth="2.5" strokeDasharray="4,4" />
-            <circle r="4" fill="#c084fc" filter="url(#glow-filter)">
-              <animate attributeName="cx" from="500" to="850" dur="2.5s" repeatCount="indefinite" />
-              <animate attributeName="cy" from={gy - 15} to="285" dur="2.5s" repeatCount="indefinite" />
+      links.push(renderBadge('def-n3', 660, 356, 'N3 (GTP-U)', 'n3-link', '#3b82f6', hasActiveSession, () => setSelectedNode('n3-link')));
+
+      const strokeN6 = hasActiveSession ? 'url(#n6-grad)' : '#334155';
+      links.push(
+        <g key="def-n6">
+          <line x1="852" y1="400" x2="908" y2="400" stroke={strokeN6} strokeWidth="3" opacity={hasActiveSession ? 1 : 0.4} />
+          {hasActiveSession && (
+            <circle r="4" fill="#06b6d4" filter="url(#glow-filter)">
+              <animate attributeName="cx" from="852" to="908" dur="2s" repeatCount="indefinite" />
+              <animate attributeName="cy" from="400" to="400" dur="2s" repeatCount="indefinite" />
             </circle>
-          </g>
-        );
+          )}
+        </g>
+      );
+      links.push(renderBadge('def-n6', 880, 400, 'N6 (SGi)', 'n6-link', '#06b6d4', hasActiveSession, () => setSelectedNode('n6-link')));
 
-        const hasActiveSession = ues.some(u => u.gnbProfileName === g.profileName && u.pduSessions && u.pduSessions.some(s => s.stateDesc?.includes('ACTIVE')));
-        const strokeColor = hasActiveSession ? 'url(#n3-grad)' : '#334155';
-        links.push(
-          <g key={`n3-${g.profileName}`}>
-            <line x1="500" y1={gy + 15} x2="850" y2="315" stroke={strokeColor} strokeWidth="3" opacity={hasActiveSession ? 1 : 0.4} />
-            {hasActiveSession && (
-              <circle r="5" fill="#60a5fa" filter="url(#glow-filter)">
-                <animate attributeName="cx" from="500" to="850" dur="1.8s" repeatCount="indefinite" />
-                <animate attributeName="cy" from={gy + 15} to="315" dur="1.8s" repeatCount="indefinite" />
-              </circle>
-            )}
-          </g>
-        );
-      });
-    }
-
-    if (totalUes === 0) {
-      const isUeActive = status?.isRunning;
-      const strokeColor = isUeActive ? 'url(#uu-grad)' : '#334155';
+      const isUeActive = !!status?.isRunning || activeUEs.length > 0;
+      const strokeUu = isUeActive ? 'url(#uu-grad)' : '#334155';
       links.push(
         <g key="def-uu">
-          <line x1="150" y1="300" x2="500" y2="300" stroke={strokeColor} strokeWidth="3" />
+          <line x1="182" y1="300" x2="468" y2="300" stroke={strokeUu} strokeWidth="3" opacity={isUeActive ? 1 : 0.4} />
           {isUeActive && (
             <circle r="5" fill="#34d399" filter="url(#glow-filter)">
-              <animate attributeName="cx" from="150" to="500" dur="2s" repeatCount="indefinite" />
+              <animate attributeName="cx" from="182" to="468" dur="2s" repeatCount="indefinite" />
               <animate attributeName="cy" from="300" to="300" dur="2s" repeatCount="indefinite" />
             </circle>
           )}
         </g>
       );
+      links.push(renderBadge('def-uu', 325, 300, 'Uu (5G-NR)', 'uu-link', '#10b981', isUeActive, () => setSelectedNode('uu-link')));
+
     } else {
+      gnbs.forEach((g, gIdx) => {
+        const gy = (gIdx + 1) * 600 / (totalGnbs + 1);
+        
+        links.push(
+          <g key={`n2-${g.profileName}`}>
+            <path d={`M 530 ${gy - 12} C 610 ${gy - 12}, 700 200, 788 200`} fill="none" stroke="url(#n2-grad)" strokeWidth="2.5" strokeDasharray="3,3" />
+            <circle r="3.5" fill="#c084fc" filter="url(#glow-filter)">
+              <animateMotion dur="3s" repeatCount="indefinite" path={`M 530 ${gy - 12} C 610 ${gy - 12}, 700 200, 788 200`} />
+            </circle>
+          </g>
+        );
+        const n2MidY = (gy - 12 + 200) / 2;
+        links.push(renderBadge(`n2-${g.profileName}`, 660, n2MidY, `N2 (${g.gnbId})`, 'n2-link', '#8b5cf6', true, () => {
+          setSelectedNode('n2-link');
+          setSelectedGnbName(g.profileName);
+        }));
+
+        const gnbHasActiveSession = ues.some(u => u.gnbProfileName === g.profileName && u.pduSessions && u.pduSessions.some(s => s.stateDesc?.includes('ACTIVE')));
+        const strokeN3 = gnbHasActiveSession ? 'url(#n3-grad)' : '#334155';
+        links.push(
+          <g key={`n3-${g.profileName}`}>
+            <path d={`M 530 ${gy + 12} C 610 ${gy + 12}, 700 400, 788 400`} fill="none" stroke={strokeN3} strokeWidth="3" opacity={gnbHasActiveSession ? 1 : 0.4} />
+            {gnbHasActiveSession && (
+              <circle r="4" fill="#60a5fa" filter="url(#glow-filter)">
+                <animateMotion dur="2.2s" repeatCount="indefinite" path={`M 530 ${gy + 12} C 610 ${gy + 12}, 700 400, 788 400`} />
+              </circle>
+            )}
+          </g>
+        );
+        const n3MidY = (gy + 12 + 400) / 2;
+        links.push(renderBadge(`n3-${g.profileName}`, 660, n3MidY, 'N3 (GTP-U)', 'n3-link', '#3b82f6', gnbHasActiveSession, () => {
+          setSelectedNode('n3-link');
+          setSelectedGnbName(g.profileName);
+        }));
+      });
+
+      const hasAnyActiveSession = ues.some(u => u.pduSessions && u.pduSessions.some(s => s.stateDesc?.includes('ACTIVE')));
+      const strokeN6 = hasAnyActiveSession ? 'url(#n6-grad)' : '#334155';
+      links.push(
+        <g key="fleet-n6">
+          <line x1="852" y1="400" x2="908" y2="400" stroke={strokeN6} strokeWidth="3" opacity={hasAnyActiveSession ? 1 : 0.4} />
+          {hasAnyActiveSession && (
+            <circle r="4" fill="#06b6d4" filter="url(#glow-filter)">
+              <animate attributeName="cx" from="852" to="908" dur="2s" repeatCount="indefinite" />
+              <animate attributeName="cy" from="400" to="400" dur="2s" repeatCount="indefinite" />
+            </circle>
+          )}
+        </g>
+      );
+      links.push(renderBadge('fleet-n6', 880, 400, 'N6 (SGi)', 'n6-link', '#06b6d4', hasAnyActiveSession, () => setSelectedNode('n6-link')));
+
       ues.forEach((u, uIdx) => {
         const uy = (uIdx + 1) * 600 / (totalUes + 1);
         let targetGy = 300;
+
         if (totalGnbs > 0) {
           const gIdx = gnbs.findIndex(g => g.profileName === u.gnbProfileName);
           if (gIdx !== -1) {
             targetGy = (gIdx + 1) * 600 / (totalGnbs + 1);
+          } else {
+            targetGy = 1 * 600 / (totalGnbs + 1);
           }
         }
+
         const isRegistered = u.stateMmDesc?.includes('REGISTERED');
         const strokeColor = isRegistered ? 'url(#uu-grad)' : '#f59e0b';
         links.push(
           <g key={`uu-${u.id}`}>
-            <line x1="150" y1={uy} x2="500" y2={targetGy} stroke={strokeColor} strokeWidth="3" opacity="0.9" />
+            <line x1="182" y1={uy} x2="468" y2={targetGy} stroke={strokeColor} strokeWidth="3" opacity="0.95" />
             {isRegistered && (
-              <circle r="5" fill="#34d399" filter="url(#glow-filter)">
-                <animate attributeName="cx" from="150" to="500" dur="2s" repeatCount="indefinite" />
+              <circle r="4" fill="#34d399" filter="url(#glow-filter)">
+                <animate attributeName="cx" from="182" to="468" dur="2s" repeatCount="indefinite" />
                 <animate attributeName="cy" from={uy} to={targetGy} dur="2s" repeatCount="indefinite" />
               </circle>
             )}
           </g>
         );
+
+        const uuMidX = (182 + 468) / 2;
+        const uuMidY = (uy + targetGy) / 2;
+        links.push(renderBadge(`uu-${u.id}`, uuMidX, uuMidY, `Uu (UE-${u.id})`, 'uu-link', '#10b981', isRegistered, () => {
+          setSelectedNode('uu-link');
+          setSelectedUeId(u.id);
+        }));
       });
     }
 
     return links;
+  };
+
+  const renderSvgNodes = () => {
+    const gnbs = status?.runningGnbs || [];
+    const ues = status?.runningUes || [];
+    const totalGnbs = gnbs.length;
+    const totalUes = ues.length;
+    const nodes: React.ReactNode[] = [];
+
+    if (totalUes === 0) {
+      nodes.push(
+        <foreignObject key="def-ue" x={150 - 60} y={300 - 100} width="120" height="200" style={{ pointerEvents: 'none' }}>
+          <div 
+            className={`topology-node clickable-node active ${selectedNode === 'ue' ? 'selected' : ''}`} 
+            onClick={() => {
+              setSelectedNode('ue');
+              setSelectedUeId(null);
+            }}
+            style={{ 
+              pointerEvents: 'auto',
+              height: '100%',
+              paddingTop: '68px',
+              boxSizing: 'border-box',
+              '--node-color': '#10b981',
+              '--node-color-glow': 'rgba(16, 185, 129, 0.2)'
+            } as React.CSSProperties}
+          >
+            <div className="node-icon-wrapper">
+              <Cpu />
+            </div>
+            <span className="node-label">User Equipment</span>
+            <span className="node-status-text">
+              {status?.isRunning || activeUEs.length > 0 ? 'CONNECTED' : 'IDLE'}
+            </span>
+          </div>
+        </foreignObject>
+      );
+    } else {
+      ues.forEach((u, idx) => {
+        const uy = (idx + 1) * 600 / (totalUes + 1);
+        const isRegistered = u.stateMmDesc?.includes('REGISTERED');
+        const isSelected = selectedNode === 'ue' && selectedUeId === u.id;
+        nodes.push(
+          <foreignObject key={`ue-${u.id}`} x={150 - 60} y={uy - 100} width="120" height="200" style={{ pointerEvents: 'none' }}>
+            <div 
+              className={`topology-node clickable-node active ${isSelected ? 'selected' : ''}`} 
+              onClick={() => {
+                setSelectedNode('ue');
+                setSelectedUeId(u.id);
+              }}
+              style={{ 
+                pointerEvents: 'auto',
+                height: '100%',
+                paddingTop: '68px',
+                boxSizing: 'border-box',
+                '--node-color': isRegistered ? '#10b981' : '#f59e0b',
+                '--node-color-glow': isRegistered ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'
+              } as React.CSSProperties}
+            >
+              <div className="node-icon-wrapper">
+                <Cpu />
+              </div>
+              <span className="node-label">UE-{u.id}</span>
+              <span className="node-status-text">
+                {isRegistered ? 'REGISTERED' : 'PENDING'}
+              </span>
+            </div>
+          </foreignObject>
+        );
+      });
+    }
+
+    if (totalGnbs === 0) {
+      nodes.push(
+        <foreignObject key="def-gnb" x={500 - 60} y={300 - 100} width="120" height="200" style={{ pointerEvents: 'none' }}>
+          <div
+            className={`topology-node clickable-node ${status?.gnbLinkState !== 'offline' ? 'active' : ''} ${selectedNode === 'gnb' ? 'selected' : ''}`}
+            onClick={() => {
+              setSelectedNode('gnb');
+              setSelectedGnbName(null);
+            }}
+            style={{ 
+              pointerEvents: 'auto',
+              height: '100%',
+              paddingTop: '68px',
+              boxSizing: 'border-box',
+              '--node-color': '#6366f1',
+              '--node-color-glow': 'rgba(99, 102, 241, 0.2)'
+            } as React.CSSProperties}
+          >
+            <div className="node-icon-wrapper">
+              <Radio />
+            </div>
+            <span className="node-label">gNodeB Cell</span>
+            <span className="node-status-text">
+              {status?.gnbLinkState !== 'offline' ? 'ESTABLISHED' : 'OFFLINE'}
+            </span>
+          </div>
+        </foreignObject>
+      );
+    } else {
+      gnbs.forEach((g, idx) => {
+        const gy = (idx + 1) * 600 / (totalGnbs + 1);
+        const isSelected = selectedNode === 'gnb' && selectedGnbName === g.profileName;
+        nodes.push(
+          <foreignObject key={`gnb-${g.profileName}`} x={500 - 60} y={gy - 100} width="120" height="200" style={{ pointerEvents: 'none' }}>
+            <div
+              className={`topology-node clickable-node active ${isSelected ? 'selected' : ''}`}
+              onClick={() => {
+                setSelectedNode('gnb');
+                setSelectedGnbName(g.profileName);
+              }}
+              style={{ 
+                pointerEvents: 'auto',
+                height: '100%',
+                paddingTop: '68px',
+                boxSizing: 'border-box',
+                '--node-color': '#6366f1',
+                '--node-color-glow': 'rgba(99, 102, 241, 0.2)'
+              } as React.CSSProperties}
+            >
+              <div className="node-icon-wrapper">
+                <Radio />
+              </div>
+              <span className="node-label">{g.profileName}</span>
+              <span className="node-status-text" style={{ fontSize: '10px' }}>
+                ID: {g.gnbId}
+              </span>
+            </div>
+          </foreignObject>
+        );
+      });
+    }
+
+    nodes.push(
+      <foreignObject key="amf-node" x={820 - 60} y={200 - 100} width="120" height="200" style={{ pointerEvents: 'none' }}>
+        <div
+          className={`topology-node clickable-node ${status?.gnbLinkState !== 'offline' || totalGnbs > 0 ? 'active' : ''} ${selectedNode === 'amf' ? 'selected' : ''}`}
+          onClick={() => setSelectedNode('amf')}
+          style={{ 
+            pointerEvents: 'auto',
+            height: '100%',
+            paddingTop: '68px',
+            boxSizing: 'border-box',
+            '--node-color': '#8b5cf6',
+            '--node-color-glow': 'rgba(139, 92, 246, 0.2)'
+          } as React.CSSProperties}
+        >
+          <div className="node-icon-wrapper">
+            <Server />
+          </div>
+          <span className="node-label">AMF Core</span>
+          <span className="node-status-text">
+            {status?.gnbLinkState !== 'offline' || totalGnbs > 0 ? 'ACTIVE' : 'OFFLINE'}
+          </span>
+        </div>
+      </foreignObject>
+    );
+
+    nodes.push(
+      <foreignObject key="upf-node" x={820 - 60} y={400 - 100} width="120" height="200" style={{ pointerEvents: 'none' }}>
+        <div
+          className={`topology-node clickable-node ${status?.gnbLinkState !== 'offline' || totalGnbs > 0 ? 'active' : ''} ${selectedNode === 'upf' ? 'selected' : ''}`}
+          onClick={() => setSelectedNode('upf')}
+          style={{ 
+            pointerEvents: 'auto',
+            height: '100%',
+            paddingTop: '68px',
+            boxSizing: 'border-box',
+            '--node-color': '#3b82f6',
+            '--node-color-glow': 'rgba(59, 130, 246, 0.2)'
+          } as React.CSSProperties}
+        >
+          <div className="node-icon-wrapper">
+            <Network />
+          </div>
+          <span className="node-label">UPF Gateway</span>
+          <span className="node-status-text">
+            {status?.gnbLinkState !== 'offline' || totalGnbs > 0 ? 'ACTIVE' : 'OFFLINE'}
+          </span>
+        </div>
+      </foreignObject>
+    );
+
+    nodes.push(
+      <foreignObject key="dn-node" x={940 - 60} y={400 - 100} width="120" height="200" style={{ pointerEvents: 'none' }}>
+        <div
+          className={`topology-node clickable-node active ${selectedNode === 'dn' ? 'selected' : ''}`}
+          onClick={() => setSelectedNode('dn')}
+          style={{ 
+            pointerEvents: 'auto',
+            height: '100%',
+            paddingTop: '68px',
+            boxSizing: 'border-box',
+            '--node-color': '#06b6d4',
+            '--node-color-glow': 'rgba(6, 182, 212, 0.2)'
+          } as React.CSSProperties}
+        >
+          <div className="node-icon-wrapper">
+            <Globe />
+          </div>
+          <span className="node-label">DN (Internet)</span>
+          <span className="node-status-text">
+            ONLINE
+          </span>
+        </div>
+      </foreignObject>
+    );
+
+    return nodes;
   };
 
   const getActiveUeToInspect = () => {
@@ -1231,157 +1527,10 @@ export default function App() {
               <div className="topology-layout">
                 {/* Left side: Canvas */}
                 <div className="topology-canvas" style={{ position: 'relative' }}>
-                  {(() => {
-                    const totalGnbs = status?.runningGnbs?.length || 0;
-                    const totalUes = status?.runningUes?.length || 0;
-                    return (
-                      <>
-                        {/* SVG Links Layer */}
-                        <svg className="topology-svg" viewBox="0 0 1000 600" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
-                          {renderSvgLinks()}
-                        </svg>
-
-                        {/* UE Nodes */}
-                        {totalUes === 0 ? (
-                          <div 
-                            className={`topology-node clickable-node active ${selectedNode === 'ue' ? 'selected' : ''}`} 
-                            onClick={() => {
-                              setSelectedNode('ue');
-                              setSelectedUeId(null);
-                            }}
-                            style={{ 
-                              position: 'absolute',
-                              left: '15%',
-                              top: '50%',
-                              transform: 'translate(-50%, -50%)',
-                              '--node-color': '#10b981',
-                              '--node-color-glow': 'rgba(16, 185, 129, 0.2)'
-                            } as React.CSSProperties}
-                          >
-                            <div className="node-icon-wrapper">
-                              <Cpu />
-                            </div>
-                            <span className="node-label">User Equipment</span>
-                            <span className="node-status-text">
-                              {status?.isRunning || activeUEs.length > 0 ? 'CONNECTED' : 'IDLE'}
-                            </span>
-                          </div>
-                        ) : (
-                          status?.runningUes?.map((u, idx) => {
-                            const topPercent = `${(idx + 1) * 100 / (totalUes + 1)}%`;
-                            const isRegistered = u.stateMmDesc?.includes('REGISTERED');
-                            const isSelected = selectedNode === 'ue' && selectedUeId === u.id;
-                            return (
-                              <div 
-                                key={u.id}
-                                className={`topology-node clickable-node active ${isSelected ? 'selected' : ''}`} 
-                                onClick={() => {
-                                  setSelectedNode('ue');
-                                  setSelectedUeId(u.id);
-                                }}
-                                style={{ 
-                                  position: 'absolute',
-                                  left: '15%',
-                                  top: topPercent,
-                                  transform: 'translate(-50%, -50%)',
-                                  '--node-color': isRegistered ? '#10b981' : '#f59e0b',
-                                  '--node-color-glow': isRegistered ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'
-                                } as React.CSSProperties}
-                              >
-                                <div className="node-icon-wrapper">
-                                  <Cpu />
-                                </div>
-                                <span className="node-label">UE-{u.id}</span>
-                                <span className="node-status-text">
-                                  {isRegistered ? 'REGISTERED' : 'PENDING'}
-                                </span>
-                              </div>
-                            );
-                          })
-                        )}
-
-                        {/* gNodeB Nodes */}
-                        {totalGnbs === 0 ? (
-                          <div
-                            className={`topology-node clickable-node ${status?.gnbLinkState !== 'offline' ? 'active' : ''} ${selectedNode === 'gnb' ? 'selected' : ''}`}
-                            onClick={() => {
-                              setSelectedNode('gnb');
-                              setSelectedGnbName(null);
-                            }}
-                            style={{ 
-                              position: 'absolute',
-                              left: '50%',
-                              top: '50%',
-                              transform: 'translate(-50%, -50%)',
-                              '--node-color': '#6366f1',
-                              '--node-color-glow': 'rgba(99, 102, 241, 0.2)'
-                            } as React.CSSProperties}
-                          >
-                            <div className="node-icon-wrapper">
-                              <Radio />
-                            </div>
-                            <span className="node-label">gNodeB Cell</span>
-                            <span className="node-status-text">
-                              {status?.gnbLinkState !== 'offline' ? 'ESTABLISHED' : 'OFFLINE'}
-                            </span>
-                          </div>
-                        ) : (
-                          status?.runningGnbs?.map((g, idx) => {
-                            const topPercent = `${(idx + 1) * 100 / (totalGnbs + 1)}%`;
-                            const isSelected = selectedNode === 'gnb' && selectedGnbName === g.profileName;
-                            return (
-                              <div
-                                key={g.profileName}
-                                className={`topology-node clickable-node active ${isSelected ? 'selected' : ''}`}
-                                onClick={() => {
-                                  setSelectedNode('gnb');
-                                  setSelectedGnbName(g.profileName);
-                                }}
-                                style={{ 
-                                  position: 'absolute',
-                                  left: '50%',
-                                  top: topPercent,
-                                  transform: 'translate(-50%, -50%)',
-                                  '--node-color': '#6366f1',
-                                  '--node-color-glow': 'rgba(99, 102, 241, 0.2)'
-                                } as React.CSSProperties}
-                              >
-                                <div className="node-icon-wrapper">
-                                  <Radio />
-                                </div>
-                                <span className="node-label">{g.profileName}</span>
-                                <span className="node-status-text" style={{ fontSize: '10px' }}>
-                                  ID: {g.gnbId}
-                                </span>
-                              </div>
-                            );
-                          })
-                        )}
-
-                        {/* 5G Core Node */}
-                        <div
-                          className={`topology-node clickable-node ${status?.gnbLinkState !== 'offline' || totalGnbs > 0 ? 'active' : ''} ${selectedNode === 'core' ? 'selected' : ''}`}
-                          onClick={() => setSelectedNode('core')}
-                          style={{ 
-                            position: 'absolute',
-                            left: '85%',
-                            top: '50%',
-                            transform: 'translate(-50%, -50%)',
-                            '--node-color': '#8b5cf6',
-                            '--node-color-glow': 'rgba(139, 92, 246, 0.2)'
-                          } as React.CSSProperties}
-                        >
-                          <div className="node-icon-wrapper">
-                            <Server />
-                          </div>
-                          <span className="node-label">5G Core (AMF/UPF)</span>
-                          <span className="node-status-text">
-                            {status?.gnbLinkState !== 'offline' || totalGnbs > 0 ? 'REACHABLE' : 'DISCONNECTED'}
-                          </span>
-                        </div>
-                      </>
-                    );
-                  })()}
+                  <svg className="topology-svg" viewBox="0 0 1000 600" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+                    {renderSvgLinks()}
+                    {renderSvgNodes()}
+                  </svg>
                 </div>
 
                 {/* Right side: Inspector Panel */}
@@ -1620,31 +1769,185 @@ export default function App() {
                     );
                   })()}
 
-                  {selectedNode === 'core' && (
+                  {selectedNode === 'amf' && (
                     <>
                       <h4 className="inspector-title" style={{ color: 'var(--color-purple)' }}>
-                        <Server size={14} /> 5G Core Inspector
+                        <Server size={14} /> AMF Core Inspector
                       </h4>
                       <div className="inspector-details">
                         <div className="detail-row">
-                          <span className="detail-label">AMF Target (N2)</span>
-                          <span className="detail-val font-mono">{status?.configSummary?.amfTarget || '127.0.0.1:38412'}</span>
+                          <span className="detail-label">Function</span>
+                          <span className="detail-val font-semibold">Access & Mobility Function</span>
                         </div>
                         <div className="detail-row">
-                          <span className="detail-label">UPF Target (N3)</span>
-                          <span className="detail-val font-mono">{configData ? `${configData.AMF?.Ip}:2152` : '127.0.0.1:2152'}</span>
+                          <span className="detail-label">N2 Port (SCTP)</span>
+                          <span className="detail-val font-mono">38412</span>
                         </div>
                         <div className="detail-row">
-                          <span className="detail-label">Slice (S-NSSAI)</span>
-                          <span className="detail-val font-mono">
-                            {configData ? `SST ${configData.Ue?.Snssai?.Sst || '1'} / SD ${configData.Ue?.Snssai?.Sd || '010203'}` : 'SST 1'}
-                          </span>
+                          <span className="detail-label">AMF IP Address</span>
+                          <span className="detail-val font-mono">{status?.configSummary?.amfTarget?.split(':')[0] || '127.0.0.1'}</span>
                         </div>
                         <div className="detail-row">
-                          <span className="detail-label">Core Status</span>
+                          <span className="detail-label">State</span>
                           <span className="detail-val font-semibold" style={{ color: status?.gnbLinkState && status.gnbLinkState !== 'offline' ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                            {status?.gnbLinkState && status.gnbLinkState !== 'offline' ? 'REACHABLE' : 'DISCONNECTED'}
+                            {status?.gnbLinkState && status.gnbLinkState !== 'offline' ? 'ACTIVE' : 'OFFLINE'}
                           </span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {selectedNode === 'upf' && (
+                    <>
+                      <h4 className="inspector-title" style={{ color: 'var(--color-info)' }}>
+                        <Network size={14} /> UPF Gateway Inspector
+                      </h4>
+                      <div className="inspector-details">
+                        <div className="detail-row">
+                          <span className="detail-label">Function</span>
+                          <span className="detail-val font-semibold">User Plane Function</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">N3 Port (UDP)</span>
+                          <span className="detail-val font-mono">2152 (GTP-U)</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">UPF IP Address</span>
+                          <span className="detail-val font-mono">{configData ? configData.AMF?.Ip : '127.0.0.1'}</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">State</span>
+                          <span className="detail-val font-semibold" style={{ color: activeUEs.some(u => u.pduSessions && u.pduSessions.some((s: any) => s.stateDesc?.includes('ACTIVE'))) ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                            {activeUEs.some(u => u.pduSessions && u.pduSessions.some((s: any) => s.stateDesc?.includes('ACTIVE'))) ? 'ROUTING TRAFFIC' : 'STANDBY'}
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {selectedNode === 'dn' && (
+                    <>
+                      <h4 className="inspector-title" style={{ color: '#06b6d4' }}>
+                        <Globe size={14} /> Data Network Inspector
+                      </h4>
+                      <div className="inspector-details">
+                        <div className="detail-row">
+                          <span className="detail-label">DN Name</span>
+                          <span className="detail-val font-semibold">Internet (External)</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">N6 Routing</span>
+                          <span className="detail-val font-semibold" style={{ color: 'var(--color-success)' }}>NAT Enabled</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Status</span>
+                          <span className="detail-val font-semibold" style={{ color: 'var(--color-success)' }}>ONLINE</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {selectedNode === 'uu-link' && (
+                    <>
+                      <h4 className="inspector-title" style={{ color: '#10b981' }}>
+                        <Activity size={14} /> Uu Interface Link
+                      </h4>
+                      <div className="inspector-details">
+                        <div className="detail-row">
+                          <span className="detail-label">Type</span>
+                          <span className="detail-val">Radio Access Link (5G-NR)</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Protocols</span>
+                          <span className="detail-val font-mono">NAS, RRC, PDCP, RLC</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Frequency Band</span>
+                          <span className="detail-val">FR1 (Sub-6GHz) Sim</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Status</span>
+                          <span className="detail-val font-semibold" style={{ color: 'var(--color-success)' }}>ACTIVE</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {selectedNode === 'n2-link' && (
+                    <>
+                      <h4 className="inspector-title" style={{ color: '#8b5cf6' }}>
+                        <Activity size={14} /> N2 Control Interface
+                      </h4>
+                      <div className="inspector-details">
+                        <div className="detail-row">
+                          <span className="detail-label">Type</span>
+                          <span className="detail-val">Control Plane (gNB &harr; AMF)</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Protocol</span>
+                          <span className="detail-val font-mono">NGAP / SCTP</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">SCTP Target Port</span>
+                          <span className="detail-val font-mono">38412</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Status</span>
+                          <span className="detail-val font-semibold" style={{ color: 'var(--color-success)' }}>ESTABLISHED</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {selectedNode === 'n3-link' && (
+                    <>
+                      <h4 className="inspector-title" style={{ color: '#3b82f6' }}>
+                        <Activity size={14} /> N3 User Interface
+                      </h4>
+                      <div className="inspector-details">
+                        <div className="detail-row">
+                          <span className="detail-label">Type</span>
+                          <span className="detail-val">User Plane (gNB &harr; UPF)</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Protocol</span>
+                          <span className="detail-val font-mono">GTP-U / UDP</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">UDP Port</span>
+                          <span className="detail-val font-mono">2152</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Status</span>
+                          <span className="detail-val font-semibold" style={{ color: activeUEs.some(u => u.pduSessions && u.pduSessions.some((s: any) => s.stateDesc?.includes('ACTIVE'))) ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                            {activeUEs.some(u => u.pduSessions && u.pduSessions.some((s: any) => s.stateDesc?.includes('ACTIVE'))) ? 'ACTIVE TUNNEL' : 'INACTIVE'}
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {selectedNode === 'n6-link' && (
+                    <>
+                      <h4 className="inspector-title" style={{ color: '#06b6d4' }}>
+                        <Activity size={14} /> N6 Data Interface
+                      </h4>
+                      <div className="inspector-details">
+                        <div className="detail-row">
+                          <span className="detail-label">Type</span>
+                          <span className="detail-val">User Plane (UPF &harr; DN)</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Protocol</span>
+                          <span className="detail-val font-mono">IP Routing (NAT)</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Routing Gateway</span>
+                          <span className="detail-val font-mono">127.0.0.2</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Status</span>
+                          <span className="detail-val font-semibold" style={{ color: 'var(--color-success)' }}>ACTIVE</span>
                         </div>
                       </div>
                     </>
@@ -1652,7 +1955,7 @@ export default function App() {
                   
                   {!selectedNode && (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: '13px' }}>
-                      Click any node to inspect standard 3GPP metrics
+                      Click any node or link badge to inspect 3GPP metrics
                     </div>
                   )}
                 </div>

@@ -1,6 +1,7 @@
 package context
 
 import (
+	"encoding/binary"
 	"github.com/ishidawataru/sctp"
 	"net"
 )
@@ -354,6 +355,13 @@ func (ue *GNBUe) GetAmfUeId() int64 {
 func (ue *GNBUe) SetAmfUeId(amfUeId int64) {
 	// fmt.Println(amfUeId)
 	ue.amfUeNgapId = amfUeId
+	if ue.unixSocketConnection != nil {
+		buf := make([]byte, 10)
+		buf[0] = 0x00
+		buf[1] = 0x03
+		binary.BigEndian.PutUint64(buf[2:10], uint64(amfUeId))
+		_, _ = ue.unixSocketConnection.Write(buf)
+	}
 }
 
 func (p *PDUSession) GetUplinkTeid() uint32 {

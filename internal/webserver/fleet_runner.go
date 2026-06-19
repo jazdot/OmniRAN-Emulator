@@ -9,6 +9,7 @@ import (
 
 	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb"
+	gnbContext "OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 	ueContext "OmniRAN-Emulator/internal/control_test_engine/ue/context"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/service"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/trigger"
@@ -27,6 +28,7 @@ type RunningGNBInstance struct {
 	StartedAt   time.Time
 	Cancel      context.CancelFunc
 	errCh       <-chan error
+	GnbCtx      *gnbContext.GNBContext
 	LinkType    string
 	LinkPort    int
 	ControlIp   string
@@ -77,7 +79,7 @@ func LaunchGNBProfile(profileName string) error {
 	socketPath := fmt.Sprintf("/tmp/gnb_%s.sock", prof.GnbId)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	errCh := gnb.InitGnbFleet(cfg, ctx, socketPath)
+	gCtx, errCh := gnb.InitGnbFleet(cfg, ctx, socketPath)
 
 	inst := &RunningGNBInstance{
 		ProfileName: profileName,
@@ -85,6 +87,7 @@ func LaunchGNBProfile(profileName string) error {
 		StartedAt:   time.Now(),
 		Cancel:      cancel,
 		errCh:       errCh,
+		GnbCtx:      gCtx,
 		LinkType:    prof.LinkType,
 		LinkPort:    prof.LinkPort,
 		ControlIp:   prof.ControlIp,
@@ -304,6 +307,8 @@ func GetFleetRunningSummary() FleetRunningSummary {
 	ues := ueContext.GetAllActiveUEs()
 	ueStatuses := make([]UEStatus, 0, len(ues))
 	for _, u := range ues {
+		resolveUeConnectionDetails(u)
+
 		pduSessions := make([]PDUSessionStatus, 0)
 		for _, sess := range u.PduSessions {
 			pduSessions = append(pduSessions, PDUSessionStatus{
@@ -338,5 +343,48 @@ func GetFleetRunningSummary() FleetRunningSummary {
 	return FleetRunningSummary{
 		RunningUEs:  ueStatuses,
 		RunningGNBs: GetRunningGNBs(),
+	}
+}
+
+func resolveUeConnectionDetails(u *ueContext.UEContext) {
+	uConn := u.GetUnixConn()
+	if uConn == nil {
+		return
+	}
+
+	runningGNBsMu.RLock()
+	defer runningGNBsMu.RUnlock()
+
+	for _, inst := range runningGNBs {
+		if inst.GnbCtx != nil {
+			var matchedGnbId string
+			var matchedProfileName string
+			var matchedAmfUeId int64
+
+			inst.GnbCtx.RangeUePool(func(ranUeId int64, gUe *gnbContext.GNBUe) bool {
+				gConn := gUe.GetUnixSocket()
+				if gConn != nil {
+					// Compare address networks and string representations
+					if gConn.LocalAddr().Network() == uConn.LocalAddr().Network() &&
+						gConn.LocalAddr().String() == uConn.RemoteAddr().String() &&
+						gConn.RemoteAddr().String() == uConn.LocalAddr().String() {
+						matchedGnbId = inst.GnbId
+						matchedProfileName = inst.ProfileName
+						matchedAmfUeId = gUe.GetAmfUeId()
+						return false // stop iteration
+					}
+				}
+				return true
+			})
+
+			if matchedGnbId != "" {
+				u.SetGnbId(matchedGnbId)
+				u.SetGnbProfileName(matchedProfileName)
+				if matchedAmfUeId != 0 {
+					u.SetAmfUeId(matchedAmfUeId)
+				}
+				return
+			}
+		}
 	}
 }
