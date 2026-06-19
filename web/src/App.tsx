@@ -791,15 +791,32 @@ export default function App() {
     } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
   };
 
+  const getDuplicateName = (baseName: string, existingNames: string[]): string => {
+    const trailingNumRegex = /(\d+)$/;
+    const match = baseName.match(trailingNumRegex);
+    let baseWithoutNum = "";
+    let startNum = 1;
+    if (match) {
+      const numStr = match[1];
+      baseWithoutNum = baseName.substring(0, baseName.length - numStr.length);
+      startNum = parseInt(numStr, 10) + 1;
+    } else {
+      baseWithoutNum = baseName;
+      startNum = 1;
+    }
+    let currentNum = startNum;
+    let candidateName = "";
+    do {
+      candidateName = `${baseWithoutNum}${currentNum}`;
+      currentNum++;
+    } while (existingNames.includes(candidateName));
+    return candidateName;
+  };
+
   const duplicateUEProfile = async (profile: UEProfile) => {
     try {
       // 1. Generate unique name
-      let newName = `${profile.name}-Copy`;
-      let counter = 1;
-      while (ueProfiles.some(p => p.name === newName)) {
-        newName = `${profile.name}-Copy${counter}`;
-        counter++;
-      }
+      const newName = getDuplicateName(profile.name, ueProfiles.map(p => p.name));
 
       // 2. Generate unique MSIN
       let msinVal = parseInt(profile.msin, 10);
@@ -831,12 +848,7 @@ export default function App() {
   const duplicateGNBProfile = async (profile: GNBProfile) => {
     try {
       // 1. Generate unique name
-      let newName = `${profile.name}-Copy`;
-      let counter = 1;
-      while (gnbProfiles.some(p => p.name === newName)) {
-        newName = `${profile.name}-Copy${counter}`;
-        counter++;
-      }
+      const newName = getDuplicateName(profile.name, gnbProfiles.map(p => p.name));
 
       // 2. Generate unique gNB ID
       let gnbIdVal = parseInt(profile.gnbId, 16);
@@ -2532,261 +2544,18 @@ export default function App() {
           <div className="view-body fade-in">
             {configData ? (
               <form onSubmit={saveConfig} className="card config-layout">
-                {/* Left Side: UE Settings */}
+                {/* Left Side: AMF Core Connection */}
                 <div className="config-section">
                   <h3 className="panel-title" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
-                    <Cpu size={18} /> User Equipment Settings
+                    <Server size={18} /> 5G Core (AMF) Target Connection
                   </h3>
+                  
+                  <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                    Configure the target 5G Core Network Access and Mobility Management Function (AMF) address. GNodeBs in the fleet will bind and attempt N2 SCTP association with this target.
+                  </p>
 
                   <div className="form-group">
-                    <label>MSIN (IMSI suffix)</label>
-                    <input
-                      type="text"
-                      value={configData.Ue?.Msin || ''}
-                      onChange={(e) => handleConfigChange('Ue.Msin', e.target.value)}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>Security Key (K)</label>
-                    <input
-                      type="text"
-                      value={configData.Ue?.Key || ''}
-                      onChange={(e) => handleConfigChange('Ue.Key', e.target.value)}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>OPc Key</label>
-                    <input
-                      type="text"
-                      value={configData.Ue?.Opc || ''}
-                      onChange={(e) => handleConfigChange('Ue.Opc', e.target.value)}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>Sequence Number (SQN)</label>
-                    <input
-                      type="text"
-                      value={configData.Ue?.Sqn || ''}
-                      onChange={(e) => handleConfigChange('Ue.Sqn', e.target.value)}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>Data Network Name (DNN)</label>
-                    <input
-                      type="text"
-                      value={configData.Ue?.Dnn || ''}
-                      onChange={(e) => handleConfigChange('Ue.Dnn', e.target.value)}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>PDU Session Type</label>
-                    <select
-                      value={configData.Ue?.PduSessionType || 'IPv4'}
-                      onChange={(e) => handleConfigChange('Ue.PduSessionType', e.target.value)}
-                    >
-                      <option value="IPv4">IPv4</option>
-                      <option value="IPv6">IPv6</option>
-                      <option value="IPv4v6">IPv4v6 (Dual-Stack)</option>
-                    </select>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                    <div className="form-group">
-                      <label>Slice SST</label>
-                      <input
-                        type="number"
-                        value={configData.Ue?.Snssai?.Sst || 1}
-                        onChange={(e) => handleConfigChange('Ue.Snssai.Sst', parseInt(e.target.value))}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Slice SD</label>
-                      <input
-                        type="text"
-                        value={configData.Ue?.Snssai?.Sd || ''}
-                        onChange={(e) => handleConfigChange('Ue.Snssai.Sd', e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Secondary PDU Sessions Configurator */}
-                  <div style={{ marginTop: '20px', borderTop: '1px solid var(--border-color)', paddingTop: '15px' }}>
-                    <h4 style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--text-primary)', marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span>Secondary PDU Sessions (Max 15)</span>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        style={{ padding: '2px 8px', fontSize: '11px', width: 'auto' }}
-                        onClick={() => {
-                          const currentSessions = configData.Ue?.PduSessions || [];
-                          if (currentSessions.length >= 14) {
-                            alert('Maximum 15 PDU Sessions reached.');
-                            return;
-                          }
-                          const usedIds = new Set(currentSessions.map(s => s.Id));
-                          let nextId = 2;
-                          while (usedIds.has(nextId) && nextId <= 15) {
-                            nextId++;
-                          }
-                          if (nextId > 15) return;
-                          
-                          const newSess = {
-                            Id: nextId,
-                            Dnn: 'internet2',
-                            PduSessionType: 'IPv4',
-                            Sst: 1,
-                            Sd: '010203'
-                          };
-                          handleConfigChange('Ue.PduSessions', [...currentSessions, newSess]);
-                        }}
-                      >
-                        + Add PDU Session
-                      </button>
-                    </h4>
-
-                    {(configData.Ue?.PduSessions || []).length === 0 ? (
-                      <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No secondary PDU sessions configured.</p>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        {(configData.Ue.PduSessions || []).map((sess, idx) => (
-                          <div key={idx} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '10px', display: 'grid', gridTemplateColumns: '80px 1fr 1fr 120px 40px', gap: '10px', alignItems: 'center' }}>
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '10px' }}>ID</label>
-                              <input
-                                type="number"
-                                min="2"
-                                max="15"
-                                value={sess.Id}
-                                onChange={(e) => {
-                                  const updated = [...configData.Ue.PduSessions!];
-                                  updated[idx].Id = parseInt(e.target.value) || 2;
-                                  handleConfigChange('Ue.PduSessions', updated);
-                                }}
-                              />
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '10px' }}>DNN</label>
-                              <input
-                                type="text"
-                                value={sess.Dnn}
-                                onChange={(e) => {
-                                  const updated = [...configData.Ue.PduSessions!];
-                                  updated[idx].Dnn = e.target.value;
-                                  handleConfigChange('Ue.PduSessions', updated);
-                                }}
-                              />
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '10px' }}>Type</label>
-                              <select
-                                value={sess.PduSessionType}
-                                onChange={(e) => {
-                                  const updated = [...configData.Ue.PduSessions!];
-                                  updated[idx].PduSessionType = e.target.value;
-                                  handleConfigChange('Ue.PduSessions', updated);
-                                }}
-                              >
-                                <option value="IPv4">IPv4</option>
-                                <option value="IPv6">IPv6</option>
-                                <option value="IPv4v6">IPv4v6</option>
-                              </select>
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '10px' }}>Slice (SST/SD)</label>
-                              <div style={{ display: 'flex', gap: '4px' }}>
-                                <input
-                                  type="number"
-                                  placeholder="SST"
-                                  value={sess.Sst}
-                                  onChange={(e) => {
-                                    const updated = [...configData.Ue.PduSessions!];
-                                    updated[idx].Sst = parseInt(e.target.value) || 1;
-                                    handleConfigChange('Ue.PduSessions', updated);
-                                  }}
-                                  style={{ width: '45px', padding: '4px' }}
-                                />
-                                <input
-                                  type="text"
-                                  placeholder="SD"
-                                  value={sess.Sd}
-                                  onChange={(e) => {
-                                    const updated = [...configData.Ue.PduSessions!];
-                                    updated[idx].Sd = e.target.value;
-                                    handleConfigChange('Ue.PduSessions', updated);
-                                  }}
-                                  style={{ padding: '4px' }}
-                                />
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const updated = configData.Ue.PduSessions!.filter((_, i) => i !== idx);
-                                handleConfigChange('Ue.PduSessions', updated);
-                              }}
-                              style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '10px 0 0' }}
-                              title="Delete PDU Session"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Right Side: GNodeB & Core Settings */}
-                <div className="config-section">
-                  <h3 className="panel-title" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
-                    <Radio size={18} /> GNodeB / 5G Core Settings
-                  </h3>
-
-                  <div className="form-group">
-                    <label>GNodeB Connection Link Type</label>
-                    <select
-                      value={configData.GNodeB?.LinkType || 'unix'}
-                      onChange={(e) => handleConfigChange('GNodeB.LinkType', e.target.value)}
-                    >
-                      <option value="unix">UNIX Sockets</option>
-                      <option value="tcp">TCP Radio Link Simulation (RLS)</option>
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label>GNodeB Radio Link Port</label>
-                    <input
-                      type="number"
-                      value={configData.GNodeB?.LinkPort || 9488}
-                      onChange={(e) => handleConfigChange('GNodeB.LinkPort', parseInt(e.target.value))}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>GNodeB Control IP (NGAP Binding)</label>
-                    <input
-                      type="text"
-                      value={configData.GNodeB?.ControlIF?.Ip || '127.0.0.1'}
-                      onChange={(e) => handleConfigChange('GNodeB.ControlIF.Ip', e.target.value)}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>GNodeB Control Port</label>
-                    <input
-                      type="number"
-                      value={configData.GNodeB?.ControlIF?.Port || 9487}
-                      onChange={(e) => handleConfigChange('GNodeB.ControlIF.Port', parseInt(e.target.value))}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>5G Core AMF IP Address</label>
+                    <label>AMF IP Address</label>
                     <input
                       type="text"
                       value={configData.AMF?.Ip || '127.0.0.1'}
@@ -2795,12 +2564,37 @@ export default function App() {
                   </div>
 
                   <div className="form-group">
-                    <label>5G Core AMF Port (NGAP)</label>
+                    <label>AMF Port (NGAP/SCTP)</label>
                     <input
                       type="number"
                       value={configData.AMF?.Port || 38412}
-                      onChange={(e) => handleConfigChange('AMF.Port', parseInt(e.target.value))}
+                      onChange={(e) => handleConfigChange('AMF.Port', parseInt(e.target.value) || 38412)}
                     />
+                  </div>
+                </div>
+
+                {/* Right Side: Logging & Verbosity */}
+                <div className="config-section">
+                  <h3 className="panel-title" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+                    <Terminal size={18} /> Logging & Verbosity
+                  </h3>
+
+                  <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                    Adjust the emulator logging level. System logs, RAN signaling events, and network packets will be filtered according to this verbosity setting.
+                  </p>
+
+                  <div className="form-group">
+                    <label>Logging Level</label>
+                    <select
+                      value={configData.Logs?.Level || 4}
+                      onChange={(e) => handleConfigChange('Logs.Level', parseInt(e.target.value) || 4)}
+                    >
+                      <option value={5}>DEBUG (Verbose)</option>
+                      <option value={4}>INFO (Standard)</option>
+                      <option value={3}>WARNING (Important warnings)</option>
+                      <option value={2}>ERROR (Failures only)</option>
+                      <option value={6}>TRACE (Deep packet decoding)</option>
+                    </select>
                   </div>
 
                   <div style={{ marginTop: 'auto', display: 'flex', gap: '10px' }}>

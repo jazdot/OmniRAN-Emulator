@@ -403,6 +403,8 @@ func handleScenariosList(w http.ResponseWriter, r *http.Request) {
 		{"mobility-reg", "Mobility Registration Update (TAU)", "Registers a UE, simulates cell crossing, and triggers a Mobility Tracking Area Update (TAU)"},
 		{"emergency-reg", "Emergency Registration", "Triggers unauthenticated Emergency Registration to the core network"},
 		{"handover", "N2 Handover (Path Switch)", "Simulates cell change by executing a Path Switch Request between gNodeBs"},
+		{"xn-handover", "Xn Handover (Inter-gNB)", "Starts two GNodeBs (Source and Target), registers a UE, establishes a PDU session, and performs Xn-based handover between GNodeBs"},
+		{"pdu-lifecycle", "PDU Session Lifecycle", "Registers a UE, establishes a PDU session, releases the PDU session, and validates state transitions back to INACTIVE"},
 		{"full-lifecycle", "Full UE Lifecycle", "Executes full sequence: Attach → PDU Active → CM-IDLE → Service Request → Detach"},
 		{"deregister", "UE-initiated Deregistration", "Registers a UE and performs a clean power-off Deregistration Request"},
 		{"load-test", "Multi-UE Load Endurance Test", "Stress tests the AMF by attaching multiple simulated UEs sequentially in a queue"},
@@ -465,11 +467,17 @@ func handleScenarioRun(w http.ResponseWriter, r *http.Request) {
 				return atomic.LoadInt32(&runningState) == 0
 			})
 		case "periodic-reg":
-			templates.ScenarioPeriodicRegistration()
+			templates.ScenarioPeriodicRegistration(func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
 		case "mobility-reg":
-			templates.ScenarioMobilityRegistration()
+			templates.ScenarioMobilityRegistration(func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
 		case "emergency-reg":
-			templates.ScenarioEmergencyRegistration()
+			templates.ScenarioEmergencyRegistration(func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
 		case "handover":
 			ip := req.TargetGnbIP
 			if ip == "" {
@@ -483,15 +491,29 @@ func handleScenarioRun(w http.ResponseWriter, r *http.Request) {
 			if delay == 0 {
 				delay = 5
 			}
-			templates.ScenarioHandover(ip, port, delay)
+			templates.ScenarioHandover(ip, port, delay, func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
+		case "xn-handover":
+			templates.ScenarioXnHandover(func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
+		case "pdu-lifecycle":
+			templates.ScenarioPduLifecycle(func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
 		case "full-lifecycle":
 			idle := req.IdleSeconds
 			if idle == 0 {
 				idle = 5
 			}
-			templates.ScenarioFullLifecycle(idle)
+			templates.ScenarioFullLifecycle(idle, func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
 		case "deregister":
-			templates.ScenarioDeregistration()
+			templates.ScenarioDeregistration(func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
 		case "load-test":
 			ueCount := req.UeCount
 			if ueCount == 0 {

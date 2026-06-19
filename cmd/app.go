@@ -238,7 +238,7 @@ func main() {
 							log.Info("---------------------------------------")
 							log.Info("[SCENARIO] Periodic Registration Update")
 							log.Info("---------------------------------------")
-							templates.ScenarioPeriodicRegistration()
+							templates.ScenarioPeriodicRegistration(nil)
 							return nil
 						},
 					},
@@ -249,7 +249,7 @@ func main() {
 							log.Info("---------------------------------------")
 							log.Info("[SCENARIO] Mobility Registration Update")
 							log.Info("---------------------------------------")
-							templates.ScenarioMobilityRegistration()
+							templates.ScenarioMobilityRegistration(nil)
 							return nil
 						},
 					},
@@ -260,7 +260,7 @@ func main() {
 							log.Info("---------------------------------------")
 							log.Info("[SCENARIO] Emergency Registration")
 							log.Info("---------------------------------------")
-							templates.ScenarioEmergencyRegistration()
+							templates.ScenarioEmergencyRegistration(nil)
 							return nil
 						},
 					},
@@ -279,7 +279,29 @@ func main() {
 							log.Info("---------------------------------------")
 							log.Infof("[SCENARIO] N2 Handover → target gNB %s:%d (delay: %ds)", targetIp, targetPort, delay)
 							log.Info("---------------------------------------")
-							templates.ScenarioHandover(targetIp, targetPort, delay)
+							templates.ScenarioHandover(targetIp, targetPort, delay, nil)
+							return nil
+						},
+					},
+					{
+						Name:  "xn-handover",
+						Usage: "Xn Handover (Direct peer-to-peer inter-gNB handover simulation)",
+						Action: func(c *cli.Context) error {
+							log.Info("---------------------------------------")
+							log.Info("[SCENARIO] Xn Handover (Inter-gNB)")
+							log.Info("---------------------------------------")
+							templates.ScenarioXnHandover(nil)
+							return nil
+						},
+					},
+					{
+						Name:  "pdu-lifecycle",
+						Usage: "PDU Session Lifecycle (Establishment and clean release simulation)",
+						Action: func(c *cli.Context) error {
+							log.Info("---------------------------------------")
+							log.Info("[SCENARIO] PDU Session Lifecycle")
+							log.Info("---------------------------------------")
+							templates.ScenarioPduLifecycle(nil)
 							return nil
 						},
 					},
@@ -294,7 +316,7 @@ func main() {
 							log.Info("---------------------------------------")
 							log.Infof("[SCENARIO] Full UE Lifecycle (idle: %ds)", idle)
 							log.Info("---------------------------------------")
-							templates.ScenarioFullLifecycle(idle)
+							templates.ScenarioFullLifecycle(idle, nil)
 							return nil
 						},
 					},
@@ -305,7 +327,7 @@ func main() {
 							log.Info("---------------------------------------")
 							log.Info("[SCENARIO] UE-initiated Deregistration")
 							log.Info("---------------------------------------")
-							templates.ScenarioDeregistration()
+							templates.ScenarioDeregistration(nil)
 							return nil
 						},
 					},

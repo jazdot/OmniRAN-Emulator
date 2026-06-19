@@ -147,13 +147,16 @@ func HandlerRegistrationAccept(ue *context.UEContext, message *nas.Message) {
 
 func HandlerDlNasTransportPduaccept(ue *context.UEContext, message *nas.Message) {
 
-	//getting PDU Session establishment accept.
+	//getting PDU Session establishment accept or release.
 	payloadContainer := nas_control.GetNasPduFromPduAccept(message)
 	if payloadContainer == nil {
-		log.Error("[UE][NAS] Error: payloadContainer is nil in PDU Accept")
+		log.Error("[UE][NAS] Error: payloadContainer is nil in PDU Accept/Release")
 		return
 	}
-	if payloadContainer.GsmHeader.GetMessageType() == nas.MsgTypePDUSessionEstablishmentAccept {
+	
+	msgType := payloadContainer.GsmHeader.GetMessageType()
+	
+	if msgType == nas.MsgTypePDUSessionEstablishmentAccept {
 		log.Info("[UE][NAS] Receiving PDU Session Establishment Accept")
 
 		// get PDU Session ID from payloadContainer
@@ -165,6 +168,25 @@ func HandlerDlNasTransportPduaccept(ue *context.UEContext, message *nas.Message)
 		// get UE ip
 		UeIp := payloadContainer.PDUSessionEstablishmentAccept.GetPDUAddressInformation()
 		ue.SetIp(pduSessionId, UeIp)
+	} else if msgType == nas.MsgTypePDUSessionReleaseCommand {
+		log.Info("[UE][NAS] Receiving PDU Session Release Command")
+
+		// get PDU Session ID from payloadContainer
+		pduSessionId := payloadContainer.PDUSessionReleaseCommand.PDUSessionID.GetPDUSessionID()
+
+		// update PDU Session state to inactive.
+		ue.GetPduSession(pduSessionId).State = context.SM5G_PDU_SESSION_INACTIVE
+		log.Infof("[UE][NAS] PDU Session %d released (inactive)", pduSessionId)
+
+		// send PDUSessionReleaseComplete back
+		releaseComplete, err := mm_5gs.UlNasTransportReleaseComplete(ue, pduSessionId)
+		if err != nil {
+			log.Errorf("[UE][NAS] Error encoding PDUSessionReleaseComplete: %v", err)
+			return
+		}
+
+		sender.SendToGnb(ue, releaseComplete)
+		log.Infof("[UE][NAS] PDU Session Release Complete sent back to network for ID %d", pduSessionId)
 	}
 }
 

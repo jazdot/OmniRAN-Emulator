@@ -84,3 +84,91 @@ func getUlNasTransport_PduSessionEstablishmentRequest(pduSessionId uint8, reques
 	nasPdu = data.Bytes()
 	return
 }
+
+// UlNasTransportRelease builds and signs a PDU Session Release Request inside a UL NAS Transport message
+func UlNasTransportRelease(ue *context.UEContext, pduSessionId uint8) ([]byte, error) {
+	pdu := getUlNasTransport_PduSessionReleaseRequest(pduSessionId)
+	if pdu == nil {
+		return nil, fmt.Errorf("Error encoding PduSession Release Request Msg")
+	}
+	pdu, err := nas_control.EncodeNasPduWithSecurity(ue, pdu, nas.SecurityHeaderTypeIntegrityProtectedAndCiphered, true, false)
+	if err != nil {
+		return nil, fmt.Errorf("Error encoding PduSession Release Request Msg: %w", err)
+	}
+	return pdu, nil
+}
+
+func getUlNasTransport_PduSessionReleaseRequest(pduSessionId uint8) (nasPdu []byte) {
+	pduSessionReleaseRequest := sm_5gs.GetPduSessionReleaseRequest(pduSessionId)
+
+	m := nas.NewMessage()
+	m.GmmMessage = nas.NewGmmMessage()
+	m.GmmHeader.SetMessageType(nas.MsgTypeULNASTransport)
+
+	ulNasTransport := nasMessage.NewULNASTransport(0)
+	ulNasTransport.SpareHalfOctetAndSecurityHeaderType.SetSecurityHeaderType(nas.SecurityHeaderTypePlainNas)
+	ulNasTransport.SetMessageType(nas.MsgTypeULNASTransport)
+	ulNasTransport.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
+	ulNasTransport.PduSessionID2Value = new(nasType.PduSessionID2Value)
+	ulNasTransport.PduSessionID2Value.SetIei(nasMessage.ULNASTransportPduSessionID2ValueType)
+	ulNasTransport.PduSessionID2Value.SetPduSessionID2Value(pduSessionId)
+	
+	ulNasTransport.SpareHalfOctetAndPayloadContainerType.SetPayloadContainerType(nasMessage.PayloadContainerTypeN1SMInfo)
+	ulNasTransport.PayloadContainer.SetLen(uint16(len(pduSessionReleaseRequest)))
+	ulNasTransport.PayloadContainer.SetPayloadContainerContents(pduSessionReleaseRequest)
+
+	m.GmmMessage.ULNASTransport = ulNasTransport
+
+	data := new(bytes.Buffer)
+	err := m.GmmMessageEncode(data)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	nasPdu = data.Bytes()
+	return
+}
+
+// UlNasTransportReleaseComplete builds and signs a PDU Session Release Complete inside a UL NAS Transport message
+func UlNasTransportReleaseComplete(ue *context.UEContext, pduSessionId uint8) ([]byte, error) {
+	pdu := getUlNasTransport_PduSessionReleaseComplete(pduSessionId)
+	if pdu == nil {
+		return nil, fmt.Errorf("Error encoding PduSession Release Complete Msg")
+	}
+	pdu, err := nas_control.EncodeNasPduWithSecurity(ue, pdu, nas.SecurityHeaderTypeIntegrityProtectedAndCiphered, true, false)
+	if err != nil {
+		return nil, fmt.Errorf("Error encoding PduSession Release Complete Msg: %w", err)
+	}
+	return pdu, nil
+}
+
+func getUlNasTransport_PduSessionReleaseComplete(pduSessionId uint8) (nasPdu []byte) {
+	pduSessionReleaseComplete := sm_5gs.GetPduSessionReleaseComplete(pduSessionId)
+
+	m := nas.NewMessage()
+	m.GmmMessage = nas.NewGmmMessage()
+	m.GmmHeader.SetMessageType(nas.MsgTypeULNASTransport)
+
+	ulNasTransport := nasMessage.NewULNASTransport(0)
+	ulNasTransport.SpareHalfOctetAndSecurityHeaderType.SetSecurityHeaderType(nas.SecurityHeaderTypePlainNas)
+	ulNasTransport.SetMessageType(nas.MsgTypeULNASTransport)
+	ulNasTransport.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
+	ulNasTransport.PduSessionID2Value = new(nasType.PduSessionID2Value)
+	ulNasTransport.PduSessionID2Value.SetIei(nasMessage.ULNASTransportPduSessionID2ValueType)
+	ulNasTransport.PduSessionID2Value.SetPduSessionID2Value(pduSessionId)
+	
+	ulNasTransport.SpareHalfOctetAndPayloadContainerType.SetPayloadContainerType(nasMessage.PayloadContainerTypeN1SMInfo)
+	ulNasTransport.PayloadContainer.SetLen(uint16(len(pduSessionReleaseComplete)))
+	ulNasTransport.PayloadContainer.SetPayloadContainerContents(pduSessionReleaseComplete)
+
+	m.GmmMessage.ULNASTransport = ulNasTransport
+
+	data := new(bytes.Buffer)
+	err := m.GmmMessageEncode(data)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	nasPdu = data.Bytes()
+	return
+}

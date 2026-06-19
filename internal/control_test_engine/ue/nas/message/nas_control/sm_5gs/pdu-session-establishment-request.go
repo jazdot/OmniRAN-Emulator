@@ -56,3 +56,55 @@ func GetPduSessionEstablishmentRequest(pduSessionId uint8, pduSessionType string
 	nasPdu = data.Bytes()
 	return
 }
+
+// GetPduSessionReleaseRequest builds a PDU Session Release Request NAS message
+func GetPduSessionReleaseRequest(pduSessionId uint8) (nasPdu []byte) {
+	m := nas.NewMessage()
+	m.GsmMessage = nas.NewGsmMessage()
+	m.GsmHeader.SetMessageType(nas.MsgTypePDUSessionReleaseRequest)
+
+	pduSessionReleaseRequest := nasMessage.NewPDUSessionReleaseRequest(0)
+	pduSessionReleaseRequest.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
+	pduSessionReleaseRequest.SetMessageType(nas.MsgTypePDUSessionReleaseRequest)
+	pduSessionReleaseRequest.PDUSessionID.SetPDUSessionID(pduSessionId)
+	pduSessionReleaseRequest.PTI.SetPTI(0x01)
+
+	// Cause value: 0x24 (Regular deactivation)
+	pduSessionReleaseRequest.Cause5GSM = nasType.NewCause5GSM(nasMessage.PDUSessionReleaseRequestCause5GSMType)
+	pduSessionReleaseRequest.Cause5GSM.SetCauseValue(0x24)
+
+	m.GsmMessage.PDUSessionReleaseRequest = pduSessionReleaseRequest
+
+	data := new(bytes.Buffer)
+	err := m.GsmMessageEncode(data)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	nasPdu = data.Bytes()
+	return
+}
+
+// GetPduSessionReleaseComplete builds a PDU Session Release Complete NAS message
+func GetPduSessionReleaseComplete(pduSessionId uint8) (nasPdu []byte) {
+	m := nas.NewMessage()
+	m.GsmMessage = nas.NewGsmMessage()
+	m.GsmHeader.SetMessageType(nas.MsgTypePDUSessionReleaseComplete)
+
+	pduSessionReleaseComplete := nasMessage.NewPDUSessionReleaseComplete(0)
+	pduSessionReleaseComplete.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
+	pduSessionReleaseComplete.SetMessageType(nas.MsgTypePDUSessionReleaseComplete)
+	pduSessionReleaseComplete.PDUSessionID.SetPDUSessionID(pduSessionId)
+	pduSessionReleaseComplete.PTI.SetPTI(0x01)
+
+	m.GsmMessage.PDUSessionReleaseComplete = pduSessionReleaseComplete
+
+	data := new(bytes.Buffer)
+	err := m.GsmMessageEncode(data)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	nasPdu = data.Bytes()
+	return
+}
