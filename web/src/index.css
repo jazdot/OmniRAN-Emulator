@@ -1718,3 +1718,31 @@ body.light .fleet-tag { background: rgba(0,0,0,0.06); color: #4b5563; }
 body.light .fleet-info-box { background: #f1f5f9; border-color: #e2e8f0; color: #4b5563; }
 body.light .fleet-toast.success { background: rgba(22, 163, 74, 0.1); color: #15803d; }
 body.light .fleet-toast.error { background: rgba(220, 38, 38, 0.1); color: #dc2626; }
+
+/* Dynamic Topology SVG Visuals */
+.topology-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.topology-node {
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.topology-node.selected .node-icon-wrapper {
+  border-color: var(--node-color) !important;
+  box-shadow: 0 0 16px var(--node-color-glow), 0 0 0 2px var(--bg-primary), 0 0 0 4px #3b82f6 !important;
+}
+
+.topology-node.clickable-node:hover {
+  transform: translate(-50%, -50%) scale(1.08) !important;
+}
+
+.topology-node.clickable-node:active {
+  transform: translate(-50%, -50%) scale(0.96) !important;
+}
