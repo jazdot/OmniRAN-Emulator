@@ -583,6 +583,8 @@ type UEStatus struct {
 	GnbLinkType      string             `json:"gnbLinkType"`
 	GnbLinkPort      int                `json:"gnbLinkPort"`
 	GnbControlIp     string             `json:"gnbControlIp"`
+	GnbId            string             `json:"gnbId"`
+	GnbProfileName   string             `json:"gnbProfileName"`
 	PduSessions      []PDUSessionStatus `json:"pduSessions"`
 }
 
@@ -609,6 +611,8 @@ type ActionRequest struct {
 	TargetGnbPort       int    `json:"targetGnbPort"`
 	TargetGnbLinkType   string `json:"targetGnbLinkType"`
 	TargetGnbSocketPath string `json:"targetGnbSocketPath"`
+	TargetGnbId         string `json:"targetGnbId"`
+	TargetGnbName       string `json:"targetGnbName"`
 }
 
 func handleScenarioStop(w http.ResponseWriter, r *http.Request) {
@@ -764,15 +768,15 @@ func handleUEAction(w http.ResponseWriter, r *http.Request) {
 		socketPath := req.TargetGnbSocketPath
 		isXn := req.Action == "xn-handover"
 
-		err := ue.TriggerHandover(u, ip, port, linkType, socketPath, isXn)
+		err := ue.TriggerHandover(u, ip, port, linkType, socketPath, isXn, req.TargetGnbId, req.TargetGnbName)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Handover trigger failed: %v", err), http.StatusInternalServerError)
 			return
 		}
 		if isXn {
-			logrus.Infof("[WEB][ACTION] Xn Handover triggered successfully to %s:%d (SocketPath: %s)", ip, port, socketPath)
+			logrus.Infof("[WEB][ACTION] Xn Handover triggered successfully to %s:%d (SocketPath: %s, TargetId: %s)", ip, port, socketPath, req.TargetGnbId)
 		} else {
-			logrus.Infof("[WEB][ACTION] Handover triggered successfully to %s:%d (SocketPath: %s)", ip, port, socketPath)
+			logrus.Infof("[WEB][ACTION] Handover triggered successfully to %s:%d (SocketPath: %s, TargetId: %s)", ip, port, socketPath, req.TargetGnbId)
 		}
 
 	default:
