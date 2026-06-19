@@ -304,7 +304,7 @@ export default function App() {
           )}
         </g>
       );
-      const isDataActive = status?.isRunning;
+      const isDataActive = status?.isRunning && activeUEs.some(ue => ue.pduSessions && ue.pduSessions.some((s: any) => s.stateDesc?.includes('ACTIVE')));
       const strokeDataColor = isDataActive ? '#3b82f6' : '#334155';
       links.push(
         <g key="def-n3">
@@ -330,7 +330,7 @@ export default function App() {
           </g>
         );
 
-        const hasActiveSession = ues.some(u => u.gnbProfileName === g.profileName && u.pduSessions && u.pduSessions.length > 0);
+        const hasActiveSession = ues.some(u => u.gnbProfileName === g.profileName && u.pduSessions && u.pduSessions.some(s => s.stateDesc?.includes('ACTIVE')));
         const strokeColor = hasActiveSession ? 'url(#n3-grad)' : '#334155';
         links.push(
           <g key={`n3-${g.profileName}`}>
