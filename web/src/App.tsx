@@ -15,7 +15,9 @@ import {
   Trash2,
   Sliders,
   Sun,
-  Moon
+  Moon,
+  Phone,
+  Tv
 } from 'lucide-react';
 
 // API base path (works with relative path when served by Go, or proxied in dev)
@@ -177,6 +179,19 @@ export default function App() {
   // Active UE States
   const [activeUEs, setActiveUEs] = useState<any[]>([]);
   const [controlUeId, setControlUeId] = useState<number | null>(null);
+
+  // User Plane Traffic simulation states
+  const [inspectorTab, setInspectorTab] = useState<'details' | 'traffic'>('details');
+  const [trafficStats, setTrafficStats] = useState<any>({});
+  const [uePingTarget, setUePingTarget] = useState('8.8.8.8');
+  const [uePingLog, setUePingLog] = useState('');
+  const [uePingRunning, setUePingRunning] = useState(false);
+  const [browserUrl, setBrowserUrl] = useState('example.com');
+  const [browserResult, setBrowserResult] = useState<any>(null);
+  const [browserRunning, setBrowserRunning] = useState(false);
+  const [videoQuality, setVideoQuality] = useState('1080p');
+  const [vonrCallee, setVonrCallee] = useState('echo');
+  const [vonrActiveCall, setVonrActiveCall] = useState<any>(null);
 
   // Secondary PDU and Handover inputs
   const [newPduId, setNewPduId] = useState(2);
@@ -450,14 +465,38 @@ export default function App() {
         }
 
         const isRegistered = u.stateMmDesc?.includes('REGISTERED');
-        const strokeColor = isRegistered ? 'url(#uu-grad)' : '#f59e0b';
+        
+        // Retrieve traffic info for this UE
+        const tInfo = trafficStats[u.id];
+        const activeAction = tInfo?.activeAction || 'idle';
+        
+        let dotColor = '#34d399';
+        let dotRadius = 4;
+        let flowDuration = '2.5s';
+        
+        if (activeAction === 'web') {
+          dotColor = '#3b82f6';
+          flowDuration = '0.7s';
+        } else if (activeAction === 'streaming') {
+          dotColor = '#a855f7';
+          dotRadius = 6;
+          flowDuration = '0.4s';
+        } else if (activeAction === 'vonr') {
+          dotColor = '#22c55e';
+          flowDuration = '1.2s';
+        }
+
+        const strokeColor = isRegistered 
+          ? (activeAction !== 'idle' ? dotColor : 'url(#uu-grad)') 
+          : '#f59e0b';
+
         links.push(
           <g key={`uu-${u.id}`}>
-            <line x1="182" y1={uy} x2="468" y2={targetGy} stroke={strokeColor} strokeWidth="3" opacity="0.95" />
+            <line x1="182" y1={uy} x2="468" y2={targetGy} stroke={strokeColor} strokeWidth={activeAction !== 'idle' ? 4 : 3} opacity="0.95" />
             {isRegistered && (
-              <circle r="4" fill="#34d399" filter="url(#glow-filter)">
-                <animate attributeName="cx" from="182" to="468" dur="2s" repeatCount="indefinite" />
-                <animate attributeName="cy" from={uy} to={targetGy} dur="2s" repeatCount="indefinite" />
+              <circle r={dotRadius} fill={dotColor} filter="url(#glow-filter)">
+                <animate attributeName="cx" from="182" to="468" dur={flowDuration} repeatCount="indefinite" />
+                <animate attributeName="cy" from={uy} to={targetGy} dur={flowDuration} repeatCount="indefinite" />
               </circle>
             )}
           </g>
@@ -539,6 +578,23 @@ export default function App() {
               <span className="node-status-text">
                 {isRegistered ? 'REGISTERED' : 'PENDING'}
               </span>
+              {isRegistered && trafficStats[u.id] && trafficStats[u.id].activeAction !== 'idle' && (
+                <div style={{
+                  fontSize: '8px',
+                  fontWeight: 'bold',
+                  color: '#ffffff',
+                  background: 'rgba(15, 23, 42, 0.95)',
+                  border: '1px solid ' + (trafficStats[u.id].activeAction === 'web' ? '#3b82f6' : trafficStats[u.id].activeAction === 'streaming' ? '#a855f7' : '#22c55e'),
+                  padding: '2px 4px',
+                  borderRadius: '4px',
+                  marginTop: '4px',
+                  fontFamily: 'monospace',
+                  textTransform: 'uppercase',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.5)'
+                }}>
+                  {trafficStats[u.id].activeAction}: {trafficStats[u.id].speedMbps >= 1.0 ? `${trafficStats[u.id].speedMbps.toFixed(1)} Mbps` : `${(trafficStats[u.id].speedMbps * 1000).toFixed(0)} Kbps`}
+                </div>
+              )}
             </div>
           </foreignObject>
         );
@@ -1019,6 +1075,119 @@ export default function App() {
     }
   };
 
+  // Fetch traffic stats
+  const fetchTrafficStats = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/ue/traffic/stats`);
+      if (res.ok) {
+        const data = await res.json();
+        setTrafficStats(data || {});
+      }
+    } catch (err) {
+      console.error('Error fetching traffic stats:', err);
+    }
+  };
+
+  // User Plane Traffic Actions
+  const startUePing = async (ueId: number) => {
+    setUePingRunning(true);
+    setUePingLog('Pinging in progress...');
+    try {
+      const res = await fetch(`${API_BASE}/ue/ping`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ueId, host: uePingTarget })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUePingLog(data.output);
+      } else {
+        setUePingLog(`Ping failed: ${await res.text()}`);
+      }
+    } catch (err) {
+      setUePingLog(`Ping error: ${err}`);
+    } finally {
+      setUePingRunning(false);
+    }
+  };
+
+  const fetchUeHttp = async (ueId: number) => {
+    setBrowserRunning(true);
+    setBrowserResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/ue/http`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ueId, url: browserUrl })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBrowserResult(data);
+      } else {
+        alert(`HTTP fetch failed: ${await res.text()}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert(`HTTP error: ${err}`);
+    } finally {
+      setBrowserRunning(false);
+    }
+  };
+
+  const toggleUeStream = async (ueId: number, action: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/ue/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ueId, action, quality: videoQuality })
+      });
+      if (res.ok) {
+        fetchTrafficStats();
+      } else {
+        alert(`Stream action failed: ${await res.text()}`);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const dialVonr = async (callerId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/ue/vonr/dial`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callerId, calleeId: vonrCallee })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setVonrActiveCall(data);
+        fetchTrafficStats();
+      } else {
+        alert(`VoNR dial failed: ${await res.text()}`);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const hangupVonr = async (callerId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/ue/vonr/hangup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callerId })
+      });
+      if (res.ok) {
+        setVonrActiveCall(null);
+        fetchTrafficStats();
+      } else {
+        alert(`VoNR hangup failed: ${await res.text()}`);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   // Trigger UE action
   const triggerUeAction = async (action: string, extra = {}) => {
     if (controlUeId === null) return;
@@ -1116,6 +1285,7 @@ export default function App() {
     fetchConfig();
     fetchScenarios();
     fetchActiveUEs();
+    fetchTrafficStats();
   }, []);
 
   useEffect(() => {
@@ -1123,6 +1293,7 @@ export default function App() {
     const timer = setInterval(() => {
       fetchStatus();
       fetchActiveUEs();
+      fetchTrafficStats();
     }, 2000);
     return () => clearInterval(timer);
   }, [autoRefresh]);
@@ -1570,69 +1741,413 @@ export default function App() {
                   {selectedNode === 'ue' && (() => {
                     const activeUe = getActiveUeToInspect();
                     if (activeUe) {
+                      const tInfo = trafficStats[activeUe.id];
+                      const isStreaming = tInfo?.activeAction === 'streaming';
+                      const activeCall = tInfo?.vonrCall || vonrActiveCall;
+                      const isCallActive = !!activeCall && activeCall.status !== 'disconnected';
+                      const otherUes = status?.runningUes?.filter((x: any) => x.id !== activeUe.id) || [];
+
                       return (
                         <>
-                          <h4 className="inspector-title" style={{ color: 'var(--color-success)' }}>
+                          <h4 className="inspector-title" style={{ color: 'var(--color-success)', marginBottom: '8px' }}>
                             <Cpu size={14} /> UE-{activeUe.id} Inspector
                           </h4>
-                          <div className="inspector-details" style={{ maxHeight: '350px', overflowY: 'auto' }}>
-                            <div className="detail-row">
-                              <span className="detail-label">SUPI</span>
-                              <span className="detail-val font-mono">{activeUe.supi}</span>
-                            </div>
-                            <div className="detail-row">
-                              <span className="detail-label">SUCI</span>
-                              <span className="detail-val font-mono" style={{ fontSize: '11px' }}>
-                                {`suci-0-999-70-0-0-0-${activeUe.supi.slice(-5)}`}
-                              </span>
-                            </div>
-                            <div className="detail-row">
-                              <span className="detail-label">5G-GUTI</span>
-                              <span className="detail-val font-mono" style={{ fontSize: '11px' }}>
-                                {`guti-999-70-0001-${activeUe.supi.slice(-4)}`}
-                              </span>
-                            </div>
-                            <div className="detail-row">
-                              <span className="detail-label">5GMM State</span>
-                              <span className="detail-val font-semibold" style={{ color: activeUe.stateMmDesc?.includes('REGISTERED') ? 'var(--color-success)' : 'var(--text-muted)' }}>
-                                {activeUe.stateMmDesc}
-                              </span>
-                            </div>
-                            <div className="detail-row">
-                              <span className="detail-label">5GMM Connection</span>
-                              <span className="detail-val font-semibold" style={{ color: activeUe.stateMmDesc?.includes('REGISTERED') ? 'var(--color-success)' : 'var(--text-muted)' }}>
-                                {activeUe.stateMmDesc?.includes('REGISTERED') ? 'CONNECTED (N1)' : 'IDLE'}
-                              </span>
-                            </div>
-                            <div className="detail-row">
-                              <span className="detail-label">RRC State</span>
-                              <span className="detail-val font-semibold" style={{ color: activeUe.stateMmDesc?.includes('REGISTERED') ? 'var(--color-success)' : 'var(--text-muted)' }}>
-                                {activeUe.stateMmDesc?.includes('REGISTERED') ? 'RRC-CONNECTED' : 'RRC-IDLE'}
-                              </span>
-                            </div>
-                            <div className="detail-row">
-                              <span className="detail-label">Connected Cell</span>
-                              <span className="detail-val font-semibold" style={{ color: 'var(--color-primary)' }}>
-                                {activeUe.gnbProfileName ? `${activeUe.gnbProfileName} (${activeUe.gnbId || '—'})` : '—'}
-                              </span>
-                            </div>
-                            <div className="detail-row" style={{ flexDirection: 'column', alignItems: 'flex-start', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px', marginTop: '8px' }}>
-                              <span className="detail-label" style={{ marginBottom: '4px' }}>PDU Sessions ({activeUe.pduSessions?.length || 0})</span>
-                              {activeUe.pduSessions && activeUe.pduSessions.length > 0 ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
-                                  {activeUe.pduSessions.map(s => (
-                                    <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', width: '100%' }}>
-                                      <span style={{ color: 'var(--color-info)' }}>PDU #{s.id} ({s.dnn}):</span>
-                                      <span className="font-mono ml-auto" style={{ marginRight: '6px' }}>{s.ueIp || '—'}</span>
-                                      <span className={`fleet-state-badge sm ${s.stateDesc?.includes('ACTIVE') ? 'registered' : 'pending'}`}>{s.stateDesc}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span className="detail-val" style={{ color: 'var(--text-muted)', fontSize: '11px' }}>None</span>
-                              )}
-                            </div>
+                          
+                          {/* Tab buttons */}
+                          <div className="inspector-tabs" style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '12px' }}>
+                            <button 
+                              className={`inspector-tab-btn ${inspectorTab === 'details' ? 'active' : ''}`}
+                              onClick={() => setInspectorTab('details')}
+                              style={{
+                                flex: 1,
+                                padding: '6px 8px',
+                                background: 'transparent',
+                                border: 'none',
+                                borderBottom: inspectorTab === 'details' ? '2px solid var(--color-success)' : '2px solid transparent',
+                                color: inspectorTab === 'details' ? 'var(--color-success)' : 'var(--text-muted)',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                fontSize: '11px',
+                                textAlign: 'center',
+                                transition: 'all 0.2s'
+                              }}
+                            >
+                              Details
+                            </button>
+                            <button 
+                              className={`inspector-tab-btn ${inspectorTab === 'traffic' ? 'active' : ''}`}
+                              onClick={() => setInspectorTab('traffic')}
+                              style={{
+                                flex: 1,
+                                padding: '6px 8px',
+                                background: 'transparent',
+                                border: 'none',
+                                borderBottom: inspectorTab === 'traffic' ? '2px solid var(--color-success)' : '2px solid transparent',
+                                color: inspectorTab === 'traffic' ? 'var(--color-success)' : 'var(--text-muted)',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                fontSize: '11px',
+                                textAlign: 'center',
+                                transition: 'all 0.2s'
+                              }}
+                            >
+                              Data Plane Tools
+                            </button>
                           </div>
+
+                          {inspectorTab === 'details' ? (
+                            <div className="inspector-details" style={{ maxHeight: '380px', overflowY: 'auto' }}>
+                              <div className="detail-row">
+                                <span className="detail-label">SUPI</span>
+                                <span className="detail-val font-mono">{activeUe.supi}</span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">SUCI</span>
+                                <span className="detail-val font-mono" style={{ fontSize: '11px' }}>
+                                  {`suci-0-999-70-0-0-0-${activeUe.supi.slice(-5)}`}
+                                </span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">5G-GUTI</span>
+                                <span className="detail-val font-mono" style={{ fontSize: '11px' }}>
+                                  {`guti-999-70-0001-${activeUe.supi.slice(-4)}`}
+                                </span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">5GMM State</span>
+                                <span className="detail-val font-semibold" style={{ color: activeUe.stateMmDesc?.includes('REGISTERED') ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                                  {activeUe.stateMmDesc}
+                                </span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">5GMM Connection</span>
+                                <span className="detail-val font-semibold" style={{ color: activeUe.stateMmDesc?.includes('REGISTERED') ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                                  {activeUe.stateMmDesc?.includes('REGISTERED') ? 'CONNECTED (N1)' : 'IDLE'}
+                                </span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">RRC State</span>
+                                <span className="detail-val font-semibold" style={{ color: activeUe.stateMmDesc?.includes('REGISTERED') ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                                  {activeUe.stateMmDesc?.includes('REGISTERED') ? 'RRC-CONNECTED' : 'RRC-IDLE'}
+                                </span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">Connected Cell</span>
+                                <span className="detail-val font-semibold" style={{ color: 'var(--color-primary)' }}>
+                                  {activeUe.gnbProfileName ? `${activeUe.gnbProfileName} (${activeUe.gnbId || '—'})` : '—'}
+                                </span>
+                              </div>
+                              <div className="detail-row" style={{ flexDirection: 'column', alignItems: 'flex-start', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px', marginTop: '8px' }}>
+                                <span className="detail-label" style={{ marginBottom: '4px' }}>PDU Sessions ({activeUe.pduSessions?.length || 0})</span>
+                                {activeUe.pduSessions && activeUe.pduSessions.length > 0 ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
+                                    {activeUe.pduSessions.map(s => (
+                                      <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', width: '100%' }}>
+                                        <span style={{ color: 'var(--color-info)' }}>PDU #{s.id} ({s.dnn}):</span>
+                                        <span className="font-mono ml-auto" style={{ marginRight: '6px' }}>{s.ueIp || '—'}</span>
+                                        <span className={`fleet-state-badge sm ${s.stateDesc?.includes('ACTIVE') ? 'registered' : 'pending'}`}>{s.stateDesc}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="detail-val" style={{ color: 'var(--text-muted)', fontSize: '11px' }}>None</span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="inspector-details" style={{ maxHeight: '380px', overflowY: 'auto', paddingRight: '4px' }}>
+                              
+                              {/* 1. Ping Tool */}
+                              <div className="tool-section" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '12px', marginBottom: '12px' }}>
+                                <h5 style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 'bold', color: 'var(--color-success)', margin: '0 0 6px 0' }}>
+                                  <Terminal size={12} /> Ping Utility
+                                </h5>
+                                <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                                  <input 
+                                    type="text" 
+                                    value={uePingTarget} 
+                                    onChange={(e) => setUePingTarget(e.target.value)} 
+                                    placeholder="8.8.8.8"
+                                    style={{ flex: 1, padding: '4px 6px', borderRadius: '4px', background: '#0f172a', border: '1px solid var(--border-color)', color: '#ffffff', fontSize: '11px' }}
+                                  />
+                                  <button 
+                                    onClick={() => startUePing(activeUe.id)} 
+                                    disabled={uePingRunning}
+                                    style={{ padding: '4px 8px', borderRadius: '4px', background: 'var(--color-success)', color: '#000000', border: 'none', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}
+                                  >
+                                    {uePingRunning ? 'Ping...' : 'Run'}
+                                  </button>
+                                </div>
+                                {uePingLog && (
+                                  <pre style={{ background: '#0f172a', color: '#10b981', fontFamily: 'monospace', fontSize: '9px', padding: '6px', borderRadius: '4px', maxHeight: '100px', overflowY: 'auto', margin: 0, border: '1px solid rgba(16,185,129,0.1)' }}>
+                                    {uePingLog}
+                                  </pre>
+                                )}
+                              </div>
+
+                              {/* 2. Web Browser */}
+                              <div className="tool-section" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '12px', marginBottom: '12px' }}>
+                                <h5 style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 'bold', color: 'var(--color-info)', margin: '0 0 6px 0' }}>
+                                  <Globe size={12} /> HTTP Web Client
+                                </h5>
+                                <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                                  <input 
+                                    type="text" 
+                                    value={browserUrl} 
+                                    onChange={(e) => setBrowserUrl(e.target.value)} 
+                                    placeholder="example.com"
+                                    style={{ flex: 1, padding: '4px 6px', borderRadius: '4px', background: '#0f172a', border: '1px solid var(--border-color)', color: '#ffffff', fontSize: '11px' }}
+                                  />
+                                  <button 
+                                    onClick={() => fetchUeHttp(activeUe.id)} 
+                                    disabled={browserRunning}
+                                    style={{ padding: '4px 8px', borderRadius: '4px', background: 'var(--color-info)', color: '#ffffff', border: 'none', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}
+                                  >
+                                    {browserRunning ? 'Fetch...' : 'Fetch'}
+                                  </button>
+                                </div>
+                                {browserResult && (
+                                  <div style={{ marginTop: '6px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                                      <span>Status: <strong style={{ color: browserResult.statusCode === 200 ? 'var(--color-success)' : '#ef4444' }}>{browserResult.statusCode}</strong></span>
+                                      <span>Elapsed: <strong>{browserResult.timeMs}ms</strong> ({browserResult.mode})</span>
+                                    </div>
+                                    <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', overflow: 'hidden' }}>
+                                      <div style={{ background: 'rgba(255,255,255,0.05)', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.1)', fontSize: '9px' }}>
+                                        <span style={{ color: '#ef4444', marginRight: '2px' }}>●</span>
+                                        <span style={{ color: '#f59e0b', marginRight: '2px' }}>●</span>
+                                        <span style={{ color: '#10b981' }}>●</span>
+                                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px', flex: 1, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', color: '#94a3b8', marginLeft: '6px', fontFamily: 'monospace' }}>
+                                          {browserUrl}
+                                        </div>
+                                      </div>
+                                      <div style={{ background: '#ffffff', color: '#1e293b', padding: '8px', fontSize: '10px', maxHeight: '110px', overflowY: 'auto' }}>
+                                        {browserResult.body.includes('<!DOCTYPE html>') || browserResult.body.includes('<html>') ? (
+                                          <div dangerouslySetInnerHTML={{ __html: browserResult.body }} />
+                                        ) : (
+                                          <pre style={{ margin: 0, fontSize: '9px', whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{browserResult.body}</pre>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* 3. Video Stream */}
+                              <div className="tool-section" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '12px', marginBottom: '12px' }}>
+                                <h5 style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 'bold', color: 'var(--color-primary)', margin: '0 0 6px 0' }}>
+                                  <Tv size={12} /> Video Stream Player
+                                </h5>
+                                <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                                  <select 
+                                    value={videoQuality} 
+                                    onChange={(e) => setVideoQuality(e.target.value)} 
+                                    disabled={isStreaming}
+                                    style={{ flex: 1, padding: '4px 6px', borderRadius: '4px', background: '#0f172a', border: '1px solid var(--border-color)', color: '#ffffff', fontSize: '11px' }}
+                                  >
+                                    <option value="720p">720p HD (2.5 Mbps)</option>
+                                    <option value="1080p">1080p Full HD (6.5 Mbps)</option>
+                                    <option value="4k">4K Ultra HD (20.0 Mbps)</option>
+                                  </select>
+                                  <button 
+                                    onClick={() => toggleUeStream(activeUe.id, isStreaming ? 'stop' : 'start')} 
+                                    style={{ padding: '4px 8px', borderRadius: '4px', background: isStreaming ? '#ef4444' : 'var(--color-primary)', color: '#ffffff', border: 'none', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}
+                                  >
+                                    {isStreaming ? 'Stop' : 'Play'}
+                                  </button>
+                                </div>
+                                {isStreaming ? (
+                                  <div style={{ marginTop: '6px' }}>
+                                    <div style={{
+                                      height: '90px',
+                                      background: '#000000',
+                                      borderRadius: '6px',
+                                      position: 'relative',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      justifyContent: 'center',
+                                      alignItems: 'center',
+                                      overflow: 'hidden',
+                                      border: '1px solid var(--color-primary)'
+                                    }}>
+                                      {tInfo?.bufferSec < 8 ? (
+                                        <div style={{ textAlign: 'center' }}>
+                                          <div style={{ 
+                                            border: '2px solid rgba(255,255,255,0.1)', 
+                                            borderTop: '2px solid var(--color-primary)', 
+                                            borderRadius: '50%', 
+                                            width: '18px', 
+                                            height: '18px', 
+                                            animation: 'spin 1.2s linear infinite', 
+                                            margin: '0 auto 6px auto' 
+                                          }} />
+                                          <span style={{ fontSize: '9px', color: '#a1a1aa' }}>Buffering ({tInfo?.bufferSec || 0}s)...</span>
+                                        </div>
+                                      ) : (
+                                        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '6px', boxSizing: 'border-box' }}>
+                                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '8px', color: '#ffffff' }}>
+                                            <span style={{ background: 'var(--color-primary)', color: '#ffffff', padding: '1px 3px', borderRadius: '2px', fontWeight: 'bold' }}>LIVE ({videoQuality})</span>
+                                            <span style={{ fontFamily: 'monospace' }}>{(tInfo?.speedMbps || 0.0).toFixed(1)} Mbps</span>
+                                          </div>
+                                          <div style={{ display: 'flex', gap: '2px', justifyContent: 'center', alignItems: 'flex-end', height: '35px' }}>
+                                            {/* Audio waves visual simulation */}
+                                            {[1,2,3,4,5,6,7,8,9,10,11,12].map(i => {
+                                              const rndH = 10 + Math.sin(Date.now() / 200 + i) * 12 + Math.random() * 8;
+                                              return (
+                                                <div key={i} style={{
+                                                  width: '4px',
+                                                  height: `${rndH}px`,
+                                                  background: 'var(--color-primary)',
+                                                  borderRadius: '2px',
+                                                  opacity: 0.8
+                                                }} />
+                                              );
+                                            })}
+                                          </div>
+                                          <div style={{ width: '100%', background: 'rgba(255,255,255,0.2)', height: '3px', borderRadius: '1.5px', overflow: 'hidden' }}>
+                                            <div style={{ width: `${(tInfo?.bufferSec || 15) * 4}%`, background: 'var(--color-primary)', height: '100%', borderRadius: '1.5px', transition: 'width 0.5s' }} />
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <style>{`
+                                      @keyframes spin {
+                                        0% { transform: rotate(0deg); }
+                                        100% { transform: rotate(360deg); }
+                                      }
+                                    `}</style>
+                                  </div>
+                                ) : (
+                                  <div style={{ fontSize: '9px', color: 'var(--text-muted)', textAlign: 'center', padding: '8px', background: 'rgba(255,255,255,0.01)', borderRadius: '4px', border: '1px dashed var(--border-color)' }}>
+                                    Stream offline. Start streaming above.
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* 4. VoNR Dialer */}
+                              <div className="tool-section" style={{ marginBottom: '6px' }}>
+                                <h5 style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 'bold', color: '#10b981', margin: '0 0 6px 0' }}>
+                                  <Phone size={12} /> VoNR SIP Phone Dialer
+                                </h5>
+                                
+                                <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+                                  <select 
+                                    value={vonrCallee} 
+                                    onChange={(e) => setVonrCallee(e.target.value)} 
+                                    disabled={isCallActive}
+                                    style={{ flex: 1, padding: '4px 6px', borderRadius: '4px', background: '#0f172a', border: '1px solid var(--border-color)', color: '#ffffff', fontSize: '11px' }}
+                                  >
+                                    <option value="echo">Voice Echo (Mock SIP Service)</option>
+                                    {otherUes.map((u: any) => (
+                                      <option key={u.id} value={u.id.toString()}>UE-{u.id} (Direct Core Call)</option>
+                                    ))}
+                                  </select>
+                                  
+                                  {!isCallActive ? (
+                                    <button 
+                                      onClick={() => dialVonr(activeUe.id)} 
+                                      style={{ padding: '4px 10px', borderRadius: '4px', background: 'var(--color-success)', color: '#000000', border: 'none', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}
+                                    >
+                                      Dial
+                                    </button>
+                                  ) : (
+                                    <button 
+                                      onClick={() => hangupVonr(activeUe.id)} 
+                                      style={{ padding: '4px 10px', borderRadius: '4px', background: '#ef4444', color: '#ffffff', border: 'none', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}
+                                    >
+                                      Hangup
+                                    </button>
+                                  )}
+                                </div>
+
+                                {isCallActive ? (
+                                  <div className="vonr-dialer" style={{ marginTop: '8px' }}>
+                                    
+                                    {/* Call active stats screen */}
+                                    <div className="vonr-status-screen">
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <div className={activeCall.status === 'ringing' || activeCall.status === 'dialing' ? 'vonr-ringing' : ''}>
+                                          <Phone size={14} color={activeCall.status === 'connected' ? '#10b981' : '#f59e0b'} />
+                                        </div>
+                                        <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                                          {activeCall.status}
+                                        </span>
+                                      </div>
+                                      <div style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                                        Target: {activeCall.calleeId === 'echo' ? 'SIP Voice Echo' : `UE-${activeCall.calleeId}`}
+                                      </div>
+                                      {activeCall.status === 'connected' && (
+                                        <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#ffffff', fontFamily: 'monospace', marginTop: '2px' }}>
+                                          {Math.floor(activeCall.callDuration / 60)}:{(activeCall.callDuration % 60).toString().padStart(2, '0')}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Metrics Grid */}
+                                    {activeCall.status === 'connected' && (
+                                      <div className="vonr-metrics-grid" style={{ marginTop: '6px' }}>
+                                        <div className="vonr-metric-card">
+                                          <span className="vonr-metric-lbl">MOS Score</span>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                            <span className="vonr-metric-val">{(activeCall.mosScore || 4.5).toFixed(2)}</span>
+                                            <span className={`vonr-mos-badge ${
+                                              (activeCall.mosScore || 4.5) >= 4.0 ? 'vonr-mos-excel' : (activeCall.mosScore || 4.5) >= 3.0 ? 'vonr-mos-good' : 'vonr-mos-poor'
+                                            }`}>
+                                              {(activeCall.mosScore || 4.5) >= 4.0 ? 'Excel' : (activeCall.mosScore || 4.5) >= 3.0 ? 'Good' : 'Poor'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="vonr-metric-card">
+                                          <span className="vonr-metric-lbl">Latency</span>
+                                          <span className="vonr-metric-val">{(activeCall.latencyMs || 0).toFixed(1)} ms</span>
+                                        </div>
+                                        <div className="vonr-metric-card">
+                                          <span className="vonr-metric-lbl">Jitter</span>
+                                          <span className="vonr-metric-val">{(activeCall.jitterMs || 0).toFixed(1)} ms</span>
+                                        </div>
+                                        <div className="vonr-metric-card">
+                                          <span className="vonr-metric-lbl">Packet Loss</span>
+                                          <span className="vonr-metric-val">{(activeCall.packetLossPct || 0.0).toFixed(2)} %</span>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* SIP Logs */}
+                                    {activeCall.sipLogs && activeCall.sipLogs.length > 0 && (
+                                      <div style={{ background: '#070b13', padding: '6px', borderRadius: '4px', maxHeight: '80px', overflowY: 'auto', fontSize: '9px', fontFamily: 'monospace', color: '#60a5fa', marginTop: '6px', border: '1px solid rgba(96,165,250,0.15)' }}>
+                                        {activeCall.sipLogs.map((l: string, idx: number) => (
+                                          <div key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)', paddingBottom: '2px', marginBottom: '2px', whiteSpace: 'nowrap' }}>{l}</div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <div className="vonr-keypad" style={{ marginTop: '6px' }}>
+                                      {['1','2','3','4','5','6','7','8','9','*','0','#'].map(key => (
+                                        <button 
+                                          key={key} 
+                                          className="vonr-key"
+                                          onClick={() => {
+                                            if (['0','1','2','3','4','5','6','7','8','9'].includes(key)) {
+                                              // High fidelity interaction: if key matches another UE, choose it
+                                              const candidate = otherUes.find((x: any) => x.id.toString().endsWith(key));
+                                              if (candidate) {
+                                                setVonrCallee(candidate.id.toString());
+                                              }
+                                            }
+                                          }}
+                                        >
+                                          {key}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                            </div>
+                          )}
                         </>
                       );
                     }

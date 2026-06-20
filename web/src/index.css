@@ -1762,3 +1762,414 @@ foreignObject .topology-node.clickable-node:hover {
 foreignObject .topology-node.clickable-node:active {
   transform: scale(0.96) !important;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   📊 Data Plane Traffic simulation UI styles
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Inspector tab headers */
+.inspector-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 12px;
+}
+
+.inspector-tab-btn {
+  padding: 6px 12px;
+  font-weight: 600;
+  font-size: 11px;
+  cursor: pointer;
+  border: none;
+  background: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.inspector-tab-btn:hover {
+  color: var(--text-primary);
+}
+
+.inspector-tab-btn.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+body.light .inspector-tab-btn.active {
+  color: #3b82f6;
+  border-bottom-color: #3b82f6;
+}
+
+/* Data tools panel layout */
+.data-tools-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar for Data tools */
+.data-tools-container::-webkit-scrollbar {
+  width: 4px;
+}
+.data-tools-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+.data-tools-container::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+}
+
+.data-tool-section {
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+body.light .data-tool-section {
+  background: rgba(0, 0, 0, 0.01);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+.tool-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+}
+
+body.light .tool-title {
+  border-bottom-color: rgba(0, 0, 0, 0.03);
+}
+
+.tool-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.tool-input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-primary);
+  font-family: monospace;
+}
+
+body.light .tool-input {
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.15);
+}
+
+.tool-btn {
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-transform: uppercase;
+  border: none;
+}
+
+.tool-btn-primary {
+  background: var(--color-primary);
+  color: #ffffff;
+}
+
+.tool-btn-primary:hover {
+  filter: brightness(1.15);
+}
+
+body.light .tool-btn-primary {
+  background: #3b82f6;
+}
+
+.tool-btn-danger {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+.tool-btn-danger:hover {
+  filter: brightness(1.15);
+}
+
+/* Terminal log block for Ping */
+.terminal-box {
+  background: #060913;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 10px;
+  color: #10b981;
+  max-height: 110px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.8);
+}
+
+body.light .terminal-box {
+  background: #0f172a;
+  border-color: #0f172a;
+}
+
+/* Browser preview panel */
+.browser-preview {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0f172a;
+  display: flex;
+  flex-direction: column;
+}
+
+.browser-url-bar {
+  background: rgba(255,255,255,0.03);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
+  font-family: monospace;
+  font-size: 9px;
+  color: var(--text-secondary);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.browser-headers {
+  background: rgba(0,0,0,0.25);
+  font-family: monospace;
+  font-size: 9px;
+  color: #94a3b8;
+  padding: 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  white-space: pre-wrap;
+  max-height: 70px;
+  overflow-y: auto;
+}
+
+.browser-body {
+  padding: 8px 12px;
+  color: #334155;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #ffffff;
+  max-height: 130px;
+  overflow-y: auto;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Video Player UI */
+.video-player-mock {
+  background: #020617;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+.video-screen {
+  width: 100%;
+  height: 110px;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: radial-gradient(circle, #1e293b 0%, #030712 100%);
+  color: #ffffff;
+  text-align: center;
+  position: relative;
+  gap: 6px;
+}
+
+.video-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.video-progress-fill {
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 0.3s;
+}
+
+body.light .video-progress-fill {
+  background: #3b82f6;
+}
+
+.video-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-family: monospace;
+  color: var(--text-secondary);
+}
+
+.video-buffering-spinner {
+  border: 3px solid rgba(255,255,255,0.1);
+  border-top: 3px solid var(--color-primary);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* VoNR Dialer UI */
+.vonr-dialer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vonr-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  max-width: 150px;
+  margin: 8px auto;
+}
+
+.vonr-key {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: all 0.15s;
+}
+
+.vonr-key:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: var(--color-primary);
+}
+
+.vonr-status-screen {
+  text-align: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
+  border: 1px dashed var(--border-color);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.vonr-ringing {
+  animation: call-shake 0.4s infinite alternate;
+}
+
+@keyframes call-shake {
+  0% { transform: rotate(-5deg) scale(1.1); }
+  100% { transform: rotate(5deg) scale(1.1); }
+}
+
+.vonr-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  width: 100%;
+}
+
+.vonr-metric-card {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vonr-metric-lbl {
+  font-size: 9px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.vonr-metric-val {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.vonr-mos-badge {
+  font-weight: bold;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 9px;
+  display: inline-block;
+  text-transform: uppercase;
+}
+
+.vonr-mos-excel {
+  background: rgba(16,185,129,0.15);
+  color: #10b981;
+}
+
+.vonr-mos-good {
+  background: rgba(245,158,11,0.15);
+  color: #f59e0b;
+}
+
+.vonr-mos-poor {
+  background: rgba(239,68,68,0.15);
+  color: #ef4444;
+}
+
+/* Speed indicator badge on topology node */
+.traffic-speed-badge {
+  background: rgba(15, 23, 42, 0.95);
+  border: 1.5px solid var(--node-color);
+  border-radius: 12px;
+  padding: 2px 6px;
+  font-family: monospace;
+  font-size: 8px;
+  font-weight: 700;
+  color: #ffffff;
+  pointer-events: none;
+  box-shadow: 0 0 8px var(--node-color-glow);
+  white-space: nowrap;
+}

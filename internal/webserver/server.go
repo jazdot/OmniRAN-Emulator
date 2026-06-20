@@ -107,6 +107,14 @@ func StartServer(host string, port int) error {
 	mux.HandleFunc("/api/ping", handlePingTest)
 	mux.HandleFunc("/api/logs/stream", handleLogStream)
 
+	// User Plane Traffic API Routes
+	mux.HandleFunc("/api/ue/ping", handleUEPing)
+	mux.HandleFunc("/api/ue/http", handleUEHttp)
+	mux.HandleFunc("/api/ue/stream", handleUEStream)
+	mux.HandleFunc("/api/ue/vonr/dial", handleUEVonrDial)
+	mux.HandleFunc("/api/ue/vonr/hangup", handleUEVonrHangup)
+	mux.HandleFunc("/api/ue/traffic/stats", handleUETrafficStats)
+
 	// Fleet Manager API Routes
 	mux.HandleFunc("/api/fleet/ue", handleFleetUEProfiles)
 	mux.HandleFunc("/api/fleet/ue/", handleFleetUEProfileDelete)
