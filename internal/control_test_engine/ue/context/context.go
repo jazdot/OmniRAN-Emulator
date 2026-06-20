@@ -49,6 +49,7 @@ type UEContext struct {
 	gnbSocketPath string
 	gnbId          string
 	gnbProfileName string
+	OnRedirection  func(ue *UEContext)
 }
 
 type Amf struct {
@@ -840,4 +841,12 @@ func (ue *UEContext) GetGnbProfileName() string {
 		return "gNB-Default"
 	}
 	return ue.gnbProfileName
+}
+
+func (ue *UEContext) GetMcc() string {
+	return ue.UeSecurity.mcc
+}
+
+func (ue *UEContext) GetMnc() string {
+	return ue.UeSecurity.mnc
 }

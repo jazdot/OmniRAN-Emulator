@@ -81,7 +81,19 @@ func processingConn(ue *context.GNBUe, gnb *context.GNBContext) {
 		forwardData := make([]byte, n)
 		copy(forwardData, buf[:n])
 
+		// Find the active UE context in GNodeB that is currently associated with this connection.
+		// If the connection was transferred (e.g. during target cell access in handover),
+		// we should use the updated real UE context.
+		activeUe := ue
+		gnb.RangeUePool(func(ranUeId int64, temp *context.GNBUe) bool {
+			if temp.GetUnixSocket() == conn {
+				activeUe = temp
+				return false // stop iteration
+			}
+			return true
+		})
+
 		// send to dispatch.
-		go nas.Dispatch(ue, forwardData, gnb)
+		go nas.Dispatch(activeUe, forwardData, gnb)
 	}
 }

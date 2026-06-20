@@ -8,12 +8,30 @@ import (
 	"regexp"
 	"runtime"
 	"os"
+	"sync"
 
 	"gopkg.in/yaml.v2"
 )
 
 // Data: Used for access to configuration globally
 var Data Config
+
+var (
+	ActiveRelease string = "15" // "15" (R15/R16), "17", "18", "19"
+	releaseMu     sync.RWMutex
+)
+
+func GetActiveRelease() string {
+	releaseMu.RLock()
+	defer releaseMu.RUnlock()
+	return ActiveRelease
+}
+
+func SetActiveRelease(rel string) {
+	releaseMu.Lock()
+	defer releaseMu.Unlock()
+	ActiveRelease = rel
+}
 
 func init() {
 	_ = DefaultInit()

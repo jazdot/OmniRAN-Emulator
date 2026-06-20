@@ -2,6 +2,10 @@ package state
 
 import (
 	"encoding/binary"
+	"fmt"
+	"net"
+	"time"
+
 	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
 	data "OmniRAN-Emulator/internal/control_test_engine/ue/data/service"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas"
@@ -33,6 +37,69 @@ func DispatchState(ue *context.UEContext, message []byte) {
 			amfUeId := int64(binary.BigEndian.Uint64(message[2:10]))
 			ue.SetAmfUeId(amfUeId)
 			log.Infof("[UE] AMF UE NGAP ID updated from GNodeB: %d", amfUeId)
+		} else if len(message) == 2 && message[1] == 0x05 {
+			log.Info("[UE] Received Handover Command from Source GNodeB. Closing old connection and accessing Target GNodeB...")
+			
+			oldConn := ue.GetUnixConn()
+			if oldConn != nil {
+				_ = oldConn.Close()
+			}
+
+			var conn net.Conn
+			var err error
+			targetGnbLinkType := ue.GetGnbLinkType()
+
+			if targetGnbLinkType == "tcp" {
+				addr := fmt.Sprintf("%s:%d", ue.GetGnbControlIp(), ue.GetGnbLinkPort())
+				conn, err = net.Dial("tcp", addr)
+				if err != nil {
+					log.Errorf("[UE] Error connecting to Target GNodeB via TCP: %v", err)
+					return
+				}
+			} else {
+				socketPath := ue.GetGnbSocketPath()
+				if socketPath == "" {
+					socketPath = "/tmp/gnb.sock"
+				}
+				dialer := net.Dialer{
+					LocalAddr: &net.UnixAddr{
+						Name: fmt.Sprintf("@ue_%d", ue.GetUeId()),
+						Net:  "unix",
+					},
+				}
+				for i := 0; i < 10; i++ {
+					conn, err = dialer.Dial("unix", socketPath)
+					if err == nil {
+						break
+					}
+					if i < 9 {
+						log.Warnf("[UE] Dial Target GNodeB UNIX socket failed: %v. Retrying in 100ms...", err)
+						time.Sleep(100 * time.Millisecond)
+					}
+				}
+				if err != nil {
+					log.Errorf("[UE] Error connecting to Target GNodeB via UNIX socket %s after retries: %v", socketPath, err)
+					return
+				}
+			}
+
+			ue.SetUnixConn(conn)
+			if ue.OnRedirection != nil {
+				go ue.OnRedirection(ue)
+			}
+
+			amfUeId := ue.GetAmfUeId()
+			accessMsg := make([]byte, 10)
+			accessMsg[0] = 0x00
+			accessMsg[1] = 0x04
+			binary.BigEndian.PutUint64(accessMsg[2:10], uint64(amfUeId))
+
+			_, err = conn.Write(accessMsg)
+			if err != nil {
+				log.Errorf("[UE] Error sending target cell access trigger: %v", err)
+			} else {
+				log.Info("[UE] Cell switch completed. Target cell access trigger sent successfully.")
+			}
 		}
 	} else {
 		// It's an IP plane configuration message from GNodeB.

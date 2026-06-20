@@ -123,6 +123,433 @@ interface LogMsg {
   timestamp: string;
 }
 
+interface DecodedIE {
+  name: string;
+  value?: string;
+  indent: number;
+  release?: string;
+  highlight?: boolean;
+  comment?: string;
+}
+
+interface DecodedMessageData {
+  name: string;
+  hex: string;
+  ies: DecodedIE[];
+  description: string;
+  specRef: string;
+}
+
+const getDecodedPacketData = (msgId: string, rel: string): DecodedMessageData => {
+  const isR17 = rel === '17' || rel === '18' || rel === '19';
+  const isR18 = rel === '18' || rel === '19';
+  const isR19 = rel === '19';
+
+  switch (msgId) {
+    case 'ng-setup': {
+      const ies: DecodedIE[] = [
+        { name: 'NGAP-PDU: initiatingMessage', indent: 0 },
+        { name: 'procedureCode: id-NGSetup (21)', indent: 1 },
+        { name: 'criticality: reject (0)', indent: 1 },
+        { name: 'value: NGSetupRequest', indent: 1 },
+        { name: 'protocolIEs: ProtocolIE-Container', indent: 2 },
+        { name: 'IE [id=GlobalRANNodeID (27)]', indent: 3 },
+        { name: 'value: GlobalGNB-ID', indent: 4 },
+        { name: 'plmnIdentity: 999-70', indent: 5 },
+        { name: 'gnb-ID: macroGNB-ID (0x000001)', indent: 5 },
+        { name: 'IE [id=RANNodeName (95)]', indent: 3 },
+        { name: 'value: "OmniRAN-gNodeB"', indent: 4 },
+        { name: 'IE [id=SupportedTAIList (102)]', indent: 3 },
+        { name: 'SupportedTAI-Item', indent: 4 },
+        { name: 'tai: TAC: 0x000001, PLMN: 999-70', indent: 5 },
+        { name: 'sliceSupportList: SupportedSlicesList', indent: 5 },
+        { name: 'SliceSupportItem: SST: 1, SD: 010203', indent: 6 }
+      ];
+
+      let hex = '0015003f000003001b00050000000001005f000b00084f6d6e6952414e0066001000050050f001000001';
+
+      if (isR17) {
+        ies.push(
+          { name: 'IE [id=NTN-AccessInformation (145)]', indent: 3, release: '17', highlight: true },
+          { name: 'value: satellite-access-allowed (1)', indent: 4, release: '17', highlight: true, comment: 'Allows access from Non-Terrestrial Network (NTN) satellite cells' },
+          { name: 'IE [id=RedCap-CellAccessInfo (146)]', indent: 3, release: '17', highlight: true },
+          { name: 'value: redcap-access-allowed (1)', indent: 4, release: '17', highlight: true, comment: 'Allows reduced capability (RedCap) UEs to camp on this GNodeB cell' }
+        );
+        hex += '009100020101009200020101';
+      }
+      if (isR18) {
+        ies.push(
+          { name: 'IE [id=PagingEarlyIndicationSupport (163)]', indent: 3, release: '18', highlight: true },
+          { name: 'value: supported (0)', indent: 4, release: '18', highlight: true, comment: 'R18 PEI enables power savings for eRedCap and stationary UEs' }
+        );
+        hex += '00a300020000';
+      }
+      if (isR19) {
+        ies.push(
+          { name: 'IE [id=AmbientIoT-GatewayCapabilities (177)]', indent: 3, release: '19', highlight: true },
+          { name: 'value: sensor-relay-active (0)', indent: 4, release: '19', highlight: true, comment: 'Allows reading/relaying passive ambient IoT tags (RFID-style battery-free devices)' },
+          { name: 'IE [id=RAN-AI-Capabilities (194)]', indent: 3, release: '19', highlight: true },
+          { name: 'value: model-inference-supported (1)', indent: 4, release: '19', highlight: true, comment: 'Supports deployment and inference of edge AI/ML models on the GNodeB' }
+        );
+        hex += '00b10002010000c200020101';
+      }
+
+      return {
+        name: 'NG Setup Request',
+        hex,
+        ies,
+        specRef: '3GPP TS 38.413, Section 9.1.8.1',
+        description: 'Initiated by the GNodeB to configure and establish the N2 control interface association with the AMF core, exchanging GNodeB capability flags and PLMN/TAC mappings.'
+      };
+    }
+    case 'initial-ue': {
+      const ies: DecodedIE[] = [
+        { name: 'NGAP-PDU: initiatingMessage', indent: 0 },
+        { name: 'procedureCode: id-InitialUEMessage (15)', indent: 1 },
+        { name: 'criticality: ignore (1)', indent: 1 },
+        { name: 'value: InitialUEMessage', indent: 1 },
+        { name: 'protocolIEs: ProtocolIE-Container', indent: 2 },
+        { name: 'IE [id=RAN-UE-NGAP-ID (85)]', indent: 3 },
+        { name: 'value: 1', indent: 4 },
+        { name: 'IE [id=NAS-PDU (38)]', indent: 3 },
+        { name: 'value: 5GMM Registration Request (0x7e004101...)', indent: 4 },
+        { name: 'IE [id=UserLocationInformation (121)]', indent: 3 },
+        { name: 'value: UserLocationInformationNR', indent: 4 },
+        { name: 'nr-CGI: PLMN: 999-70, NR Cell ID: 0x000001', indent: 5 },
+        { name: 'tai: TAC: 0x000001, PLMN: 999-70', indent: 5 },
+        { name: 'IE [id=RRCEstablishmentCause (90)]', indent: 3 },
+        { name: 'value: mo-Signalling (2)', indent: 4 }
+      ];
+
+      let hex = '000f003600000400550004000000010026000780f0010000010079000b000899970f000001005a000102';
+
+      if (isR17) {
+        ies.push(
+          { name: 'IE [id=RedCapIndication (142)]', indent: 3, release: '17', highlight: true },
+          { name: 'value: true (Reduced Capability UE type)', indent: 4, release: '17', highlight: true, comment: 'Flags to AMF that the UE is a low-complexity RedCap client (1-Rx or 2-Rx)' },
+          { name: 'IE [id=UserLocationInformation-NTN (155)]', indent: 3, release: '17', highlight: true },
+          { name: 'value: TAI: 999-70, OrbitInfo: Sat-ID-42, Coords: Lat 37.7749 / Lon -122.4194', indent: 4, release: '17', highlight: true, comment: 'R17 NTN User location metadata including satellite ephemeris orbital tracking details' }
+        );
+        hex += '008e00020101009b000b000899970f1a2b3c4d';
+      }
+      if (isR18) {
+        ies.push(
+          { name: 'IE [id=AerialUEIndication (173)]', indent: 3, release: '18', highlight: true },
+          { name: 'value: UAV-Drone-Flight-99a (Federal flight auth: FA-8827-US)', indent: 4, release: '18', highlight: true, comment: 'R18 aerial drone indication with authorized flight context and trajectory metadata' },
+          { name: 'IE [id=SliceGroupID (181)]', indent: 3, release: '18', highlight: true },
+          { name: 'value: 0x4f (Slice Group Ultra-Reliable Low-Latency)', indent: 4, release: '18', highlight: true, comment: 'R18 classification grouping for mapping the UE to specific low-latency slice pools' }
+        );
+        hex += '00ad000c0b5541562d44726f6e6500bc000605414d423031';
+      }
+      if (isR19) {
+        ies.push(
+          { name: 'IE [id=AmbientIoTIndication (188)]', indent: 3, release: '19', highlight: true },
+          { name: 'value: EPC: AMB01 (Sensor Temp: 24.5C, Battery: Passive/Harvesting)', indent: 4, release: '19', highlight: true, comment: 'R19 Passive Ambient IoT tag sensor payload (battery-free RFID sensor data)' },
+          { name: 'IE [id=RanAISensingInfo (207)]', indent: 3, release: '19', highlight: true },
+          { name: 'value: ISAC (Integrated Sensing and Communication radar range: 150m, speed: 12m/s)', indent: 4, release: '19', highlight: true, comment: 'R19 ISAC environment sensing targets tracked near the UE location' }
+        );
+        hex += '00cf000b0008c2a3f0190a42';
+      }
+
+      return {
+        name: 'Initial UE Message',
+        hex,
+        ies,
+        specRef: '3GPP TS 38.413, Section 9.1.5.1',
+        description: 'Sent by the GNodeB to the AMF to initiate a signaling connection for a UE, encapsulating the raw NAS Registration Request payload and location identifiers.'
+      };
+    }
+    case 'pdu-setup': {
+      const ies: DecodedIE[] = [
+        { name: 'NGAP-PDU: initiatingMessage', indent: 0 },
+        { name: 'procedureCode: id-PDUSessionResourceSetup (29)', indent: 1 },
+        { name: 'criticality: reject (0)', indent: 1 },
+        { name: 'value: PDUSessionResourceSetupRequest', indent: 1 },
+        { name: 'protocolIEs: ProtocolIE-Container', indent: 2 },
+        { name: 'IE [id=AMF-UE-NGAP-ID (10)]', indent: 3 },
+        { name: 'value: 1', indent: 4 },
+        { name: 'IE [id=RAN-UE-NGAP-ID (85)]', indent: 3 },
+        { name: 'value: 1', indent: 4 },
+        { name: 'IE [id=PDUSessionResourceSetupListSUReq (74)]', indent: 3 },
+        { name: 'PDUSessionResourceSetupItemSUReq', indent: 4 },
+        { name: 'pduSessionID: 1', indent: 5 },
+        { name: 'pduSessionResourceSetupRequestTransfer: (UPF IP: 127.0.0.1, TEID: 1)', indent: 5 },
+        { name: 'snssai: SST: 1, SD: 010203', indent: 5 }
+      ];
+
+      let hex = '001d003b0000030055000400000001004a0004000000010068001e001c00010001000c0101020300100a0000010000000109060504030201';
+
+      if (isR17) {
+        ies.push(
+          { name: 'IE [id=XR-QoS-Parameters (164)]', indent: 3, release: '17', highlight: true },
+          { name: 'value: JitterBudget: 10ms, PacketDelayBudget: 15ms, BurstSize: 1024B', indent: 4, release: '17', highlight: true, comment: 'R17 high-resolution low-latency QoS guidelines optimized for Extended Reality (XR) streams' }
+        );
+        hex += '00a4000d0c0a0f0505';
+      }
+      if (isR18) {
+        ies.push(
+          { name: 'IE [id=SliceGroupID (183)]', indent: 3, release: '18', highlight: true },
+          { name: 'value: SG-01-UltraLowLatency', indent: 4, release: '18', highlight: true, comment: 'R18 Slice Group ID classification for aggregated low-latency priority queue scheduling' }
+        );
+        hex += '00b700040353473031';
+      }
+      if (isR19) {
+        ies.push(
+          { name: 'IE [id=AI-Traffic-Pattern (204)]', indent: 3, release: '19', highlight: true },
+          { name: 'value: Periodicity: 20ms, PredictionAccuracy: 95%, PacketArrivalWindow: 2ms', indent: 4, release: '19', highlight: true, comment: 'R19 AI-derived packet arrival prediction context for battery-saving DRX micro-sleep alignment' }
+        );
+        hex += '00cc000a09145f';
+      }
+
+      return {
+        name: 'PDU Session Resource Setup Request',
+        hex,
+        ies,
+        specRef: '3GPP TS 38.413, Section 9.1.4.1',
+        description: 'Sent by the AMF core to command the GNodeB to provision radio resources and create a GTP-U user plane tunnel endpoint for user plane network data transfer.'
+      };
+    }
+    case 'path-switch': {
+      const ies: DecodedIE[] = [
+        { name: 'NGAP-PDU: initiatingMessage', indent: 0 },
+        { name: 'procedureCode: id-PathSwitchRequest (30)', indent: 1 },
+        { name: 'criticality: reject (0)', indent: 1 },
+        { name: 'value: PathSwitchRequest', indent: 1 },
+        { name: 'protocolIEs: ProtocolIE-Container', indent: 2 },
+        { name: 'IE [id=AMF-UE-NGAP-ID (10)]', indent: 3 },
+        { name: 'value: 1', indent: 4 },
+        { name: 'IE [id=RAN-UE-NGAP-ID (85)]', indent: 3 },
+        { name: 'value: 2', indent: 4 },
+        { name: 'IE [id=UserLocationInformation (121)]', indent: 3 },
+        { name: 'value: nr-CGI: 999-70-000001, TAI: 999-70-000001', indent: 4 },
+        { name: 'IE [id=SourceToTarget-TransparentContainer (91)]', indent: 3 },
+        { name: 'value: 0x0301...', indent: 4 }
+      ];
+
+      let hex = '001e002e000004000a00040000000100550004000000020079000b000899970f000001005b00020301';
+
+      if (isR17) {
+        ies.push(
+          { name: 'IE [id=RedCap-HO-Indication (170)]', indent: 3, release: '17', highlight: true },
+          { name: 'value: supported (0)', indent: 4, release: '17', highlight: true, comment: 'R17 Handover support verification flag for RedCap low-complexity parameters' }
+        );
+        hex += '00aa00020101';
+      }
+      if (isR18) {
+        ies.push(
+          { name: 'IE [id=UAV-Flight-Path-Update (195)]', indent: 3, release: '18', highlight: true },
+          { name: 'value: UAV-Active-Flight (3D Flight Path verified, altitude ceiling 120m)', indent: 4, release: '18', highlight: true, comment: 'R18 Active flight trajectory sync with core to authorize flying drone airspace handover' }
+        );
+        hex += '00c3000b0a5541562d416374697665';
+      }
+      if (isR19) {
+        ies.push(
+          { name: 'IE [id=ISAC-SensingContextTransfer (212)]', indent: 3, release: '19', highlight: true },
+          { name: 'value: active (0)', indent: 4, release: '19', highlight: true, comment: 'R19 context transfer of target radio radar reflection profiles to prevent sensing discontinuity' }
+        );
+        hex += '00d400020101';
+      }
+
+      return {
+        name: 'Path Switch Request',
+        hex,
+        ies,
+        specRef: '3GPP TS 38.413, Section 9.1.2.1',
+        description: 'Sent by the target GNodeB to request the AMF core to switch the active PDU session user plane GTP-U tunnel endpoints from the source GNodeB during Xn handover.'
+      };
+    }
+    case 'handover-req': {
+      const ies: DecodedIE[] = [
+        { name: 'NGAP-PDU: initiatingMessage', indent: 0 },
+        { name: 'procedureCode: id-HandoverPreparation (27)', indent: 1 },
+        { name: 'criticality: reject (0)', indent: 1 },
+        { name: 'value: HandoverRequired', indent: 1 },
+        { name: 'protocolIEs: ProtocolIE-Container', indent: 2 },
+        { name: 'IE [id=AMF-UE-NGAP-ID (10)]', indent: 3 },
+        { name: 'value: 1', indent: 4 },
+        { name: 'IE [id=RAN-UE-NGAP-ID (85)]', indent: 3 },
+        { name: 'value: 2', indent: 4 },
+        { name: 'IE [id=HandoverType (28)]', indent: 3 },
+        { name: 'value: intra5gs (0)', indent: 4 },
+        { name: 'IE [id=Cause (22)]', indent: 3 },
+        { name: 'value: radioNetwork (handover-desirable-for-radio-reasons)', indent: 4 },
+        { name: 'IE [id=TargetID (122)]', indent: 3 },
+        { name: 'value: targetGNB-ID (0x000002)', indent: 4 }
+      ];
+
+      let hex = '001b002c000005000a0004000000010055000400000002001c00020000001600020001007a000400000002';
+
+      if (isR17) {
+        ies.push(
+          { name: 'IE [id=NTN-HO-Offset (171)]', indent: 3, release: '17', highlight: true },
+          { name: 'value: OrbitOffset: 120km, DopplerCompensation: active', indent: 4, release: '17', highlight: true, comment: 'R17 Handover compensation metrics adjusting for high-velocity LEO satellite relative movement' }
+        );
+        hex += '00ab0008070000007801';
+      }
+      if (isR18) {
+        ies.push(
+          { name: 'IE [id=AerialUE-SafetyStatus (196)]', indent: 3, release: '18', highlight: true },
+          { name: 'value: flight-zone-safety-clear (1)', indent: 4, release: '18', highlight: true, comment: 'R18 Airspace geofence and trajectory safety clearance verification flags' }
+        );
+        hex += '00c400020101';
+      }
+      if (isR19) {
+        ies.push(
+          { name: 'IE [id=RAN-AI-ModelContext (213)]', indent: 3, release: '19', highlight: true },
+          { name: 'value: Model-V4 (AI Model context weights transfer active)', indent: 4, release: '19', highlight: true, comment: 'R19 transfers localized reinforcement-learning model weights to target GNodeB for zero-handover-latency tracking' }
+        );
+        hex += '00d500060541492d5634';
+      }
+
+      return {
+        name: 'Handover Required',
+        hex,
+        ies,
+        specRef: '3GPP TS 38.413, Section 9.1.3.1',
+        description: 'Sent by the source GNodeB to the AMF core to trigger N2-based handover when Xn direct interface is unavailable, prompting target resource allocation.'
+      };
+    }
+    case 'handover-ack': {
+      const ies: DecodedIE[] = [
+        { name: 'NGAP-PDU: successfulOutcome', indent: 0 },
+        { name: 'procedureCode: id-HandoverResourceAllocation (29)', indent: 1 },
+        { name: 'criticality: reject (0)', indent: 1 },
+        { name: 'value: HandoverRequestAcknowledge', indent: 1 },
+        { name: 'protocolIEs: ProtocolIE-Container', indent: 2 },
+        { name: 'IE [id=AMF-UE-NGAP-ID (10)]', indent: 3 },
+        { name: 'value: 1', indent: 4 },
+        { name: 'IE [id=RAN-UE-NGAP-ID (85)]', indent: 3 },
+        { name: 'value: 2', indent: 4 },
+        { name: 'IE [id=PDUSessionResourceAdmittedList (75)]', indent: 3 },
+        { name: 'PDUSessionResourceAdmittedItem', indent: 4 },
+        { name: 'pduSessionID: 1', indent: 5 },
+        { name: 'handoverRequestAcknowledgeTransfer: (GTP-U TEID: 1)', indent: 5 }
+      ];
+
+      let hex = '001d002f000004000a0004000000010055000400000002004b000800000001000000010069000a0901020304';
+
+      if (isR17) {
+        ies.push(
+          { name: 'IE [id=XR-LowLatencyAdmitted (172)]', indent: 3, release: '17', highlight: true },
+          { name: 'value: admitted (1)', indent: 4, release: '17', highlight: true, comment: 'R17 target GNodeB verifies allocation of specialized high-jitter low-latency buffer queues' }
+        );
+        hex += '00ac00020101';
+      }
+      if (isR18) {
+        ies.push(
+          { name: 'IE [id=SliceGroupAdmitted (197)]', indent: 3, release: '18', highlight: true },
+          { name: 'value: SG-02-RealTime', indent: 4, release: '18', highlight: true, comment: 'R18 Target cell accepts the user\'s specific Slicing Group scheduling' }
+        );
+        hex += '00c500040353473032';
+      }
+      if (isR19) {
+        ies.push(
+          { name: 'IE [id=RAN-SensingContextAcknowledge (214)]', indent: 3, release: '19', highlight: true },
+          { name: 'value: active-sensing-granted (1)', indent: 4, release: '19', highlight: true, comment: 'R19 confirms target radio sensor sweeps will execute continuously post-HO' }
+        );
+        hex += '00d600060553454e5345';
+      }
+
+      return {
+        name: 'Handover Request Acknowledge',
+        hex,
+        ies,
+        specRef: '3GPP TS 38.413, Section 9.1.3.3',
+        description: 'Sent by the target GNodeB to the AMF core to confirm readiness and allocate user plane tunnel endpoints for incoming UE handover context.'
+      };
+    }
+    case 'ue-release-complete': {
+      const ies: DecodedIE[] = [
+        { name: 'NGAP-PDU: successfulOutcome', indent: 0 },
+        { name: 'procedureCode: id-UEContextRelease (41)', indent: 1 },
+        { name: 'criticality: ignore (1)', indent: 1 },
+        { name: 'value: UEContextReleaseComplete', indent: 1 },
+        { name: 'protocolIEs: ProtocolIE-Container', indent: 2 },
+        { name: 'IE [id=AMF-UE-NGAP-ID (10)]', indent: 3 },
+        { name: 'value: 1', indent: 4 },
+        { name: 'IE [id=RAN-UE-NGAP-ID (85)]', indent: 3 },
+        { name: 'value: 2', indent: 4 },
+        { name: 'IE [id=UserLocationInformation (123)]', indent: 3 },
+        { name: 'value: nr-CGI: 999-70-000001, TAI: 999-70-000001', indent: 4 }
+      ];
+
+      let hex = '0029001b000003000a0004000000010055000400000002007b000500000001';
+
+      if (isR17) {
+        ies.push(
+          { name: 'IE [id=NTN-SessionReleaseStats (173)]', indent: 3, release: '17', highlight: true },
+          { name: 'value: SatelliteConnectionTime: 342s', indent: 4, release: '17', highlight: true, comment: 'R17 records satellite connection duration logs to analyze orbital handovers' }
+        );
+        hex += '00ad00020101';
+      }
+      if (isR18) {
+        ies.push(
+          { name: 'IE [id=UAV-FlightReleaseSummary (198)]', indent: 3, release: '18', highlight: true },
+          { name: 'value: FlightPathCompleted: true', indent: 4, release: '18', highlight: true, comment: 'R18 transmits final drone flight checklist and geo-tracking audit logs' }
+        );
+        hex += '00c600020101';
+      }
+      if (isR19) {
+        ies.push(
+          { name: 'IE [id=AI-InferenceModelLog (215)]', indent: 3, release: '19', highlight: true },
+          { name: 'value: ModelAccPct: 94.8%, InferenceDelay: 4ms', indent: 4, release: '19', highlight: true, comment: 'R19 AI-powered channel prediction feedback metrics logged upon connection lifecycle' }
+        );
+        hex += '00d700040341495f';
+      }
+
+      return {
+        name: 'UE Context Release Complete',
+        hex,
+        ies,
+        specRef: '3GPP TS 38.413, Section 9.1.6.2',
+        description: 'Sent by the GNodeB to the AMF core to confirm that the UE radio/control context resources have been successfully torn down and released.'
+      };
+    }
+    default: {
+      return {
+        name: 'Unknown Message',
+        hex: '',
+        ies: [],
+        specRef: '',
+        description: ''
+      };
+    }
+  }
+};
+
+const formatHexDump = (hex: string): string => {
+  const cleanHex = hex.replace(/[^0-9a-fA-F]/g, '');
+  let result = '';
+  for (let i = 0; i < cleanHex.length; i += 32) {
+    const chunk = cleanHex.slice(i, i + 32);
+    const offset = (i / 2).toString(16).padStart(4, '0');
+    
+    let hexPart = '';
+    for (let j = 0; j < 32; j += 2) {
+      if (j < chunk.length) {
+        hexPart += chunk.slice(j, j + 2) + ' ';
+      } else {
+        hexPart += '   ';
+      }
+      if (j === 14) hexPart += ' ';
+    }
+    
+    let asciiPart = '';
+    for (let j = 0; j < chunk.length; j += 2) {
+      const byteHex = chunk.slice(j, j + 2);
+      const val = parseInt(byteHex, 16);
+      if (val >= 32 && val <= 126) {
+        asciiPart += String.fromCharCode(val);
+      } else {
+        asciiPart += '.';
+      }
+    }
+    
+    result += `${offset}  ${hexPart} |${asciiPart}|\n`;
+  }
+  return result;
+};
+
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const saved = localStorage.getItem('theme');
@@ -130,6 +557,34 @@ export default function App() {
   });
   const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity' | 'fleet' | 'diagnostics'>('dashboard');
   const [selectedNode, setSelectedNode] = useState<'ue' | 'gnb' | 'amf' | 'upf' | 'dn' | 'uu-link' | 'n2-link' | 'n3-link' | 'n6-link' | null>('ue');
+  // 3GPP Spec Release State
+  const [activeRelease, setActiveRelease] = useState<string>('15');
+  const [selectedInspectMsg, setSelectedInspectMsg] = useState<string>('ng-setup');
+  const [inspectRelease, setInspectRelease] = useState<string>('15');
+
+  // Sync inspection release with active release when it updates
+  useEffect(() => {
+    setInspectRelease(activeRelease);
+  }, [activeRelease]);
+
+  const updateRelease = async (rel: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/config/release`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ release: rel })
+      });
+      if (res.ok) {
+        setActiveRelease(rel);
+        fetchStatus();
+      } else {
+        const text = await res.text();
+        alert(`Failed to update 3GPP release: ${text}`);
+      }
+    } catch (err) {
+      console.error("Error updating 3GPP release:", err);
+    }
+  };
 
   // Diagnostics & PCAP States
   const [pcapInterfaces, setPcapInterfaces] = useState<{ index: number; name: string; flags: string; ipAddresses: string[] }[]>([]);
@@ -1227,6 +1682,9 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
+        if (data.activeRelease) {
+          setActiveRelease(data.activeRelease);
+        }
         if (data.configSummary && !pingHost) {
           // Prefill ping host with AMF IP
           const ip = data.configSummary.amfTarget.split(':')[0];
@@ -1795,6 +2253,27 @@ export default function App() {
               <span className="font-semibold">{showBanners ? 'HIDE WARNINGS/TIPS' : 'SHOW WARNINGS/TIPS'}</span>
             </button>
 
+            {/* 3GPP Release Selector Dropdown */}
+            <div className="status-badge" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 12px' }}>
+              <span className="text-muted" style={{ fontSize: '11px', fontWeight: 600 }}>3GPP Spec:</span>
+              <select
+                value={activeRelease}
+                onChange={(e) => updateRelease(e.target.value)}
+                className="release-select"
+                title="Select active 3GPP release for emulation capabilities"
+              >
+                {Array.from(new Set([activeRelease, '15', '17', '18', '19'])).filter(Boolean).sort().map((rel) => (
+                  <option 
+                    key={rel} 
+                    value={rel}
+                    style={{ background: 'var(--bg-panel)', color: 'var(--text-primary)' }}
+                  >
+                    {rel === '15' ? 'Release 15/16 (Baseline)' : rel === '17' ? 'Release 17 (RedCap/NTN)' : rel === '18' ? 'Release 18 (5G-Advanced)' : rel === '19' ? 'Release 19 (AI & Sensing)' : `Release ${rel}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {/* Theme Toggle Button */}
             <button
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
@@ -1808,10 +2287,12 @@ export default function App() {
             {/* AMF Connection status */}
             <div className="status-badge">
               <span className="text-muted">AMF Core:</span>
-              <div
-                className={`status-dot ${
-                  status?.gnbLinkState && status.gnbLinkState !== 'offline' ? 'active' : 'inactive'
-                }`}
+              <Server 
+                size={13} 
+                style={{ 
+                  color: status?.gnbLinkState && status.gnbLinkState !== 'offline' ? '#10b981' : '#ef4444',
+                  flexShrink: 0 
+                }} 
               />
               <span className="font-semibold">
                 {status?.gnbLinkState && status.gnbLinkState !== 'offline' ? 'CONNECTED' : 'DISCONNECTED'}
@@ -1833,16 +2314,18 @@ export default function App() {
             {/* Running Scenario */}
             <div className="status-badge">
               <span className="text-muted">Status:</span>
+              <Activity 
+                size={13} 
+                className={status?.isRunning ? 'animate-pulse' : ''} 
+                style={{ 
+                  color: status?.isRunning ? '#f59e0b' : '#10b981',
+                  flexShrink: 0 
+                }} 
+              />
               {status?.isRunning ? (
-                <>
-                  <span className="status-dot warning animate-pulse" />
-                  <span className="text-amber-500 font-bold uppercase">{status.runningName}</span>
-                </>
+                <span className="text-amber-500 font-bold uppercase">{status.runningName}</span>
               ) : (
-                <>
-                  <div className="status-dot active" />
-                  <span className="text-emerald-500 font-bold">IDLE</span>
-                </>
+                <span className="text-emerald-500 font-bold">IDLE</span>
               )}
             </div>
           </div>
@@ -3155,14 +3638,13 @@ export default function App() {
                 const isRunningThis = status?.isRunning && status.runningName === scen.id;
                 return (
                   <div className="card scenario-card" key={scen.id}>
-                    <div className="card-header">
+                    <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span className="card-title font-bold text-white">{scen.name}</span>
-                      <span
-                        className="status-dot"
-                        style={{
-                          backgroundColor: isRunningThis ? 'var(--color-warning)' : 'var(--border-color)'
-                        }}
-                      />
+                      {isRunningThis ? (
+                        <Activity size={12} className="animate-pulse" style={{ color: '#f59e0b' }} />
+                      ) : (
+                        <Play size={12} style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+                      )}
                     </div>
                     <div className="card-body">
                       <p className="scenario-description">{scen.description}</p>
@@ -3384,10 +3866,9 @@ export default function App() {
           <div className="view-body fade-in">
             <div className="console-panel">
               <div className="console-header">
-                <div className="console-dot-actions">
-                  <div className="console-dot red" />
-                  <div className="console-dot yellow" />
-                  <div className="console-dot green" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)' }}>
+                  <Terminal size={14} />
+                  <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.05em' }}>CONSOLE</span>
                 </div>
 
                 <div className="console-filter-bar">
@@ -3434,7 +3915,7 @@ export default function App() {
                       value={logSearch}
                       onChange={(e) => setLogSearch(e.target.value)}
                       style={{ 
-                        background: 'rgba(255,255,255,0.02)', 
+                        background: 'var(--bg-input)', 
                         border: '1px solid var(--border-color)', 
                         borderRadius: '4px', 
                         color: 'var(--text-primary)', 
@@ -4176,49 +4657,255 @@ export default function App() {
               </div>
             </div>
 
+            {/* 3GPP Decoded Frame Inspector Card */}
+            <div className="card" style={{ marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Layers size={18} className="text-blue" />
+                  3GPP Decoded Frame Inspector
+                </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Inspector Spec Release:</span>
+                  <div style={{ display: 'flex', border: '1px solid var(--border-color)', borderRadius: '6px', overflow: 'hidden' }}>
+                    {['15', '17', '18', '19'].map((r) => (
+                      <button
+                        key={r}
+                        onClick={() => setInspectRelease(r)}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          background: inspectRelease === r ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                          color: inspectRelease === r ? '#60a5fa' : 'var(--text-secondary)',
+                          fontWeight: inspectRelease === r ? 'bold' : 'normal',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        Rel {r === '15' ? '15/16' : r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Alert explaining capabilities */}
+              <div className="fleet-toast info" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.15)', padding: '8px 12px', borderRadius: '6px', margin: 0 }}>
+                <Activity size={14} style={{ color: '#10b981', flexShrink: 0 }} />
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  <strong>APER Decode View:</strong> Real-time APER decoded representation. Highlighted green items represent 3GPP Release capabilities enabled on the simulated control plane.
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr', gap: '20px' }}>
+                {/* Left panel: Message select list */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px', letterSpacing: '0.05em' }}>
+                    Control Plane Messages
+                  </div>
+                  {[
+                    { id: 'ng-setup', label: 'NG Setup Request' },
+                    { id: 'initial-ue', label: 'Initial UE Message' },
+                    { id: 'pdu-setup', label: 'PDU Session Setup Req' },
+                    { id: 'path-switch', label: 'Path Switch Request' },
+                    { id: 'handover-req', label: 'Handover Required' },
+                    { id: 'handover-ack', label: 'Handover Request Ack' },
+                    { id: 'ue-release-complete', label: 'UE Context Release Complete' }
+                  ].map((msg) => (
+                    <button
+                      key={msg.id}
+                      onClick={() => setSelectedInspectMsg(msg.id)}
+                      className={`inspect-msg-btn ${selectedInspectMsg === msg.id ? 'active' : ''}`}
+                    >
+                      {msg.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Right panel: Decode output */}
+                {(() => {
+                  const decoded = getDecodedPacketData(selectedInspectMsg, inspectRelease);
+                  const formattedHex = formatHexDump(decoded.hex);
+                  const isR17 = inspectRelease === '17' || inspectRelease === '18' || inspectRelease === '19';
+                  const isR18 = inspectRelease === '18' || inspectRelease === '19';
+                  const isR19 = inspectRelease === '19';
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{decoded.name}</span>
+                          <span className="badge" style={{ fontSize: '10px', background: 'rgba(59,130,246,0.1)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.2)', padding: '2px 6px', borderRadius: '4px', fontFamily: 'monospace' }}>
+                            {decoded.specRef}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(decoded.hex);
+                            alert("Copied raw hex stream to clipboard!");
+                          }}
+                          className="btn btn-ghost btn-sm"
+                          style={{ padding: '2px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          Copy Hex
+                        </button>
+                      </div>
+
+                      <p style={{ margin: 0, fontSize: '12px', opacity: 0.8, color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                        {decoded.description}
+                      </p>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        {/* Decoded ASN.1 Tree */}
+                        <div>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase' }}>ASN.1 APER Structured View</div>
+                          <div className="asn1-tree">
+                            {decoded.ies.map((ie, index) => {
+                              const isHighlighted = ie.highlight && ((ie.release === '17' && isR17) || (ie.release === '18' && isR18) || (ie.release === '19' && isR19));
+                              return (
+                                <div
+                                  key={index}
+                                  className={`asn1-line ${isHighlighted ? 'highlighted' : ''}`}
+                                  style={{ paddingLeft: `${ie.indent * 16}px` }}
+                                >
+                                  {/* Indent connector lines */}
+                                  {Array.from({ length: ie.indent }).map((_, depth) => (
+                                    <span key={depth} style={{ color: 'var(--border-color)', marginRight: '8px', userSelect: 'none' }}>│</span>
+                                  ))}
+                                  <span className="asn1-tag">{ie.name}</span>
+                                  {ie.value && <span className="asn1-value">: {ie.value}</span>}
+                                  {ie.comment && <span className="asn1-comment"> -- {ie.comment}</span>}
+                                  {ie.release && (
+                                    <span style={{ fontSize: '9px', fontWeight: 'bold', background: ie.release === '17' ? '#10b981' : ie.release === '18' ? '#7c3aed' : '#0284c7', color: '#fff', padding: '1px 4px', borderRadius: '3px', marginLeft: '6px', fontFamily: 'sans-serif' }}>
+                                      Rel {ie.release === '15' ? '15/16' : ie.release}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Raw Hex Pane */}
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Raw APER Byte Stream</span>
+                            <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>Size: {decoded.hex.length / 2} Bytes</span>
+                          </div>
+                          <div className="hex-pane">
+                            {formattedHex}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+
             {/* Bottom Row: Permanent System Logs Console */}
             <div className="console-panel" style={{ marginTop: '24px' }}>
-              <div className="console-header" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px', padding: '12px 20px' }}>
-                <div className="console-dot-actions" style={{ display: 'flex', gap: '6px' }}>
-                  <div className="console-dot red" style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ff5f56' }} />
-                  <div className="console-dot yellow" style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ffbd2e' }} />
-                  <div className="console-dot green" style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#27c93f' }} />
-                </div>
-                <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
-                  EMULATOR SYSTEM LOGS HISTORY (PERSISTED ON SERVER)
-                </span>
+              <div className="console-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', flexWrap: 'wrap', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)' }}>
+                    <Terminal size={14} />
+                    <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.05em' }}>SYSTEM LOGS</span>
+                  </div>
+                  <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
+                    EMULATOR SYSTEM LOGS HISTORY (PERSISTED ON SERVER)
+                  </span>
 
-                <div className="console-filter-bar" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  {/* Action buttons side-by-side, compact and small */}
+                  <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={fetchDiagnosticsLogs}
+                      disabled={isRefreshingLogs}
+                      style={{ padding: '4px 6px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', borderRadius: '4px', width: '28px', height: '28px' }}
+                      title="Reload system logs from server"
+                    >
+                      <RefreshCw size={12} className={isRefreshingLogs ? 'animate-spin' : ''} />
+                    </button>
+
+                    <button
+                      className="btn btn-success btn-sm"
+                      onClick={() => window.location.href = `${API_BASE}/diagnostics/logs/download`}
+                      style={{ padding: '4px 6px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: '#10b981', border: 'none', color: '#fff', borderRadius: '4px', width: '28px', height: '28px' }}
+                      title="Download full system log file"
+                    >
+                      <Download size={12} />
+                    </button>
+
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={clearSystemLogs}
+                      disabled={isClearingLogs}
+                      style={{ padding: '4px 6px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: '#ef4444', border: 'none', color: '#fff', borderRadius: '4px', width: '28px', height: '28px' }}
+                      title="Clear/Truncate server system logs"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="console-filter-bar" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <span
                     className={`filter-badge ${diagnosticsLogLevel === 'all' ? 'active' : ''}`}
                     onClick={() => setDiagnosticsLogLevel('all')}
-                    style={{ cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', background: diagnosticsLogLevel === 'all' ? 'rgba(255,255,255,0.1)' : 'transparent' }}
+                    style={{
+                      cursor: 'pointer',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      background: diagnosticsLogLevel === 'all' ? (theme === 'light' ? '#cbd5e1' : 'rgba(255,255,255,0.1)') : 'transparent',
+                      color: diagnosticsLogLevel === 'all' ? (theme === 'light' ? '#0f172a' : '#f9fafb') : 'var(--text-secondary)'
+                    }}
                   >
                     ALL LOGS
                   </span>
                   <span
                     className={`filter-badge ${diagnosticsLogLevel === 'info' ? 'active' : ''}`}
                     onClick={() => setDiagnosticsLogLevel('info')}
-                    style={{ cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', background: diagnosticsLogLevel === 'info' ? 'rgba(59, 130, 246, 0.2)' : 'transparent', color: diagnosticsLogLevel === 'info' ? '#60a5fa' : 'inherit' }}
+                    style={{
+                      cursor: 'pointer',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      background: diagnosticsLogLevel === 'info' ? (theme === 'light' ? '#dbeafe' : 'rgba(59, 130, 246, 0.2)') : 'transparent',
+                      color: diagnosticsLogLevel === 'info' ? (theme === 'light' ? '#1d4ed8' : '#60a5fa') : 'var(--text-secondary)'
+                    }}
                   >
                     INFO
                   </span>
                   <span
                     className={`filter-badge ${diagnosticsLogLevel === 'warn' ? 'active' : ''}`}
                     onClick={() => setDiagnosticsLogLevel('warn')}
-                    style={{ cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', background: diagnosticsLogLevel === 'warn' ? 'rgba(234, 179, 8, 0.2)' : 'transparent', color: diagnosticsLogLevel === 'warn' ? '#fde047' : 'inherit' }}
+                    style={{
+                      cursor: 'pointer',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      background: diagnosticsLogLevel === 'warn' ? (theme === 'light' ? '#fef3c7' : 'rgba(234, 179, 8, 0.2)') : 'transparent',
+                      color: diagnosticsLogLevel === 'warn' ? (theme === 'light' ? '#b45309' : '#fde047') : 'var(--text-secondary)'
+                    }}
                   >
                     WARNINGS
                   </span>
                   <span
                     className={`filter-badge ${diagnosticsLogLevel === 'error' ? 'active' : ''}`}
                     onClick={() => setDiagnosticsLogLevel('error')}
-                    style={{ cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', background: diagnosticsLogLevel === 'error' ? 'rgba(239, 68, 68, 0.2)' : 'transparent', color: diagnosticsLogLevel === 'error' ? '#fca5a5' : 'inherit' }}
+                    style={{
+                      cursor: 'pointer',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      background: diagnosticsLogLevel === 'error' ? (theme === 'light' ? '#fee2e2' : 'rgba(239, 68, 68, 0.2)') : 'transparent',
+                      color: diagnosticsLogLevel === 'error' ? (theme === 'light' ? '#b91c1c' : '#fca5a5') : 'var(--text-secondary)'
+                    }}
                   >
                     ERRORS
                   </span>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '10px', borderLeft: '1px solid var(--border-color)', paddingLeft: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '6px', borderLeft: '1px solid var(--border-color)', paddingLeft: '8px' }}>
                     <Search size={12} style={{ color: 'var(--text-muted)' }} />
                     <input
                       type="text"
@@ -4226,7 +4913,7 @@ export default function App() {
                       value={diagnosticsLogSearch}
                       onChange={(e) => setDiagnosticsLogSearch(e.target.value)}
                       style={{
-                        background: 'rgba(255,255,255,0.02)',
+                        background: 'var(--bg-input)',
                         border: '1px solid var(--border-color)',
                         borderRadius: '4px',
                         color: 'var(--text-primary)',
@@ -4240,43 +4927,12 @@ export default function App() {
                       onBlur={(e) => e.target.style.width = '120px'}
                     />
                   </div>
-
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={fetchDiagnosticsLogs}
-                    disabled={isRefreshingLogs}
-                    style={{ marginLeft: '10px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', cursor: 'pointer', background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '4px' }}
-                    title="Refresh log history from server"
-                  >
-                    <RefreshCw size={11} className={isRefreshingLogs ? 'animate-spin' : ''} />
-                    Reload
-                  </button>
-
-                  <button
-                    className="btn btn-success btn-sm"
-                    onClick={() => window.location.href = `${API_BASE}/diagnostics/logs/download`}
-                    style={{ marginLeft: '6px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', cursor: 'pointer', background: '#10b981', border: 'none', color: '#fff', borderRadius: '4px' }}
-                    title="Download full log file"
-                  >
-                    <Download size={11} />
-                    Download File
-                  </button>
-
-                  <button
-                    className="btn btn-danger btn-sm"
-                    onClick={clearSystemLogs}
-                    disabled={isClearingLogs}
-                    style={{ marginLeft: '6px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', cursor: 'pointer', background: '#ef4444', border: 'none', color: '#fff', borderRadius: '4px' }}
-                    title="Truncate system logs"
-                  >
-                    {isClearingLogs ? 'Clearing...' : 'Clear File'}
-                  </button>
                 </div>
               </div>
 
-              <div className="console-body" style={{ maxHeight: '400px', overflowY: 'auto', padding: '20px', background: '#1e1e1e', borderRadius: '0 0 12px 12px' }}>
+              <div className="console-body" style={{ maxHeight: '400px' }}>
                 {diagnosticsLogs.length === 0 ? (
-                  <div style={{ color: '#888', textAlign: 'center', padding: '40px 0' }}>
+                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '40px 0' }}>
                     No log entries found. Reload logs or trigger actions to generate system output.
                   </div>
                 ) : (
@@ -4296,20 +4952,23 @@ export default function App() {
 
                     if (filtered.length === 0) {
                       return (
-                        <div style={{ color: '#888', textAlign: 'center', padding: '40px 0' }}>
+                        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '40px 0' }}>
                           No log lines match the current search or level filters.
                         </div>
                       );
                     }
 
                     return filtered.map((line, idx) => {
-                      let textColor = '#d4d4d4';
-                      if (line.toLowerCase().includes('level=error') || line.toLowerCase().includes('level=fatal') || line.toLowerCase().includes('[error]') || line.toLowerCase().includes('[err]')) textColor = '#f87171';
-                      else if (line.toLowerCase().includes('level=warning') || line.toLowerCase().includes('level=warn') || line.toLowerCase().includes('[warn]')) textColor = '#fbbf24';
-                      else if (line.toLowerCase().includes('level=debug') || line.toLowerCase().includes('[debug]')) textColor = '#60a5fa';
+                      const levelClass = (() => {
+                        const lower = line.toLowerCase();
+                        if (lower.includes('level=error') || lower.includes('level=fatal') || lower.includes('[error]') || lower.includes('[err]')) return 'log-error';
+                        if (lower.includes('level=warning') || lower.includes('level=warn') || lower.includes('[warn]')) return 'log-warn';
+                        if (lower.includes('level=debug') || lower.includes('[debug]')) return 'log-debug';
+                        return 'log-info';
+                      })();
 
                       return (
-                        <div key={idx} style={{ fontFamily: 'monospace', fontSize: '12px', lineHeight: '1.6', color: textColor, whiteSpace: 'pre-wrap', wordBreak: 'break-all', borderBottom: '1px solid rgba(255,255,255,0.02)', padding: '2px 0' }}>
+                        <div key={idx} className={`log-line ${levelClass}`} style={{ fontSize: '12px', padding: '2px 0', borderBottom: '1px solid var(--border-color)', opacity: 0.9 }}>
                           {line}
                         </div>
                       );

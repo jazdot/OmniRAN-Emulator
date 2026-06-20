@@ -8,6 +8,9 @@ import (
 	serviceGateway "OmniRAN-Emulator/internal/control_test_engine/gnb/data/service"
 	serviceGtp "OmniRAN-Emulator/internal/control_test_engine/gnb/gtp/service"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/nas/message/sender"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/ue_context_management"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/ue_mobility_management"
+	senderNgap "OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/sender"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/trigger"
 	"OmniRAN-Emulator/lib/aper"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
@@ -722,4 +725,180 @@ func HandlerPathSwitchRequestAcknowledge(gnb *context.GNBContext, message *ngapT
 		log.Infof("[GNB][NGAP] Handover Completed for UE ID %d", ranUeId)
 	}
 }
+
+func HandlerHandoverRequest(gnb *context.GNBContext, message *ngapType.NGAPPDU) {
+	var amfUeId int64
+	var pduSessionId uint8 = 1
+	var qosId int64 = 1
+
+	valueMessage := message.InitiatingMessage.Value.HandoverRequest
+	if valueMessage == nil {
+		log.Warn("[GNB][NGAP] Handover Request value is nil")
+		return
+	}
+
+	for _, ies := range valueMessage.ProtocolIEs.List {
+		switch ies.Id.Value {
+		case ngapType.ProtocolIEIDAMFUENGAPID:
+			amfUeId = ies.Value.AMFUENGAPID.Value
+		case ngapType.ProtocolIEIDPDUSessionResourceSetupListHOReq:
+			list := ies.Value.PDUSessionResourceSetupListHOReq
+			if list != nil {
+				for _, item := range list.List {
+					pduSessionId = uint8(item.PDUSessionID.Value)
+				}
+			}
+		}
+	}
+
+	log.Infof("[GNB-Target][NGAP] Received HANDOVER REQUEST from AMF. AMF UE ID: %d", amfUeId)
+
+	// Create UE context in Target GNodeB (without socket connection yet)
+	ue := gnb.NewGnBUe(nil)
+	if ue == nil {
+		log.Error("[GNB-Target][NGAP] Failed to create UE context in Target GNodeB")
+		return
+	}
+	ue.SetAmfUeId(amfUeId)
+	ue.SetStateOngoing()
+
+	// Setup default PDU session info on Target
+	ue.CreatePduSession(int64(pduSessionId), "01", "010203", 1, 1, 1, 1, ue.GetTeidDownlink(), ue.GetIp(), 0)
+
+	// Build HandoverRequestAcknowledge
+	dlTeid := make([]byte, 4)
+	binary.BigEndian.PutUint32(dlTeid, ue.GetTeidDownlink())
+
+	gnbIp := net.ParseIP(gnb.GetGnbIpByData())
+	var gnbIpBytes []byte
+	if gnbIp.To4() != nil {
+		gnbIpBytes = gnbIp.To4()
+	} else {
+		gnbIpBytes = gnbIp
+	}
+
+	ackMsg, err := ue_mobility_management.GetHandoverRequestAcknowledge(
+		ue.GetRanUeId(),
+		amfUeId,
+		pduSessionId,
+		gnbIpBytes,
+		dlTeid,
+		qosId,
+	)
+	if err != nil {
+		log.Errorf("[GNB-Target][NGAP] Error building Handover Request Acknowledge: %v", err)
+		return
+	}
+
+	conn := ue.GetSCTP()
+	err = senderNgap.SendToAmF(ackMsg, conn)
+	if err != nil {
+		log.Errorf("[GNB-Target][AMF] Error sending Handover Request Acknowledge: %v", err)
+	} else {
+		log.Infof("[GNB-Target][AMF] Handover Request Acknowledge sent successfully. Target RAN UE ID: %d", ue.GetRanUeId())
+	}
+}
+
+func HandlerHandoverCommand(gnb *context.GNBContext, message *ngapType.NGAPPDU) {
+	var ranUeId int64
+	var amfUeId int64
+
+	valueMessage := message.SuccessfulOutcome.Value.HandoverCommand
+	if valueMessage == nil {
+		log.Warn("[GNB-Source][NGAP] Handover Command value is nil")
+		return
+	}
+
+	for _, ies := range valueMessage.ProtocolIEs.List {
+		switch ies.Id.Value {
+		case ngapType.ProtocolIEIDAMFUENGAPID:
+			amfUeId = ies.Value.AMFUENGAPID.Value
+		case ngapType.ProtocolIEIDRANUENGAPID:
+			ranUeId = ies.Value.RANUENGAPID.Value
+		}
+	}
+
+	ue, err := gnb.GetGnbUe(ranUeId)
+	if err != nil || ue == nil {
+		log.Errorf("[GNB-Source][NGAP] Handover Command: UE %d not found in GNodeB pool", ranUeId)
+		return
+	}
+
+	log.Infof("[GNB-Source][NGAP] Handover Command received for RAN UE ID: %d, AMF UE ID: %d. Triggering cell switch on UE...", ranUeId, amfUeId)
+
+	// Send Handover Command trigger to UE over UNIX/TCP socket: [0x00, 0x05]
+	cmdMsg := []byte{0x00, 0x05}
+	_, err = ue.GetUnixSocket().Write(cmdMsg)
+	if err != nil {
+		log.Errorf("[GNB-Source] Error writing Handover Command trigger to UE socket: %v", err)
+	} else {
+		log.Info("[GNB-Source] Handover Command trigger sent to UE socket successfully")
+	}
+}
+
+func HandlerUeContextReleaseCommand(gnb *context.GNBContext, message *ngapType.NGAPPDU) {
+	var ranUeId int64
+	var amfUeId int64
+
+	valueMessage := message.InitiatingMessage.Value.UEContextReleaseCommand
+	if valueMessage == nil {
+		log.Warn("[GNB][NGAP] UE Context Release Command value is nil")
+		return
+	}
+
+	for _, ies := range valueMessage.ProtocolIEs.List {
+		switch ies.Id.Value {
+		case ngapType.ProtocolIEIDUENGAPIDs:
+			ueGapIds := ies.Value.UENGAPIDs
+			if ueGapIds != nil {
+				if ueGapIds.Present == ngapType.UENGAPIDsPresentUENGAPIDPair {
+					if ueGapIds.UENGAPIDPair != nil {
+						amfUeId = ueGapIds.UENGAPIDPair.AMFUENGAPID.Value
+						ranUeId = ueGapIds.UENGAPIDPair.RANUENGAPID.Value
+					}
+				} else if ueGapIds.Present == ngapType.UENGAPIDsPresentAMFUENGAPID {
+					if ueGapIds.AMFUENGAPID != nil {
+						amfUeId = ueGapIds.AMFUENGAPID.Value
+					}
+				}
+			}
+		}
+	}
+
+	if ranUeId == 0 && amfUeId != 0 {
+		gnb.RangeUePool(func(id int64, ue *context.GNBUe) bool {
+			if ue.GetAmfUeId() == amfUeId {
+				ranUeId = id
+				return false
+			}
+			return true
+		})
+	}
+
+	log.Infof("[GNB-Source][NGAP] UE Context Release Command received for RAN UE ID: %d, AMF UE ID: %d", ranUeId, amfUeId)
+
+	// Clean up context from GNodeB
+	gnb.DeleteGnBUe(ranUeId)
+
+	// Respond with UEContextReleaseComplete
+	completeMsg, err := ue_context_management.GetUEContextReleaseComplete(ranUeId, amfUeId)
+	if err != nil {
+		log.Errorf("[GNB-Source][NGAP] Error building UE Context Release Complete: %v", err)
+		return
+	}
+
+	n2Conn := gnb.GetN2()
+	if n2Conn == nil {
+		log.Error("[GNB-Source][NGAP] Failed to get N2 association to send UE Context Release Complete")
+		return
+	}
+
+	err = senderNgap.SendToAmF(completeMsg, n2Conn)
+	if err != nil {
+		log.Errorf("[GNB-Source][AMF] Error sending UE Context Release Complete: %v", err)
+	} else {
+		log.Infof("[GNB-Source][AMF] UE Context Release Complete sent successfully")
+	}
+}
+
 

@@ -8,24 +8,107 @@ import (
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/ue_mobility_management"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/sender"
 	"net"
+	"strings"
 )
 
 func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBContext) {
 
-	// Check if this is a handover path switch trigger (0x02: N2, 0x03: Xn)
-	if len(message) == 11 && message[0] == 0x00 && (message[1] == 0x02 || message[1] == 0x03) {
+	// 1. Check if this is N2 Handover Trigger (0x02) from UE to Source GNodeB (size 28)
+	if len(message) == 28 && message[0] == 0x00 && message[1] == 0x02 {
 		amfUeId := int64(binary.BigEndian.Uint64(message[2:10]))
 		pduSessionId := uint8(message[10])
-		isXn := message[1] == 0x03
+		targetMcc := string(message[11:14])
+		targetMnc := strings.TrimRight(string(message[14:17]), "\x00")
+		targetTacVal := message[17:20]
+		targetGnbIdVal := int64(binary.BigEndian.Uint64(message[20:28]))
 
-		if isXn {
-			log.Info("[GNB-XN] Direct peer-to-peer Xn interface connection established with Source GNodeB")
-			log.Infof("[GNB-XN] Received XN HANDOVER REQUEST for UE (AMF UE ID: %d, PDU Session ID: %d)", amfUeId, pduSessionId)
-			log.Info("[GNB-XN] Sending XN HANDOVER REQUEST ACKNOWLEDGE to Source GNodeB")
-			log.Info("[GNB-XN] Peer-to-peer Xn Handover handshake completed successfully. Triggering Path Switch Request...")
-		} else {
-			log.Infof("[GNB] Processing Handover Path Switch Trigger from UE. AMF UE ID: %d, PDU Session ID: %d", amfUeId, pduSessionId)
+		log.Infof("[GNB-Source] Processing N2 Handover Trigger. Target gNB ID: %d, PLMN MCC/MNC: %s/%s", targetGnbIdVal, targetMcc, targetMnc)
+
+		ue.SetAmfUeId(amfUeId)
+
+		// Build and send HandoverRequired
+		handoverRequiredMsg, err := ue_mobility_management.GetHandoverRequired(
+			ue.GetRanUeId(),
+			amfUeId,
+			targetMcc,
+			targetMnc,
+			targetGnbIdVal,
+			targetTacVal,
+			pduSessionId,
+		)
+		if err != nil {
+			log.Errorf("[GNB-Source][NGAP] Error building Handover Required: %v", err)
+			return
 		}
+
+		conn := ue.GetSCTP()
+		err = sender.SendToAmF(handoverRequiredMsg, conn)
+		if err != nil {
+			log.Errorf("[GNB-Source][AMF] Error sending Handover Required: %v", err)
+		} else {
+			log.Info("[GNB-Source][AMF] Handover Required sent successfully to AMF")
+		}
+		return
+	}
+
+	// 2. Check if this is Target Access Trigger (0x04) from UE to Target GNodeB (size 10)
+	if len(message) == 10 && message[0] == 0x00 && message[1] == 0x04 {
+		amfUeId := int64(binary.BigEndian.Uint64(message[2:10]))
+
+		log.Infof("[GNB-Target] UE accessing target cell. AMF UE ID: %d. Swapping socket connections...", amfUeId)
+
+		var realUe *context.GNBUe
+		gnb.RangeUePool(func(ranUeId int64, temp *context.GNBUe) bool {
+			if temp.GetAmfUeId() == amfUeId {
+				realUe = temp
+				return false
+			}
+			return true
+		})
+
+		if realUe == nil {
+			log.Errorf("[GNB-Target] Pre-created UE context not found for AMF UE ID: %d", amfUeId)
+			return
+		}
+
+		// Transfer connection and set Ready state
+		realUe.SetUnixSocket(ue.GetUnixSocket())
+		realUe.SetStateReady()
+
+		// Delete temporary context created by accept
+		gnb.DeleteGnBUe(ue.GetRanUeId())
+
+		// Send HandoverNotify to AMF
+		notifyMsg, err := ue_mobility_management.GetHandoverNotify(
+			realUe.GetRanUeId(),
+			amfUeId,
+			gnb.GetMccAndMncInOctets(),
+			gnb.GetTacInBytes(),
+		)
+		if err != nil {
+			log.Errorf("[GNB-Target][NGAP] Error building Handover Notify: %v", err)
+			return
+		}
+
+		conn := realUe.GetSCTP()
+		err = sender.SendToAmF(notifyMsg, conn)
+		if err != nil {
+			log.Errorf("[GNB-Target][AMF] Error sending Handover Notify: %v", err)
+		} else {
+			log.Info("[GNB-Target][AMF] Handover Notify sent successfully to AMF")
+		}
+		return
+	}
+
+	// 3. Check if this is Xn Handover Trigger (0x03) or legacy/direct Path Switch (size 11)
+	if len(message) == 11 && message[0] == 0x00 && message[1] == 0x03 {
+		amfUeId := int64(binary.BigEndian.Uint64(message[2:10]))
+		pduSessionId := uint8(message[10])
+
+		log.Info("[GNB-XN] Direct peer-to-peer Xn interface connection established with Source GNodeB")
+		log.Infof("[GNB-XN] Received XN HANDOVER REQUEST for UE (AMF UE ID: %d, PDU Session ID: %d)", amfUeId, pduSessionId)
+		log.Info("[GNB-XN] Sending XN HANDOVER REQUEST ACKNOWLEDGE to Source GNodeB")
+		log.Info("[GNB-XN] Peer-to-peer Xn Handover handshake completed successfully. Triggering Path Switch Request...")
 
 		ue.SetAmfUeId(amfUeId)
 		ue.SetStateReady() // Transition directly to Ready state since registration is active
@@ -57,9 +140,9 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 		}
 
 		conn := ue.GetSCTP()
-		err = sender.SendToAmF(pathSwitchMsg, conn)
-		if err != nil {
-			log.Errorf("[GNB][AMF] Error sending Path Switch Request: %v", err)
+		pathSwitchErr := sender.SendToAmF(pathSwitchMsg, conn)
+		if pathSwitchErr != nil {
+			log.Errorf("[GNB][AMF] Error sending Path Switch Request: %v", pathSwitchErr)
 		} else {
 			log.Info("[GNB][AMF] Path Switch Request sent successfully")
 		}

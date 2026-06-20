@@ -39,6 +39,7 @@ func InitConn(ue *context.UEContext) error {
 
 	// store unix socket connection in the UE.
 	ue.SetUnixConn(conn)
+	ue.OnRedirection = UeListen
 
 	// listen NAS.
 	go UeListen(ue)

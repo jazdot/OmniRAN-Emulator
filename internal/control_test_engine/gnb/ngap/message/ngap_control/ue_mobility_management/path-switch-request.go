@@ -102,7 +102,7 @@ func BuildPathSwitchRequest(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, t
 	})
 
 	// PathSwitchRequestTransfer is a separate APER-encoded value (OctetString)
-	transferBytes, _ := aper.Marshal(transferPdu)
+	transferBytes, _ := aper.MarshalWithParams(transferPdu, "valueExt")
 	pduItem.PathSwitchRequestTransfer = aper.OctetString(transferBytes)
 
 	pduList.List = append(pduList.List, pduItem)

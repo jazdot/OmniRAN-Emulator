@@ -53,6 +53,14 @@ func Dispatch(amf *context.GNBAmf, gnb *context.GNBContext, message []byte) {
 		case ngapType.ProcedureCodePaging:
 			log.Info("[GNB][NGAP] Receive Paging Request")
 			handler.HandlerPaging(gnb, ngapMsg)
+
+		case ngapType.ProcedureCodeHandoverResourceAllocation:
+			log.Info("[GNB][NGAP] Receive Handover Request")
+			handler.HandlerHandoverRequest(gnb, ngapMsg)
+
+		case ngapType.ProcedureCodeUEContextRelease:
+			log.Info("[GNB][NGAP] Receive UE Context Release Command")
+			handler.HandlerUeContextReleaseCommand(gnb, ngapMsg)
 		}
 
 	case ngapType.NGAPPDUPresentSuccessfulOutcome:
@@ -67,6 +75,10 @@ func Dispatch(amf *context.GNBAmf, gnb *context.GNBContext, message []byte) {
 		case ngapType.ProcedureCodePathSwitchRequest:
 			log.Info("[GNB][NGAP] Receive Path Switch Request Acknowledge")
 			handler.HandlerPathSwitchRequestAcknowledge(gnb, ngapMsg)
+
+		case ngapType.ProcedureCodeHandoverPreparation:
+			log.Info("[GNB][NGAP] Receive Handover Command")
+			handler.HandlerHandoverCommand(gnb, ngapMsg)
 
 		}
 

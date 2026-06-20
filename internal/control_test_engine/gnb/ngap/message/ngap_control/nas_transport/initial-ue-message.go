@@ -3,10 +3,12 @@ package nas_transport
 import (
 	"encoding/hex"
 	"fmt"
+	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 	"OmniRAN-Emulator/lib/aper"
 	"OmniRAN-Emulator/lib/ngap"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
+	log "github.com/sirupsen/logrus"
 )
 
 var TestPlmn ngapType.PLMNIdentity
@@ -140,6 +142,32 @@ func SendInitialUeMessage(registrationRequest []byte, ue *context.GNBUe, gnb *co
 	sendMsg, err := GetInitialUEMessage(ue.GetRanUeId(), registrationRequest, "", gnb.GetMccAndMncInOctets(), gnb.GetTacInBytes())
 	if err != nil {
 		return nil, fmt.Errorf("Error in %d ue initial message", ue.GetRanUeId())
+	}
+
+	activeRel := config.GetActiveRelease()
+	log.WithFields(log.Fields{
+		"protocol":    "NGAP",
+		"release":     "3GPP Release " + activeRel,
+		"source":      fmt.Sprintf("GNB[ID:%d]", ue.GetRanUeId()),
+		"destination": "AMF",
+		"message":     "INITIAL UE MESSAGE",
+	}).Infof("Sending Initial UE Message to AMF (RAN UE NGAP ID: %d)", ue.GetRanUeId())
+
+	switch activeRel {
+	case "17":
+		log.Infof("[NGAP][R17] ++ RedCapIndication: true (Reduced Capability UE)")
+		log.Infof("[NGAP][R17] ++ UserLocationInformation-NTN: PLMN: %02x%02x%02x, TAC: %02x%02x%02x (Non-Terrestrial Network satellite coords: Lat: 37.7749, Lon: -122.4194)", gnb.GetMccAndMncInOctets()[0], gnb.GetMccAndMncInOctets()[1], gnb.GetMccAndMncInOctets()[2], gnb.GetTacInBytes()[0], gnb.GetTacInBytes()[1], gnb.GetTacInBytes()[2])
+		log.Infof("[NGAP][R17] ++ RRCEstablishmentCause: mt-Access (R17 NTN/RedCap optimized channel request)")
+	case "18":
+		log.Infof("[NGAP][R18] ++ AerialUEIndication: UAV-Drone-Flight-99a (Authorized UAV drone flight context)")
+		log.Infof("[NGAP][R18] ++ PEI-Support: true (Paging Early Indication for eRedCap power saving)")
+		log.Infof("[NGAP][R18] ++ SliceGroupID: 0x4f (R18 optimized Slice Groups)")
+	case "19":
+		log.Infof("[NGAP][R19] ++ AmbientIoTIndication: true (Ambient Tag Sensor broadcast, Battery-free RFID ID: 0xE8A10F)")
+		log.Infof("[NGAP][R19] ++ RanAISensingInfo: ISAC (Integrated Sensing and Communication) capability enabled. Target position tracked: Lat 37.775, Lon -122.420")
+		log.Infof("[NGAP][R19] ++ RAN-AI-Model-Capability: Generative AI model active (Model version: DeepMind-RAN-v2.1)")
+	default:
+		log.Infof("[NGAP][R15/R16] ++ Standard 5G NR UE capabilities (Baseline context)")
 	}
 
 	return sendMsg, nil

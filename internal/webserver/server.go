@@ -101,6 +101,7 @@ func StartServer(host string, port int) error {
 	// REST API Routes
 	mux.HandleFunc("/api/status", handleStatus)
 	mux.HandleFunc("/api/config", handleConfig)
+	mux.HandleFunc("/api/config/release", handleConfigRelease)
 	mux.HandleFunc("/api/scenarios", handleScenariosList)
 	mux.HandleFunc("/api/scenarios/run", handleScenarioRun)
 	mux.HandleFunc("/api/scenarios/stop", handleScenarioStop)
@@ -234,6 +235,7 @@ type StatusResponse struct {
 	ConfigSummary ConfigSummary      `json:"configSummary"`
 	RunningGnbs   []RunningGNBStatus `json:"runningGnbs,omitempty"`
 	RunningUes    []UEStatus         `json:"runningUes,omitempty"`
+	ActiveRelease string             `json:"activeRelease"`
 }
 
 type NetworkInterface struct {
@@ -257,8 +259,9 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := StatusResponse{
-		IsRunning:   atomic.LoadInt32(&runningState) == 1,
-		RunningName: runningName,
+		IsRunning:     atomic.LoadInt32(&runningState) == 1,
+		RunningName:   runningName,
+		ActiveRelease: config.GetActiveRelease(),
 	}
 
 	// Fetch network interfaces (looking for uetun / tun / uesimtun)
@@ -412,6 +415,34 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
 
+func handleConfigRelease(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"release":"%s"}`, config.GetActiveRelease())))
+		return
+	}
+	if r.Method == http.MethodPost {
+		var req struct {
+			Release string `json:"release"`
+		}
+		err := json.NewDecoder(r.Body).Decode(&req)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+			return
+		}
+		if req.Release != "15" && req.Release != "17" && req.Release != "18" && req.Release != "19" {
+			http.Error(w, "Unsupported release. Must be '15', '17', '18', or '19'", http.StatusBadRequest)
+			return
+		}
+		config.SetActiveRelease(req.Release)
+		logrus.Infof("[WEB] Active 3GPP Release updated dynamically to Release %s", req.Release)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success"}`))
+		return
+	}
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
 type ScenarioItem struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -433,6 +464,9 @@ func handleScenariosList(w http.ResponseWriter, r *http.Request) {
 		{"amf-load-loop", "AMF Load Loop (Stress Test)", "Periodically generates heavy registration requests to evaluate AMF throughput under stress"},
 		{"ue-latency-interval", "UE Registration Latency", "Evaluates and measures the average registration latency for a queue of UEs"},
 		{"amf-availability", "AMF Core Uptime Availability", "Performs reachability checks to evaluate the core uptime over a specified interval"},
+		{"r17-ntn", "3GPP Rel 17: RedCap & NTN Attachment", "Demonstrates Release 17 capabilities, including RedCap cell access, satellite orbit parameter IEs, and XR low-latency QoS flows"},
+		{"r18-uav", "3GPP Rel 18: UAV Flight & Slicing", "Demonstrates Release 18 capabilities: Aerial drone trajectory registration, PEI support, and Slice Groups handover"},
+		{"r19-sensing", "3GPP Rel 19: AI & ISAC Sensing", "Demonstrates Release 19 capabilities: Ambient IoT passive sensor relay tags, direct RAN AI model inference deployment, and ISAC radar target sweeps"},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(scenarios)
@@ -530,6 +564,18 @@ func handleScenarioRun(w http.ResponseWriter, r *http.Request) {
 				idle = 5
 			}
 			templates.ScenarioFullLifecycle(idle, func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
+		case "r17-ntn":
+			templates.ScenarioRelease17RedCapNTN(func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
+		case "r18-uav":
+			templates.ScenarioRelease18UAVSlicing(func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
+		case "r19-sensing":
+			templates.ScenarioRelease19AISensing(func() bool {
 				return atomic.LoadInt32(&runningState) == 0
 			})
 		case "deregister":

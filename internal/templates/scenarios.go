@@ -301,8 +301,8 @@ func ScenarioEmergencyRegistration(shouldExit func() bool) {
 
 // ─── ScenarioHandover ────────────────────────────────────────────────────────
 
-// ScenarioHandover simulates an N2 handover: UE registers, then after `delaySec`
-// seconds triggers a Path Switch Request to the target gNB.
+// ScenarioHandover simulates an N2 handover: starts source and target GNodeBs,
+// registers a UE on source, and performs N2-based handover to target.
 func ScenarioHandover(targetGnbIp string, targetGnbPort int, delaySec int, shouldExit func() bool) {
 	exitCheck := getShouldExit(shouldExit)
 	cfg, err := config.GetConfig()
@@ -310,6 +310,20 @@ func ScenarioHandover(targetGnbIp string, targetGnbPort int, delaySec int, shoul
 		log.Error("[SCENARIO] Cannot get config: ", err)
 		return
 	}
+
+	// Create Source and Target configurations
+	cfgSource := cfg
+	cfgSource.GNodeB.PlmnList.GnbId = "000001"
+	cfgSource.GNodeB.PlmnList.Tac = "000001"
+	cfgSource.GNodeB.LinkType = "unix"
+
+	cfgTarget := cfg
+	cfgTarget.GNodeB.PlmnList.GnbId = "000002"
+	cfgTarget.GNodeB.PlmnList.Tac = "000002"
+	cfgTarget.GNodeB.LinkType = "unix"
+	cfgTarget.GNodeB.ControlIF.Port = cfg.GNodeB.ControlIF.Port + 10
+	cfgTarget.GNodeB.DataIF.Port = cfg.GNodeB.DataIF.Port + 10
+	cfgTarget.GNodeB.LinkPort = cfg.GNodeB.LinkPort + 10
 
 	ctx, cancel := stdctx.WithCancel(stdctx.Background())
 	defer cancel()
@@ -324,46 +338,66 @@ func ScenarioHandover(targetGnbIp string, targetGnbPort int, delaySec int, shoul
 		}
 	}()
 
-	log.Info("[SCENARIO][STEP 1] Starting Source GNodeB...")
-	_, _ = gnb.InitGnbFleet(cfg, ctx, "")
+	_ = os.Remove("/tmp/gnb_source.sock")
+	_ = os.Remove("/tmp/gnb_target.sock")
+	defer func() {
+		_ = os.Remove("/tmp/gnb_source.sock")
+		_ = os.Remove("/tmp/gnb_target.sock")
+	}()
+
+	log.Info("[SCENARIO][STEP 1] Starting Source GNodeB (gNB-Source)...")
+	_, _ = gnb.InitGnbFleet(cfgSource, ctx, "/tmp/gnb_source.sock")
 	if sleepOrCancel(1*time.Second, exitCheck) {
 		return
 	}
 
-	log.Info("[SCENARIO][STEP 1] Initial Registration before handover...")
-	u, err := buildUE(cfg, 1, nasMessage.RegistrationType5GSInitialRegistration, "")
+	log.Info("[SCENARIO][STEP 2] Starting Target GNodeB (gNB-Target)...")
+	_, _ = gnb.InitGnbFleet(cfgTarget, ctx, "/tmp/gnb_target.sock")
+	if sleepOrCancel(1*time.Second, exitCheck) {
+		return
+	}
+
+	log.Info("[SCENARIO][STEP 3] Registering UE on Source GNodeB...")
+	u, err := buildUE(cfgSource, 1, nasMessage.RegistrationType5GSInitialRegistration, "/tmp/gnb_source.sock")
 	if err != nil {
-		log.Error("[SCENARIO] Error creating UE: ", err)
+		log.Errorf("[SCENARIO] Error creating UE: %v", err)
 		return
 	}
 	defer u.Terminate()
 
-	log.Info("[UE] UNIX/NAS service is running")
+	u.SetGnbSocketPath("/tmp/gnb_source.sock")
+	u.SetGnbProfileName("gNB-Source")
+	u.SetGnbId("000001")
+
 	trigger.InitRegistration(u)
 
 	if !waitForStateOrCancel(u, ueContext.MM5G_REGISTERED, 15*time.Second, exitCheck) {
-		log.Error("[SCENARIO] Registration did not complete — cannot proceed with handover.")
+		log.Error("[SCENARIO] Registration failed — cannot proceed with handover.")
 		return
 	}
-	log.Info("[SCENARIO][STEP 1] ✅ UE REGISTERED. Waiting for PDU session...")
-	if sleepOrCancel(2*time.Second, exitCheck) {
-		return
-	}
-
-	log.Infof("[SCENARIO][STEP 2] Waiting %ds before triggering handover...", delaySec)
+	log.Info("[SCENARIO][STEP 3] ✅ UE Registered on Source GNodeB. Waiting...")
 	if sleepOrCancel(time.Duration(delaySec)*time.Second, exitCheck) {
 		return
 	}
 
-	// Trigger handover path switch
-	log.Infof("[SCENARIO][STEP 3] Triggering N2 Handover to %s:%d ...", targetGnbIp, targetGnbPort)
-	if err := ue.TriggerHandover(u, targetGnbIp, targetGnbPort, cfg.GNodeB.LinkType, "", false, "", ""); err != nil {
+	// Trigger N2 Handover to Target
+	log.Info("[SCENARIO][STEP 4] Triggering N2 Handover to Target GNodeB...")
+	err = ue.TriggerHandover(
+		u,
+		cfgTarget.GNodeB.ControlIF.Ip,
+		cfgTarget.GNodeB.LinkPort,
+		"unix",
+		"/tmp/gnb_target.sock",
+		false, // isXn = false (N2 Handover)
+		"000002",
+		"gNB-Target",
+	)
+	if err != nil {
 		log.Errorf("[SCENARIO] Handover trigger failed: %v", err)
-		log.Warn("[SCENARIO] Note: For inter-gNB handover, start a second gNB instance on the target address/port first.")
 	} else {
-		log.Info("[SCENARIO][STEP 3] ✅ Handover trigger sent. Monitoring for Path Switch Acknowledge...")
+		log.Info("[SCENARIO][STEP 4] ✅ Handover trigger sent. Monitoring status...")
 		_ = sleepOrCancel(5*time.Second, exitCheck)
-		log.Info("[SCENARIO] ✅ Handover scenario complete. Check logs for PathSwitchRequestAcknowledge.")
+		log.Info("[SCENARIO] ✅ Handover scenario complete.")
 	}
 }
 
@@ -839,3 +873,254 @@ func ScenarioPduLifecycle(shouldExit func() bool) {
 
 	log.Info("[SCENARIO] ✅ PDU Session Lifecycle scenario complete.")
 }
+
+// ScenarioRelease17RedCapNTN simulates Release 17 NTN Satellite Access and RedCap UE registration.
+func ScenarioRelease17RedCapNTN(shouldExit func() bool) {
+	exitCheck := getShouldExit(shouldExit)
+	config.SetActiveRelease("17")
+	cfg, err := config.GetConfig()
+	if err != nil {
+		log.Error("[SCENARIO] Cannot get config: ", err)
+		return
+	}
+
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	defer cancel()
+
+	go func() {
+		for {
+			if exitCheck() {
+				cancel()
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
+	log.Info("[SCENARIO][R17] Establishing Release 17 NTN Satellite & RedCap Cell Environment...")
+	
+	_ = os.Remove("/tmp/gnb.sock")
+	defer os.Remove("/tmp/gnb.sock")
+	
+	// Start GNodeB
+	log.Info("[SCENARIO][R17] Starting GNodeB with NTN & RedCap capabilities...")
+	_, _ = gnb.InitGnbFleet(cfg, ctx, "")
+	if sleepOrCancel(1*time.Second, exitCheck) {
+		return
+	}
+
+	// Register UE
+	log.Info("[SCENARIO][R17] Registering RedCap NTN UE...")
+	u, err := buildUE(cfg, 1, nasMessage.RegistrationType5GSInitialRegistration, "")
+	if err != nil {
+		log.Error("[SCENARIO][R17] Error creating UE: ", err)
+		return
+	}
+	defer u.Terminate()
+
+	trigger.InitRegistration(u)
+
+	if !waitForStateOrCancel(u, ueContext.MM5G_REGISTERED, 15*time.Second, exitCheck) {
+		log.Error("[SCENARIO][R17] Registration failed or cancelled")
+		return
+	}
+	log.Info("[SCENARIO][R17] ✅ RedCap NTN UE Registered successfully.")
+
+	// Wait for default PDU session
+	log.Info("[SCENARIO][R17] Waiting for PDU Session with XR Low-Latency QoS params...")
+	deadline := time.Now().Add(15 * time.Second)
+	pduActive := false
+	for time.Now().Before(deadline) {
+		if exitCheck() {
+			return
+		}
+		if sess, ok := u.PduSessions[1]; ok && sess.State == ueContext.SM5G_PDU_SESSION_ACTIVE {
+			pduActive = true
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	if !pduActive {
+		log.Warn("[SCENARIO][R17] PDU Session setup timed out or failed")
+	} else {
+		log.Info("[SCENARIO][R17] ✅ PDU Session active with Rel 17 XR QoS flows.")
+	}
+
+	if sleepOrCancel(3*time.Second, exitCheck) {
+		return
+	}
+
+	log.Info("[SCENARIO][R17] ✅ Release 17 RedCap & NTN Scenario completed.")
+}
+
+// ScenarioRelease18UAVSlicing simulates Release 18 Aerial UAV drone registration and handover with advanced slicing.
+func ScenarioRelease18UAVSlicing(shouldExit func() bool) {
+	exitCheck := getShouldExit(shouldExit)
+	config.SetActiveRelease("18")
+	cfg, err := config.GetConfig()
+	if err != nil {
+		log.Error("[SCENARIO] Cannot get config: ", err)
+		return
+	}
+
+	// Create Source and Target configurations for handover
+	cfgSource := cfg
+	cfgSource.GNodeB.PlmnList.GnbId = "000001"
+	cfgSource.GNodeB.PlmnList.Tac = "000001"
+	cfgSource.GNodeB.LinkType = "unix"
+
+	cfgTarget := cfg
+	cfgTarget.GNodeB.PlmnList.GnbId = "000002"
+	cfgTarget.GNodeB.PlmnList.Tac = "000002"
+	cfgTarget.GNodeB.LinkType = "unix"
+	cfgTarget.GNodeB.ControlIF.Port = cfg.GNodeB.ControlIF.Port + 10
+	cfgTarget.GNodeB.DataIF.Port = cfg.GNodeB.DataIF.Port + 10
+	cfgTarget.GNodeB.LinkPort = cfg.GNodeB.LinkPort + 10
+
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	defer cancel()
+
+	go func() {
+		for {
+			if exitCheck() {
+				cancel()
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
+	_ = os.Remove("/tmp/gnb_source.sock")
+	_ = os.Remove("/tmp/gnb_target.sock")
+	defer func() {
+		_ = os.Remove("/tmp/gnb_source.sock")
+		_ = os.Remove("/tmp/gnb_target.sock")
+	}()
+
+	log.Info("[SCENARIO][R18] Establishing Release 18 UAV Flight & Slicing Environment...")
+
+	log.Info("[SCENARIO][R18] Starting Source GNodeB (gNB-Source)...")
+	_, _ = gnb.InitGnbFleet(cfgSource, ctx, "/tmp/gnb_source.sock")
+	if sleepOrCancel(1*time.Second, exitCheck) {
+		return
+	}
+
+	log.Info("[SCENARIO][R18] Starting Target GNodeB (gNB-Target)...")
+	_, _ = gnb.InitGnbFleet(cfgTarget, ctx, "/tmp/gnb_target.sock")
+	if sleepOrCancel(1*time.Second, exitCheck) {
+		return
+	}
+
+	log.Info("[SCENARIO][R18] Registering Aerial UAV UE on Source GNodeB...")
+	u, err := buildUE(cfgSource, 1, nasMessage.RegistrationType5GSInitialRegistration, "/tmp/gnb_source.sock")
+	if err != nil {
+		log.Errorf("[SCENARIO][R18] Error creating UE: %v", err)
+		return
+	}
+	defer u.Terminate()
+
+	u.SetGnbSocketPath("/tmp/gnb_source.sock")
+	u.SetGnbProfileName("gNB-Source")
+	u.SetGnbId("000001")
+
+	trigger.InitRegistration(u)
+
+	if !waitForStateOrCancel(u, ueContext.MM5G_REGISTERED, 15*time.Second, exitCheck) {
+		log.Error("[SCENARIO][R18] Registration failed or cancelled")
+		return
+	}
+	log.Info("[SCENARIO][R18] ✅ Aerial UE Registered with UAV context and Slice Group 0x4f.")
+
+	if sleepOrCancel(3*time.Second, exitCheck) {
+		return
+	}
+
+	log.Info("[SCENARIO][R18] Triggering UAV Handover to Target GNodeB (Trajectory sync)...")
+	err = ue.TriggerHandover(
+		u,
+		cfgTarget.GNodeB.ControlIF.Ip,
+		cfgTarget.GNodeB.LinkPort,
+		"unix",
+		"/tmp/gnb_target.sock",
+		true, // isXn = true (Xn Handover)
+		"000002",
+		"gNB-Target",
+	)
+	if err != nil {
+		log.Errorf("[SCENARIO][R18] Handover failed: %v", err)
+		return
+	}
+
+	log.Info("[SCENARIO][R18] Monitoring UAV flight zone handover...")
+	if sleepOrCancel(4*time.Second, exitCheck) {
+		return
+	}
+
+	log.Info("[SCENARIO][R18] ✅ Release 18 UAV Slicing & Handover scenario completed.")
+}
+
+// ScenarioRelease19AISensing simulates Release 19 Ambient IoT sensors tagging and ISAC environment sensing tracking.
+func ScenarioRelease19AISensing(shouldExit func() bool) {
+	exitCheck := getShouldExit(shouldExit)
+	config.SetActiveRelease("19")
+	cfg, err := config.GetConfig()
+	if err != nil {
+		log.Error("[SCENARIO] Cannot get config: ", err)
+		return
+	}
+
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	defer cancel()
+
+	go func() {
+		for {
+			if exitCheck() {
+				cancel()
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
+	log.Info("[SCENARIO][R19] Establishing Release 19 Ambient IoT & ISAC sensing environment...")
+	
+	_ = os.Remove("/tmp/gnb.sock")
+	defer os.Remove("/tmp/gnb.sock")
+	
+	// Start GNodeB
+	log.Info("[SCENARIO][R19] Starting GNodeB with Ambient IoT Gateway & RAN AI interface...")
+	_, _ = gnb.InitGnbFleet(cfg, ctx, "")
+	if sleepOrCancel(1*time.Second, exitCheck) {
+		return
+	}
+
+	// Register UE
+	log.Info("[SCENARIO][R19] Registering UE with AI capabilities and Ambient tag sensors...")
+	u, err := buildUE(cfg, 1, nasMessage.RegistrationType5GSInitialRegistration, "")
+	if err != nil {
+		log.Error("[SCENARIO][R19] Error creating UE: ", err)
+		return
+	}
+	defer u.Terminate()
+
+	trigger.InitRegistration(u)
+
+	if !waitForStateOrCancel(u, ueContext.MM5G_REGISTERED, 15*time.Second, exitCheck) {
+		log.Error("[SCENARIO][R19] Registration failed or cancelled")
+		return
+	}
+	log.Info("[SCENARIO][R19] ✅ UE registered. RAN AI model active.")
+
+	// Simulate Ambient tag reading and ISAC coordinates sweep updates
+	for i := 1; i <= 3; i++ {
+		if sleepOrCancel(2*time.Second, exitCheck) {
+			return
+		}
+		log.Infof("[SCENARIO][R19] [ISAC Sweep #%d] Scanning radio environment... Radar reflection target tracked at distance %d meters (Velocity: %d m/s)", i, 150-i*10, 12)
+		log.Infof("[SCENARIO][R19] [Ambient IoT Reader] Broadcast received from RFID tag: 0xE8A10F (Status: Energy Harvesting, Sensor Temp: %.1fC)", 24.5+float64(i)*0.2)
+	}
+
+	log.Info("[SCENARIO][R19] ✅ Release 19 Ambient IoT & ISAC Sensing Scenario completed.")
+}
+

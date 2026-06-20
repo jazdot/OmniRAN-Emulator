@@ -1,10 +1,13 @@
 package interface_management
 
 import (
+	"fmt"
+	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 	"OmniRAN-Emulator/lib/aper"
 	"OmniRAN-Emulator/lib/ngap"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
+	log "github.com/sirupsen/logrus"
 )
 
 func BuildNGSetupRequest(gnb *context.GNBContext) (pdu ngapType.NGAPPDU) {
@@ -125,6 +128,28 @@ func NGSetupRequest(gnb *context.GNBContext, name string) ([]byte, error) {
 	// RANNodeName
 	ie = message.InitiatingMessage.Value.NGSetupRequest.ProtocolIEs.List[1]
 	ie.Value.RANNodeName.Value = name
+
+	activeRel := config.GetActiveRelease()
+	log.WithFields(log.Fields{
+		"protocol": "NGAP",
+		"release":  "3GPP Release " + activeRel,
+		"source":   fmt.Sprintf("GNB[Name:%s]", name),
+		"message":  "NG SETUP REQUEST",
+	}).Infof("Initiating NG Setup Request with AMF")
+
+	switch activeRel {
+	case "17":
+		log.Infof("[NGAP][R17] ++ GNodeB NTN Satellite Access support enabled")
+		log.Infof("[NGAP][R17] ++ GNodeB RedCap (Reduced Capability) Cell Access allowed")
+	case "18":
+		log.Infof("[NGAP][R18] ++ GNodeB 5G-Advanced UAV Drone authorization support enabled")
+		log.Infof("[NGAP][R18] ++ GNodeB PEI (Paging Early Indication) transmission support enabled")
+	case "19":
+		log.Infof("[NGAP][R19] ++ GNodeB Ambient IoT gateway & passive tagging reader support enabled")
+		log.Infof("[NGAP][R19] ++ GNodeB RAN AI/ML Model deployment interface active")
+	default:
+		log.Infof("[NGAP][R15/R16] ++ Standard GNodeB cell capabilities configured")
+	}
 
 	return ngap.Encoder(message)
 }

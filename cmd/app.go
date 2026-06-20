@@ -331,6 +331,39 @@ func main() {
 							return nil
 						},
 					},
+					{
+						Name:  "r17-ntn",
+						Usage: "Release 17: RedCap & NTN Satellite Attachment Scenario",
+						Action: func(c *cli.Context) error {
+							log.Info("---------------------------------------")
+							log.Info("[SCENARIO] Release 17: RedCap & NTN Attachment")
+							log.Info("---------------------------------------")
+							templates.ScenarioRelease17RedCapNTN(nil)
+							return nil
+						},
+					},
+					{
+						Name:  "r18-uav",
+						Usage: "Release 18: UAV Flight & Slicing Scenario",
+						Action: func(c *cli.Context) error {
+							log.Info("---------------------------------------")
+							log.Info("[SCENARIO] Release 18: UAV Flight & Slicing")
+							log.Info("---------------------------------------")
+							templates.ScenarioRelease18UAVSlicing(nil)
+							return nil
+						},
+					},
+					{
+						Name:  "r19-sensing",
+						Usage: "Release 19: AI & ISAC Sensing Scenario",
+						Action: func(c *cli.Context) error {
+							log.Info("---------------------------------------")
+							log.Info("[SCENARIO] Release 19: AI & ISAC Sensing")
+							log.Info("---------------------------------------")
+							templates.ScenarioRelease19AISensing(nil)
+							return nil
+						},
+					},
 				},
 			},
 			{
