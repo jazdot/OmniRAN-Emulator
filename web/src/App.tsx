@@ -17,7 +17,10 @@ import {
   Sun,
   Moon,
   Phone,
-  Tv
+  Tv,
+  Download,
+  Search,
+  FileText
 } from 'lucide-react';
 
 // API base path (works with relative path when served by Go, or proxied in dev)
@@ -125,8 +128,33 @@ export default function App() {
     const saved = localStorage.getItem('theme');
     return (saved === 'dark' || saved === 'light') ? saved : 'light';
   });
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity' | 'fleet'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity' | 'fleet' | 'diagnostics'>('dashboard');
   const [selectedNode, setSelectedNode] = useState<'ue' | 'gnb' | 'amf' | 'upf' | 'dn' | 'uu-link' | 'n2-link' | 'n3-link' | 'n6-link' | null>('ue');
+
+  // Diagnostics & PCAP States
+  const [pcapInterfaces, setPcapInterfaces] = useState<{ index: number; name: string; flags: string; ipAddresses: string[] }[]>([]);
+  const [activeCaptureStatus, setActiveCaptureStatus] = useState<{
+    isCapturing: boolean;
+    interface?: string;
+    protocol?: string;
+    fileName?: string;
+    packetCount?: number;
+    bytesCount?: number;
+    elapsedSec?: number;
+  } | null>(null);
+  const [savedPcapFiles, setSavedPcapFiles] = useState<{ name: string; size: number; modTime: string }[]>([]);
+  const [pcapInterface, setPcapInterface] = useState('any');
+  const [pcapProtocol, setPcapProtocol] = useState('all');
+  const [pcapFileName, setPcapFileName] = useState('');
+  const [diagnosticsLogs, setDiagnosticsLogs] = useState<string[]>([]);
+  const [diagnosticsLogSearch, setDiagnosticsLogSearch] = useState('');
+  const [diagnosticsLogLevel, setDiagnosticsLogLevel] = useState<'all' | 'info' | 'warn' | 'error'>('all');
+
+  const [isStartingPcap, setIsStartingPcap] = useState(false);
+  const [isStoppingPcap, setIsStoppingPcap] = useState(false);
+  const [isRefreshingPcaps, setIsRefreshingPcaps] = useState(false);
+  const [isClearingLogs, setIsClearingLogs] = useState(false);
+  const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
 
   const [showBanners, setShowBanners] = useState(true);
   const [bannerFade, setBannerFade] = useState(false);
@@ -1025,6 +1053,173 @@ export default function App() {
   }, [uePingLog]);
 
 
+  // Diagnostics & PCAP Fetchers & Handlers
+  const fetchPcapInterfaces = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/diagnostics/pcap/interfaces`);
+      if (res.ok) {
+        const data = await res.json();
+        setPcapInterfaces(data);
+      }
+    } catch (err) {
+      console.error("Error fetching pcap interfaces:", err);
+    }
+  };
+
+  const fetchPcapStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/diagnostics/pcap/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setActiveCaptureStatus(data);
+      }
+    } catch (err) {
+      console.error("Error fetching pcap status:", err);
+    }
+  };
+
+  const fetchSavedPcapFiles = async () => {
+    setIsRefreshingPcaps(true);
+    try {
+      const res = await fetch(`${API_BASE}/diagnostics/pcap/list`);
+      if (res.ok) {
+        const data = await res.json();
+        setSavedPcapFiles(data);
+      }
+    } catch (err) {
+      console.error("Error fetching saved pcaps:", err);
+    } finally {
+      setIsRefreshingPcaps(false);
+    }
+  };
+
+  const fetchDiagnosticsLogs = async () => {
+    setIsRefreshingLogs(true);
+    try {
+      const res = await fetch(`${API_BASE}/diagnostics/logs/history`);
+      if (res.ok) {
+        const data = await res.json();
+        setDiagnosticsLogs(data.logs || []);
+      }
+    } catch (err) {
+      console.error("Error fetching logs history:", err);
+    } finally {
+      setIsRefreshingLogs(false);
+    }
+  };
+
+  const startPcapCapture = async () => {
+    if (!pcapFileName.trim()) {
+      alert("Please provide a filename for the capture.");
+      return;
+    }
+    setIsStartingPcap(true);
+    try {
+      const res = await fetch(`${API_BASE}/diagnostics/pcap/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          interface: pcapInterface,
+          protocol: pcapProtocol,
+          fileName: pcapFileName
+        })
+      });
+      if (res.ok) {
+        await fetchPcapStatus();
+        await fetchSavedPcapFiles();
+      } else {
+        const errMsg = await res.text();
+        alert(`Failed to start capture: ${errMsg}`);
+      }
+    } catch (err) {
+      console.error("Error starting pcap capture:", err);
+      alert(`Error starting capture: ${err}`);
+    } finally {
+      setIsStartingPcap(false);
+    }
+  };
+
+  const stopPcapCapture = async () => {
+    setIsStoppingPcap(true);
+    try {
+      const res = await fetch(`${API_BASE}/diagnostics/pcap/stop`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        await fetchPcapStatus();
+        await fetchSavedPcapFiles();
+      } else {
+        const errMsg = await res.text();
+        alert(`Failed to stop capture: ${errMsg}`);
+      }
+    } catch (err) {
+      console.error("Error stopping pcap capture:", err);
+      alert(`Error stopping capture: ${err}`);
+    } finally {
+      setIsStoppingPcap(false);
+    }
+  };
+
+  const deletePcapFile = async (name: string) => {
+    if (!confirm(`Are you sure you want to delete ${name}?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/diagnostics/pcap/delete?file=${encodeURIComponent(name)}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        await fetchSavedPcapFiles();
+      } else {
+        const errMsg = await res.text();
+        alert(`Failed to delete: ${errMsg}`);
+      }
+    } catch (err) {
+      console.error("Error deleting pcap file:", err);
+    }
+  };
+
+  const clearSystemLogs = async () => {
+    if (!confirm("Are you sure you want to clear the emulator system log file? This will empty the backend log file.")) return;
+    setIsClearingLogs(true);
+    try {
+      const res = await fetch(`${API_BASE}/diagnostics/logs/clear`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        setDiagnosticsLogs([]);
+        await fetchDiagnosticsLogs();
+      } else {
+        const errMsg = await res.text();
+        alert(`Failed to clear logs: ${errMsg}`);
+      }
+    } catch (err) {
+      console.error("Error clearing logs:", err);
+    } finally {
+      setIsClearingLogs(false);
+    }
+  };
+
+  // Effect to handle diagnostics tab load and polling
+  useEffect(() => {
+    if (activeTab === 'diagnostics') {
+      fetchPcapInterfaces();
+      fetchPcapStatus();
+      fetchSavedPcapFiles();
+      fetchDiagnosticsLogs();
+      if (!pcapFileName) {
+        setPcapFileName(`capture_${Math.floor(Date.now() / 1000)}.pcap`);
+      }
+    }
+  }, [activeTab]);
+
+  // Polling active capture status when capture is running
+  useEffect(() => {
+    if (activeTab !== 'diagnostics' || !activeCaptureStatus?.isCapturing) return;
+    const timer = setInterval(() => {
+      fetchPcapStatus();
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [activeTab, activeCaptureStatus?.isCapturing]);
+
   // Fetch emulator status
   const fetchStatus = async () => {
     try {
@@ -1529,6 +1724,13 @@ export default function App() {
             <Radio />
             <span>Fleet Manager</span>
           </li>
+          <li
+            className={`nav-item ${activeTab === 'diagnostics' ? 'active' : ''}`}
+            onClick={() => setActiveTab('diagnostics')}
+          >
+            <Sliders />
+            <span>Diagnostics</span>
+          </li>
         </nav>
 
         <div className="sidebar-footer">
@@ -1548,6 +1750,7 @@ export default function App() {
               {activeTab === 'logs' && 'Live Console Panel'}
               {activeTab === 'connectivity' && 'Connectivity Tool Panel'}
               {activeTab === 'fleet' && 'Fleet Manager'}
+              {activeTab === 'diagnostics' && 'Diagnostics & Captures'}
             </h1>
           </div>
 
@@ -3735,6 +3938,389 @@ export default function App() {
 
           </div>
         )}
+
+        {/* ─── Diagnostics Tab ───────────────────────────────────────────── */}
+        {activeTab === 'diagnostics' && (
+          <div className="view-body fade-in">
+            <div className="fleet-toast info" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', padding: '12px', borderRadius: '8px' }}>
+              <AlertTriangle size={16} style={{ flexShrink: 0, color: '#eab308' }} />
+              <div style={{ fontSize: '13px' }}>
+                <strong>Root Access Requirement:</strong> Raw socket binding requires the backend to be run with root permissions (e.g. <code>sudo ./app web</code>). Capturing on virtual tunnel interfaces (<code>uetun*</code>) automatically encapsulates raw IP packets into Ethernet frames for standard Wireshark compatibility.
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '24px', marginBottom: '24px' }}>
+              {/* Left Column: Capture Control & Live Status */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                <div className="card">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                    <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Radio size={18} className="text-blue" />
+                      Live PCAP Capturer
+                    </h3>
+                    {activeCaptureStatus?.isCapturing && (
+                      <span className="fleet-state-badge registered animate-pulse" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }} />
+                        CAPTURING
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div className="form-group">
+                      <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', opacity: 0.8 }}>Target Interface</label>
+                      <select
+                        className="form-input"
+                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)' }}
+                        value={pcapInterface}
+                        onChange={(e) => {
+                          setPcapInterface(e.target.value);
+                          const ifName = e.target.value === 'any' ? 'any' : e.target.value;
+                          setPcapFileName(`capture_${ifName}_${Math.floor(Date.now() / 1000)}.pcap`);
+                        }}
+                        disabled={activeCaptureStatus?.isCapturing}
+                      >
+                        <option value="any">Any / Loopback (All Interfaces)</option>
+                        {pcapInterfaces.map((iface) => (
+                          <option key={iface.name} value={iface.name}>
+                            {iface.name} ({iface.ipAddresses.join(', ') || 'No IP'}) {iface.flags.includes('up') ? ' - UP' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', opacity: 0.8 }}>Protocol Filter</label>
+                      <select
+                        className="form-input"
+                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)' }}
+                        value={pcapProtocol}
+                        onChange={(e) => setPcapProtocol(e.target.value)}
+                        disabled={activeCaptureStatus?.isCapturing}
+                      >
+                        <option value="all">All Protocols (Ethernet/IP/TCP/UDP/SCTP/ICMP)</option>
+                        <option value="icmp">ICMP (Ping)</option>
+                        <option value="tcp">TCP</option>
+                        <option value="udp">UDP</option>
+                        <option value="sctp">SCTP (NGAP/Control Plane)</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', opacity: 0.8 }}>Destination Filename</label>
+                      <input
+                        className="form-input"
+                        type="text"
+                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)' }}
+                        placeholder="e.g. uetun101_traffic.pcap"
+                        value={pcapFileName}
+                        onChange={(e) => setPcapFileName(e.target.value)}
+                        disabled={activeCaptureStatus?.isCapturing}
+                      />
+                    </div>
+
+                    <div style={{ marginTop: '8px' }}>
+                      {activeCaptureStatus?.isCapturing ? (
+                        <button
+                          className="btn btn-danger"
+                          style={{ width: '100%', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', border: 'none', borderRadius: '6px', cursor: 'pointer', background: '#ef4444', color: '#fff', fontWeight: 'bold' }}
+                          onClick={stopPcapCapture}
+                          disabled={isStoppingPcap}
+                        >
+                          <Trash2 size={16} />
+                          {isStoppingPcap ? 'Stopping Capture...' : 'Stop Packet Capture'}
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-primary"
+                          style={{ width: '100%', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', border: 'none', borderRadius: '6px', cursor: 'pointer', background: '#3b82f6', color: '#fff', fontWeight: 'bold' }}
+                          onClick={startPcapCapture}
+                          disabled={isStartingPcap}
+                        >
+                          <Play size={16} />
+                          {isStartingPcap ? 'Starting Capture...' : 'Start Packet Capture'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Real-time stats dashboard */}
+                {activeCaptureStatus?.isCapturing && (
+                  <div className="card fade-in" style={{ borderColor: 'rgba(16, 185, 129, 0.4)', background: 'rgba(16, 185, 129, 0.02)' }}>
+                    <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', letterSpacing: '0.05em', color: '#10b981', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Activity size={14} className="animate-pulse" />
+                      LIVE RECORDING TELEMETRY
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>Packets Captured</div>
+                        <div style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'monospace', color: 'var(--text-primary)' }}>
+                          {activeCaptureStatus.packetCount?.toLocaleString() || 0}
+                        </div>
+                      </div>
+                      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>Data Volume</div>
+                        <div style={{ fontSize: '20px', fontWeight: 'bold', fontFamily: 'monospace', color: 'var(--text-primary)' }}>
+                          {(() => {
+                            const bytes = activeCaptureStatus.bytesCount || 0;
+                            if (bytes === 0) return '0 Bytes';
+                            const k = 1024;
+                            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                            const i = Math.floor(Math.log(bytes) / Math.log(k));
+                            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+                          })()}
+                        </div>
+                      </div>
+                      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', gridColumn: 'span 2' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>Elapsed Capture Time</div>
+                        <div style={{ fontSize: '22px', fontWeight: 'bold', fontFamily: 'monospace', color: '#10b981', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <RefreshCw size={16} className="animate-spin text-emerald" />
+                          {(() => {
+                            const seconds = activeCaptureStatus.elapsedSec || 0;
+                            const mins = Math.floor(seconds / 60);
+                            const secs = seconds % 60;
+                            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column: Saved Capture Files */}
+              <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                  <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <FileText size={18} className="text-blue" />
+                    Diagnostics PCAP Repository
+                  </h3>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={fetchSavedPcapFiles}
+                    disabled={isRefreshingPcaps}
+                    style={{ padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <RefreshCw size={13} className={isRefreshingPcaps ? 'animate-spin' : ''} />
+                    Refresh
+                  </button>
+                </div>
+
+                <p className="fleet-hint" style={{ marginTop: 0 }}>
+                  Captured packet files are stored under <code>log/captures/</code>. Click download to fetch them locally and open in Wireshark.
+                </p>
+
+                <div className="fleet-table-wrapper" style={{ flex: 1, maxHeight: '350px', overflowY: 'auto' }}>
+                  {savedPcapFiles.length === 0 ? (
+                    <div className="fleet-empty" style={{ padding: '60px 0' }}>
+                      No saved PCAP files found in <code>log/captures/</code>. Start a capture session to record network traffic.
+                    </div>
+                  ) : (
+                    <table className="fleet-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: 'left', padding: '8px' }}>Filename</th>
+                          <th style={{ textAlign: 'left', padding: '8px' }}>Size</th>
+                          <th style={{ textAlign: 'left', padding: '8px' }}>Recorded At</th>
+                          <th style={{ textAlign: 'right', padding: '8px' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {savedPcapFiles.map((file) => (
+                          <tr key={file.name} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                            <td style={{ padding: '8px', verticalAlign: 'middle' }}>
+                              <strong className="mono">{file.name}</strong>
+                            </td>
+                            <td className="mono" style={{ padding: '8px', verticalAlign: 'middle' }}>
+                              {(() => {
+                                const bytes = file.size;
+                                if (bytes === 0) return '0 Bytes';
+                                const k = 1024;
+                                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+                              })()}
+                            </td>
+                            <td style={{ padding: '8px', verticalAlign: 'middle', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                              {new Date(file.modTime).toLocaleString()}
+                            </td>
+                            <td style={{ padding: '8px', textAlign: 'right', verticalAlign: 'middle' }}>
+                              <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                                <button
+                                  className="btn btn-xs btn-success"
+                                  onClick={() => window.location.href = `${API_BASE}/diagnostics/pcap/download?file=${encodeURIComponent(file.name)}`}
+                                  style={{ padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', border: 'none', background: '#10b981', color: '#fff', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                  title="Download PCAP file"
+                                >
+                                  <Download size={11} />
+                                  Download
+                                </button>
+                                <button
+                                  className="btn btn-xs btn-danger"
+                                  onClick={() => deletePcapFile(file.name)}
+                                  disabled={activeCaptureStatus?.isCapturing && activeCaptureStatus.fileName === file.name}
+                                  style={{ padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', border: 'none', background: '#ef4444', color: '#fff', fontSize: '11px' }}
+                                  title="Delete PCAP file"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Row: Permanent System Logs Console */}
+            <div className="console-panel" style={{ marginTop: '24px' }}>
+              <div className="console-header" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px', padding: '12px 20px' }}>
+                <div className="console-dot-actions" style={{ display: 'flex', gap: '6px' }}>
+                  <div className="console-dot red" style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ff5f56' }} />
+                  <div className="console-dot yellow" style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ffbd2e' }} />
+                  <div className="console-dot green" style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#27c93f' }} />
+                </div>
+                <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
+                  EMULATOR SYSTEM LOGS HISTORY (PERSISTED ON SERVER)
+                </span>
+
+                <div className="console-filter-bar" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span
+                    className={`filter-badge ${diagnosticsLogLevel === 'all' ? 'active' : ''}`}
+                    onClick={() => setDiagnosticsLogLevel('all')}
+                    style={{ cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', background: diagnosticsLogLevel === 'all' ? 'rgba(255,255,255,0.1)' : 'transparent' }}
+                  >
+                    ALL LOGS
+                  </span>
+                  <span
+                    className={`filter-badge ${diagnosticsLogLevel === 'info' ? 'active' : ''}`}
+                    onClick={() => setDiagnosticsLogLevel('info')}
+                    style={{ cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', background: diagnosticsLogLevel === 'info' ? 'rgba(59, 130, 246, 0.2)' : 'transparent', color: diagnosticsLogLevel === 'info' ? '#60a5fa' : 'inherit' }}
+                  >
+                    INFO
+                  </span>
+                  <span
+                    className={`filter-badge ${diagnosticsLogLevel === 'warn' ? 'active' : ''}`}
+                    onClick={() => setDiagnosticsLogLevel('warn')}
+                    style={{ cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', background: diagnosticsLogLevel === 'warn' ? 'rgba(234, 179, 8, 0.2)' : 'transparent', color: diagnosticsLogLevel === 'warn' ? '#fde047' : 'inherit' }}
+                  >
+                    WARNINGS
+                  </span>
+                  <span
+                    className={`filter-badge ${diagnosticsLogLevel === 'error' ? 'active' : ''}`}
+                    onClick={() => setDiagnosticsLogLevel('error')}
+                    style={{ cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', background: diagnosticsLogLevel === 'error' ? 'rgba(239, 68, 68, 0.2)' : 'transparent', color: diagnosticsLogLevel === 'error' ? '#fca5a5' : 'inherit' }}
+                  >
+                    ERRORS
+                  </span>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '10px', borderLeft: '1px solid var(--border-color)', paddingLeft: '10px' }}>
+                    <Search size={12} style={{ color: 'var(--text-muted)' }} />
+                    <input
+                      type="text"
+                      placeholder="Search log history..."
+                      value={diagnosticsLogSearch}
+                      onChange={(e) => setDiagnosticsLogSearch(e.target.value)}
+                      style={{
+                        background: 'rgba(255,255,255,0.02)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        color: 'var(--text-primary)',
+                        padding: '2px 8px',
+                        fontSize: '11px',
+                        width: '120px',
+                        outline: 'none',
+                        transition: 'width 0.25s ease'
+                      }}
+                      onFocus={(e) => e.target.style.width = '180px'}
+                      onBlur={(e) => e.target.style.width = '120px'}
+                    />
+                  </div>
+
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={fetchDiagnosticsLogs}
+                    disabled={isRefreshingLogs}
+                    style={{ marginLeft: '10px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', cursor: 'pointer', background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '4px' }}
+                    title="Refresh log history from server"
+                  >
+                    <RefreshCw size={11} className={isRefreshingLogs ? 'animate-spin' : ''} />
+                    Reload
+                  </button>
+
+                  <button
+                    className="btn btn-success btn-sm"
+                    onClick={() => window.location.href = `${API_BASE}/diagnostics/logs/download`}
+                    style={{ marginLeft: '6px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', cursor: 'pointer', background: '#10b981', border: 'none', color: '#fff', borderRadius: '4px' }}
+                    title="Download full log file"
+                  >
+                    <Download size={11} />
+                    Download File
+                  </button>
+
+                  <button
+                    className="btn btn-danger btn-sm"
+                    onClick={clearSystemLogs}
+                    disabled={isClearingLogs}
+                    style={{ marginLeft: '6px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', cursor: 'pointer', background: '#ef4444', border: 'none', color: '#fff', borderRadius: '4px' }}
+                    title="Truncate system logs"
+                  >
+                    {isClearingLogs ? 'Clearing...' : 'Clear File'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="console-body" style={{ maxHeight: '400px', overflowY: 'auto', padding: '20px', background: '#1e1e1e', borderRadius: '0 0 12px 12px' }}>
+                {diagnosticsLogs.length === 0 ? (
+                  <div style={{ color: '#888', textAlign: 'center', padding: '40px 0' }}>
+                    No log entries found. Reload logs or trigger actions to generate system output.
+                  </div>
+                ) : (
+                  (() => {
+                    const filtered = diagnosticsLogs.filter(line => {
+                      if (diagnosticsLogSearch && !line.toLowerCase().includes(diagnosticsLogSearch.toLowerCase())) {
+                        return false;
+                      }
+                      if (diagnosticsLogLevel !== 'all') {
+                        const lower = line.toLowerCase();
+                        if (diagnosticsLogLevel === 'info' && !lower.includes('level=info') && !lower.includes('[info]')) return false;
+                        if (diagnosticsLogLevel === 'warn' && !lower.includes('level=warn') && !lower.includes('[warn]') && !lower.includes('warning')) return false;
+                        if (diagnosticsLogLevel === 'error' && !lower.includes('level=err') && !lower.includes('[err]') && !lower.includes('error')) return false;
+                      }
+                      return true;
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div style={{ color: '#888', textAlign: 'center', padding: '40px 0' }}>
+                          No log lines match the current search or level filters.
+                        </div>
+                      );
+                    }
+
+                    return filtered.map((line, idx) => {
+                      let textColor = '#d4d4d4';
+                      if (line.toLowerCase().includes('level=error') || line.toLowerCase().includes('level=fatal') || line.toLowerCase().includes('[error]') || line.toLowerCase().includes('[err]')) textColor = '#f87171';
+                      else if (line.toLowerCase().includes('level=warning') || line.toLowerCase().includes('level=warn') || line.toLowerCase().includes('[warn]')) textColor = '#fbbf24';
+                      else if (line.toLowerCase().includes('level=debug') || line.toLowerCase().includes('[debug]')) textColor = '#60a5fa';
+
+                      return (
+                        <div key={idx} style={{ fontFamily: 'monospace', fontSize: '12px', lineHeight: '1.6', color: textColor, whiteSpace: 'pre-wrap', wordBreak: 'break-all', borderBottom: '1px solid rgba(255,255,255,0.02)', padding: '2px 0' }}>
+                          {line}
+                        </div>
+                      );
+                    });
+                  })()
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
       {/* Fleet Form Overlays (Rendered at root layout to prevent transform/clipping side effects) */}
       {showUEForm && (
         <div className="fleet-form-overlay">

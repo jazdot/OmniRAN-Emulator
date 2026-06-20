@@ -56,6 +56,7 @@ func (h *WebLogHook) Fire(entry *logrus.Entry) error {
 	if err != nil {
 		return err
 	}
+	AppendLogToFile(msg)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for clientChan := range h.clients {
@@ -126,6 +127,18 @@ func StartServer(host string, port int) error {
 	mux.HandleFunc("/api/fleet/stop/ue", handleFleetStopUE)
 	mux.HandleFunc("/api/fleet/stop/gnb/", handleFleetStopGNB)
 	mux.HandleFunc("/api/fleet/running", handleFleetRunning)
+
+	// Diagnostics / PCAP API Routes
+	mux.HandleFunc("/api/diagnostics/pcap/interfaces", handleGetInterfaces)
+	mux.HandleFunc("/api/diagnostics/pcap/start", handleStartPcap)
+	mux.HandleFunc("/api/diagnostics/pcap/stop", handleStopPcap)
+	mux.HandleFunc("/api/diagnostics/pcap/status", handleGetPcapStatus)
+	mux.HandleFunc("/api/diagnostics/pcap/list", handleListPcaps)
+	mux.HandleFunc("/api/diagnostics/pcap/download", handleDownloadPcap)
+	mux.HandleFunc("/api/diagnostics/pcap/delete", handleDeletePcap)
+	mux.HandleFunc("/api/diagnostics/logs/download", handleDownloadLogs)
+	mux.HandleFunc("/api/diagnostics/logs/clear", handleClearLogs)
+	mux.HandleFunc("/api/diagnostics/logs/history", handleGetLogsHistory)
 
 	// Embedded static React files
 	assetsFS, err := fs.Sub(web.Assets, "dist")
