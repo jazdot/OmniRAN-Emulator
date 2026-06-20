@@ -60,3 +60,19 @@ func SendNgSetupRequest(gnb *context.GNBContext, amf *context.GNBAmf) {
 	}
 
 }
+
+func SendPduSessionResourceReleaseResponse(ue *context.GNBUe, gnb *context.GNBContext) {
+	_ = gnb // reserved for future per-gnb routing
+	ngapMsg, err := pdu_session_management.PDUSessionResourceReleaseResponse(ue)
+	if err != nil {
+		log.Warn("[GNB][NGAP] Error building PDU Session Resource Release Response: ", err)
+		return
+	}
+
+	conn := ue.GetSCTP()
+	err = sender.SendToAmF(ngapMsg, conn)
+	if err != nil {
+		log.Warn("[GNB][AMF] Error sending PDU Session Resource Release Response: ", err)
+	}
+	log.Info("[GNB][NGAP][AMF] Sent PDU Session Resource Release Response.")
+}

@@ -388,6 +388,52 @@ func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *nga
 	sender.SendToUe(ue, msg)
 }
 
+// HandlerPduSessionResourceReleaseCommand handles NGAP PDU Session Resource Release Command.
+// It extracts the NAS PDU (PDU Session Release Command) carried inside the NGAP message
+// and forwards it to the UE via the UNIX NAS socket, then sends the Release Response to AMF.
+func HandlerPduSessionResourceReleaseCommand(gnb *context.GNBContext, message *ngapType.NGAPPDU) {
+	var ranUeId int64
+	var amfUeId int64
+	var messageNas []byte
+
+	valueMessage := message.InitiatingMessage.Value.PDUSessionResourceReleaseCommand
+
+	for _, ies := range valueMessage.ProtocolIEs.List {
+		switch ies.Id.Value {
+		case ngapType.ProtocolIEIDAMFUENGAPID:
+			if ies.Value.AMFUENGAPID != nil {
+				amfUeId = ies.Value.AMFUENGAPID.Value
+			}
+		case ngapType.ProtocolIEIDRANUENGAPID:
+			if ies.Value.RANUENGAPID != nil {
+				ranUeId = ies.Value.RANUENGAPID.Value
+			}
+		case ngapType.ProtocolIEIDNASPDU:
+			if ies.Value.NASPDU != nil {
+				messageNas = ies.Value.NASPDU.Value
+			}
+		}
+	}
+
+	// Look up the UE context by RAN UE NGAP ID
+	ue, err := gnb.GetGnbUe(ranUeId)
+	if err != nil || ue == nil {
+		log.Warn("[GNB][NGAP] PDU Session Resource Release Command: RAN UE NGAP ID not found, ranUeId=", ranUeId)
+		return
+	}
+
+	_ = amfUeId // may be used for future validation
+
+	// Forward the NAS PDU Session Release Command to the UE
+	if messageNas != nil {
+		log.Info("[GNB][NGAP][UE] Forwarding PDU Session Release Command NAS to UE")
+		sender.SendToUe(ue, messageNas)
+	}
+
+	// Send NGAP PDU Session Resource Release Response back to AMF
+	trigger.SendPduSessionResourceReleaseResponse(ue, gnb)
+}
+
 func HandlerNgSetupResponse(amf *context.GNBAmf, gnb *context.GNBContext, message *ngapType.NGAPPDU) {
 
 	err := false

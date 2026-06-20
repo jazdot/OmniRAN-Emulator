@@ -155,8 +155,7 @@ func RegistrationUeMonitor(conf config.Config,
 	}
 
 	wg.Done()
-	// ue.Terminate()
-	// os.Exit(0)
+	ue.Terminate()
 }
 
 func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort int, targetGnbLinkType string, targetGnbSocketPath string, isXn bool, targetGnbId string, targetGnbName string) error {

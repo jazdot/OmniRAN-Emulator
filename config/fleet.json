@@ -90,6 +90,23 @@
       "linkPort": 9491,
       "amfIp": "127.0.0.1",
       "amfPort": 38412
+    },
+    {
+      "name": "gNB-East",
+      "gnbId": "000004",
+      "mcc": "999",
+      "mnc": "70",
+      "tac": "000001",
+      "sliceSst": "01",
+      "sliceSd": "",
+      "controlIp": "127.0.0.1",
+      "controlPort": 9525,
+      "dataIp": "127.0.0.1",
+      "dataPort": 2153,
+      "linkType": "unix",
+      "linkPort": 9526,
+      "amfIp": "127.0.0.1",
+      "amfPort": 38412
     }
   ]
 }

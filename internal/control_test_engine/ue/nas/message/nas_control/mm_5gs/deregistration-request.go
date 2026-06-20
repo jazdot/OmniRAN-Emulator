@@ -21,6 +21,8 @@ func DeregistrationRequest(ue *context.UEContext, switchOff bool) ([]byte, error
 	m.GmmHeader.SetMessageType(nas.MsgTypeDeregistrationRequestUEOriginatingDeregistration)
 
 	dereg := nasMessage.NewDeregistrationRequestUEOriginatingDeregistration(0)
+	dereg.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
+	dereg.SpareHalfOctetAndSecurityHeaderType.SetSecurityHeaderType(nas.SecurityHeaderTypePlainNas)
 	dereg.DeregistrationRequestMessageIdentity.SetMessageType(nas.MsgTypeDeregistrationRequestUEOriginatingDeregistration)
 
 	// NgksiAndDeregistrationType: TSC | KSI | SwitchOff | ReReg | AccessType

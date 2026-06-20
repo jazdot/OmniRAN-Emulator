@@ -45,6 +45,11 @@ func Dispatch(amf *context.GNBAmf, gnb *context.GNBContext, message []byte) {
 			log.Info("[GNB][NGAP] Receive PDU Session Resource Setup Request")
 			handler.HandlerPduSessionResourceSetupRequest(gnb, ngapMsg)
 
+		case ngapType.ProcedureCodePDUSessionResourceRelease:
+			// handler NGAP PDU Session Resource Release Command.
+			log.Info("[GNB][NGAP] Receive PDU Session Resource Release Command")
+			handler.HandlerPduSessionResourceReleaseCommand(gnb, ngapMsg)
+
 		case ngapType.ProcedureCodePaging:
 			log.Info("[GNB][NGAP] Receive Paging Request")
 			handler.HandlerPaging(gnb, ngapMsg)

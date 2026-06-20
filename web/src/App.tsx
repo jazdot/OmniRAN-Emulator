@@ -1292,7 +1292,7 @@ export default function App() {
 
   // Check if any active virtual interface exists
   const activeTuns = status?.interfaces?.filter(
-    (i) => i.name.startsWith('ue') || i.name.includes('tun')
+    (i) => i.name.startsWith('uetun')
   ) || [];
 
   return (
@@ -1481,17 +1481,23 @@ export default function App() {
 
             {/* KPI Cards Grid */}
             <div className="stats-grid">
-              <div className="card interactive-kpi primary-hover" onClick={() => setActiveTab('config')} title="Click to edit profile settings">
+              {/* Card 1: Active GNodeBs */}
+              <div className="card interactive-kpi primary-hover" onClick={() => setActiveTab('fleet')} title="Click to open Fleet Manager">
                 <div className="card-header">
-                  <span className="card-title">SIM IMSI</span>
+                  <span className="card-title">Active GNodeBs</span>
                   <div className="card-icon primary">
-                    <Cpu size={18} />
+                    <Radio size={18} />
                   </div>
                 </div>
-                <div className="card-value">{status?.configSummary?.ueImsi || '001010000000001'}</div>
-                <span className="card-desc">Provisioned subscriber profile identity</span>
+                <div className="card-value">{status?.runningGnbs?.length || 0}</div>
+                <span className="card-desc">
+                  {status?.runningGnbs && status.runningGnbs.length > 0
+                    ? `Running: ${status.runningGnbs.map((g) => g.profileName).join(', ')}`
+                    : 'No active gNB instances'}
+                </span>
               </div>
 
+              {/* Card 2: Active UEs Online */}
               <div className="card interactive-kpi success-hover" onClick={() => { const el = document.getElementById('activeUEsTable'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }} title="Click to view active UEs list">
                 <div className="card-header">
                   <span className="card-title">Active UEs Online</span>
@@ -1499,14 +1505,19 @@ export default function App() {
                     <Cpu size={18} />
                   </div>
                 </div>
-                <div className="card-value">{activeTuns.length}</div>
+                <div className="card-value">
+                  {activeUEs.filter((u) => u.stateMmDesc?.includes('REGISTERED')).length}
+                </div>
                 <span className="card-desc">
-                  {activeTuns.length > 0
-                    ? `Active Tunnels: ${activeTuns.map((t) => t.name).join(', ')}`
-                    : 'No virtual interfaces active'}
+                  {activeUEs.filter((u) => u.stateMmDesc?.includes('REGISTERED')).length > 0
+                    ? `Registered: ${activeUEs.filter((u) => u.stateMmDesc?.includes('REGISTERED')).map((u) => `UE-${u.id}`).join(', ')} (${activeUEs.length} total)`
+                    : activeUEs.length > 0
+                    ? `0 of ${activeUEs.length} UEs registered`
+                    : 'No active UEs registered'}
                 </span>
               </div>
 
+              {/* Card 3: AMF Core Target */}
               <div className="card interactive-kpi info-hover" onClick={() => setActiveTab('connectivity')} title="Click to test core connectivity">
                 <div className="card-header">
                   <span className="card-title">AMF Core Target</span>
@@ -1518,15 +1529,24 @@ export default function App() {
                 <span className="card-desc">5G Core control plane SCTP binding</span>
               </div>
 
-              <div className="card interactive-kpi purple-hover" onClick={() => setActiveTab('config')} title="Click to edit slice profile">
+              {/* Card 4: Active GTP Tunnels */}
+              <div className="card interactive-kpi purple-hover" onClick={() => { const el = document.getElementById('activeUEsTable'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }} title="Click to view active UEs and sessions">
                 <div className="card-header">
-                  <span className="card-title">Slice Configuration</span>
+                  <span className="card-title">Active GTP Tunnels</span>
                   <div className="card-icon purple">
-                    <Layers size={18} />
+                    <Network size={18} />
                   </div>
                 </div>
-                <div className="card-value">{status?.configSummary?.ueSlice ? status.configSummary.ueSlice.replace('SST: ', 'SST ').replace(', SD: ', '/SD ') : 'SST 1/SD 010203'}</div>
-                <span className="card-desc">Active S-NSSAI network slice profile</span>
+                <div className="card-value">
+                  {activeUEs.reduce((acc, u) => acc + (u.pduSessions?.filter((s: any) => s.stateDesc?.includes('ACTIVE')).length || 0), 0)}
+                </div>
+                <span className="card-desc">
+                  {activeUEs.reduce((acc, u) => acc + (u.pduSessions?.filter((s: any) => s.stateDesc?.includes('ACTIVE')).length || 0), 0) > 0
+                    ? `Active PDU sessions tunnel data (${activeTuns.length} interfaces)`
+                    : activeTuns.length > 0
+                    ? `0 sessions (${activeTuns.length} interfaces)`
+                    : 'No virtual interfaces active'}
+                </span>
               </div>
             </div>
 
