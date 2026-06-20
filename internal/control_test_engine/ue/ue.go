@@ -161,7 +161,13 @@ func RegistrationUeMonitor(conf config.Config,
 func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort int, targetGnbLinkType string, targetGnbSocketPath string, isXn bool, targetGnbId string, targetGnbName string) error {
 	log.Infof("[UE] Initiating Handover to Target GNodeB: %s:%d (LinkType: %s, SocketPath: %s, isXn: %t, targetGnbId: %s, targetGnbName: %s)", targetGnbIp, targetGnbPort, targetGnbLinkType, targetGnbSocketPath, isXn, targetGnbId, targetGnbName)
 
-	// 1. Establish new connection to Target GNodeB
+	// 1. Close old connection first so the local abstract socket address is released
+	oldConn := ue.GetUnixConn()
+	if oldConn != nil {
+		_ = oldConn.Close()
+	}
+
+	// 2. Establish new connection to Target GNodeB
 	var conn net.Conn
 	var err error
 
@@ -176,16 +182,16 @@ func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort in
 		if socketPath == "" {
 			socketPath = "/tmp/gnb.sock"
 		}
-		conn, err = net.Dial("unix", socketPath)
+		dialer := net.Dialer{
+			LocalAddr: &net.UnixAddr{
+				Name: fmt.Sprintf("@ue_%d", ue.GetUeId()),
+				Net:  "unix",
+			},
+		}
+		conn, err = dialer.Dial("unix", socketPath)
 		if err != nil {
 			return fmt.Errorf("error connecting to Target GNodeB via UNIX socket %s: %w", socketPath, err)
 		}
-	}
-
-	// 2. Close old connection
-	oldConn := ue.GetUnixConn()
-	if oldConn != nil {
-		_ = oldConn.Close()
 	}
 
 	// 3. Set new connection

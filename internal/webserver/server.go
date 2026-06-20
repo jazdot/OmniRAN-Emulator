@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -748,6 +749,9 @@ func handleActiveUEs(w http.ResponseWriter, r *http.Request) {
 			PduSessions:      pduSessions,
 		})
 	}
+	sort.Slice(resp, func(i, j int) bool {
+		return resp[i].ID < resp[j].ID
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)

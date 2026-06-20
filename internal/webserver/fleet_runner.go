@@ -3,6 +3,7 @@ package webserver
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -75,8 +76,8 @@ func LaunchGNBProfile(profileName string) error {
 
 	cfg := config.BuildConfigFromGNBProfile(prof)
 
-	// Use a unique socket path for each gNB in fleet mode
-	socketPath := fmt.Sprintf("/tmp/gnb_%s.sock", prof.GnbId)
+	// Use a unique socket path for each gNB in fleet mode based on profile name
+	socketPath := fmt.Sprintf("/tmp/gnb_%s.sock", profileName)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	gCtx, errCh := gnb.InitGnbFleet(cfg, ctx, socketPath)
@@ -157,6 +158,9 @@ func GetRunningGNBs() []RunningGNBStatus {
 			ConnectedUes: connectedUes,
 		})
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ProfileName < result[j].ProfileName
+	})
 	return result
 }
 
@@ -339,6 +343,9 @@ func GetFleetRunningSummary() FleetRunningSummary {
 			PduSessions:      pduSessions,
 		})
 	}
+	sort.Slice(ueStatuses, func(i, j int) bool {
+		return ueStatuses[i].ID < ueStatuses[j].ID
+	})
 
 	return FleetRunningSummary{
 		RunningUEs:  ueStatuses,
@@ -347,44 +354,49 @@ func GetFleetRunningSummary() FleetRunningSummary {
 }
 
 func resolveUeConnectionDetails(u *ueContext.UEContext) {
-	uConn := u.GetUnixConn()
-	if uConn == nil {
-		return
-	}
-
 	runningGNBsMu.RLock()
 	defer runningGNBsMu.RUnlock()
 
+	ueLinkType := u.GetGnbLinkType()
+	ueSocketPath := u.GetGnbSocketPath()
+	uePort := u.GetGnbLinkPort()
+
 	for _, inst := range runningGNBs {
-		if inst.GnbCtx != nil {
-			var matchedGnbId string
-			var matchedProfileName string
-			var matchedAmfUeId int64
-
-			inst.GnbCtx.RangeUePool(func(ranUeId int64, gUe *gnbContext.GNBUe) bool {
-				gConn := gUe.GetUnixSocket()
-				if gConn != nil {
-					// Compare address networks and string representations
-					if gConn.LocalAddr().Network() == uConn.LocalAddr().Network() &&
-						gConn.LocalAddr().String() == uConn.RemoteAddr().String() &&
-						gConn.RemoteAddr().String() == uConn.LocalAddr().String() {
-						matchedGnbId = inst.GnbId
-						matchedProfileName = inst.ProfileName
-						matchedAmfUeId = gUe.GetAmfUeId()
-						return false // stop iteration
-					}
-				}
-				return true
-			})
-
-			if matchedGnbId != "" {
-				u.SetGnbId(matchedGnbId)
-				u.SetGnbProfileName(matchedProfileName)
-				if matchedAmfUeId != 0 {
-					u.SetAmfUeId(matchedAmfUeId)
-				}
-				return
+		match := false
+		if ueLinkType == "unix" && inst.LinkType == "unix" {
+			if inst.SocketPath == ueSocketPath {
+				match = true
 			}
+		} else if ueLinkType == "tcp" && inst.LinkType == "tcp" {
+			if inst.LinkPort == uePort {
+				match = true
+			}
+		}
+
+		if match {
+			u.SetGnbId(inst.GnbId)
+			u.SetGnbProfileName(inst.ProfileName)
+
+			// Resolve the AmfUeId from the GNB's UE pool
+			if inst.GnbCtx != nil {
+				inst.GnbCtx.RangeUePool(func(ranUeId int64, gUe *gnbContext.GNBUe) bool {
+					uConn := u.GetUnixConn()
+					gConn := gUe.GetUnixSocket()
+					if uConn != nil && gConn != nil {
+						// Compare networks and local-to-remote addresses (stable comparison)
+						if gConn.LocalAddr().Network() == uConn.LocalAddr().Network() &&
+							gConn.LocalAddr().String() == uConn.RemoteAddr().String() &&
+							gConn.RemoteAddr().String() == uConn.LocalAddr().String() {
+							if gUe.GetAmfUeId() != 0 {
+								u.SetAmfUeId(gUe.GetAmfUeId())
+							}
+							return false // stop iteration
+						}
+					}
+					return true
+				})
+			}
+			return
 		}
 	}
 }

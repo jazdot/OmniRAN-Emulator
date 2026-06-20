@@ -25,7 +25,13 @@ func InitConn(ue *context.UEContext) error {
 		}
 	} else {
 		socketPath := ue.GetGnbSocketPath()
-		conn, err = net.Dial("unix", socketPath)
+		dialer := net.Dialer{
+			LocalAddr: &net.UnixAddr{
+				Name: fmt.Sprintf("@ue_%d", ue.GetUeId()),
+				Net:  "unix",
+			},
+		}
+		conn, err = dialer.Dial("unix", socketPath)
 		if err != nil {
 			return fmt.Errorf("[UE] Error on Dial UNIX with server on %s: %v", socketPath, err)
 		}

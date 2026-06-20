@@ -1016,6 +1016,13 @@ export default function App() {
   };
 
   const consoleEndRef = useRef<HTMLDivElement>(null);
+  const pingLogEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (pingLogEndRef.current) {
+      pingLogEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [uePingLog]);
 
 
   // Fetch emulator status
@@ -1857,6 +1864,27 @@ export default function App() {
                           ) : (
                             <div className="inspector-details" style={{ maxHeight: '380px', overflowY: 'auto', paddingRight: '4px' }}>
                               
+                              {/* Warning overlay if PDU session not active */}
+                              {!activeUe.pduSessions?.some((s: any) => s.stateDesc?.includes('ACTIVE')) && (
+                                <div style={{
+                                  background: 'rgba(245, 158, 11, 0.08)',
+                                  border: '1px solid rgba(245, 158, 11, 0.2)',
+                                  borderRadius: '6px',
+                                  padding: '8px',
+                                  marginBottom: '12px',
+                                  fontSize: '10px',
+                                  color: '#f59e0b',
+                                  lineHeight: '1.4'
+                                }}>
+                                  <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' }}>
+                                    <AlertTriangle size={12} /> PDU Session Not Active
+                                  </div>
+                                  <div>
+                                    This UE does not have an active user-plane PDU Session. Establish a session in the Details tab or run a scenario first. Real data will fall back to simulation.
+                                  </div>
+                                </div>
+                              )}
+
                               {/* 1. Ping Tool */}
                               <div className="tool-section" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '12px', marginBottom: '12px' }}>
                                 <h5 style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 'bold', color: 'var(--color-success)', margin: '0 0 6px 0' }}>
@@ -1879,8 +1907,9 @@ export default function App() {
                                   </button>
                                 </div>
                                 {uePingLog && (
-                                  <pre style={{ background: '#0f172a', color: '#10b981', fontFamily: 'monospace', fontSize: '9px', padding: '6px', borderRadius: '4px', maxHeight: '100px', overflowY: 'auto', margin: 0, border: '1px solid rgba(16,185,129,0.1)' }}>
+                                  <pre style={{ background: '#0f172a', color: '#10b981', fontFamily: 'monospace', fontSize: '9px', padding: '6px', borderRadius: '4px', maxHeight: '100px', overflowY: 'auto', margin: 0, border: '1px solid rgba(16,185,129,0.1)', position: 'relative' }}>
                                     {uePingLog}
+                                    <div ref={pingLogEndRef} style={{ height: 1 }} />
                                   </pre>
                                 )}
                               </div>
@@ -2037,7 +2066,7 @@ export default function App() {
                                     disabled={isCallActive}
                                     style={{ flex: 1, padding: '4px 6px', borderRadius: '4px', background: '#0f172a', border: '1px solid var(--border-color)', color: '#ffffff', fontSize: '11px' }}
                                   >
-                                    <option value="echo">Voice Echo (Mock SIP Service)</option>
+                                    <option value="echo">Voice Echo (Real 5G Core Loopback)</option>
                                     {otherUes.map((u: any) => (
                                       <option key={u.id} value={u.id.toString()}>UE-{u.id} (Direct Core Call)</option>
                                     ))}

@@ -3,6 +3,7 @@ package webserver
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -402,6 +403,138 @@ type UEVonrDialRequest struct {
 	CalleeID string `json:"calleeId"` // "echo" or another UE ID (e.g. "102")
 }
 
+var (
+	echoServerOnce sync.Once
+	echoServerAddr = "127.0.0.2:5005"
+)
+
+func startVoiceEchoServer() {
+	echoServerOnce.Do(func() {
+		addr, err := net.ResolveUDPAddr("udp", echoServerAddr)
+		if err != nil {
+			logrus.Errorf("[VoNR-ECHO] Resolve UDP address error: %v", err)
+			return
+		}
+		conn, err := net.ListenUDP("udp", addr)
+		if err != nil {
+			logrus.Errorf("[VoNR-ECHO] Listen UDP error on %s: %v", echoServerAddr, err)
+			return
+		}
+		logrus.Infof("[VoNR-ECHO] Real VoNR Voice Echo Server listening on UDP %s", echoServerAddr)
+
+		go func() {
+			defer conn.Close()
+			buf := make([]byte, 2048)
+			for {
+				n, raddr, err := conn.ReadFromUDP(buf)
+				if err != nil {
+					logrus.Warnf("[VoNR-ECHO] Read error: %v", err)
+					return
+				}
+				// Echo the packet back to the sender
+				_, err = conn.WriteToUDP(buf[:n], raddr)
+				if err != nil {
+					logrus.Warnf("[VoNR-ECHO] Write error: %v", err)
+				}
+			}
+		}()
+	})
+}
+
+func startRealRtpLoop(ctx context.Context, c *ActiveCall, localIP, remoteIP string, localPort, remotePort int, appendLog func(string)) {
+	lAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", localIP, localPort))
+	if err != nil {
+		appendLog(fmt.Sprintf("RTP UDP local address resolve error: %v", err))
+		return
+	}
+	rAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", remoteIP, remotePort))
+	if err != nil {
+		appendLog(fmt.Sprintf("RTP UDP remote address resolve error: %v", err))
+		return
+	}
+
+	conn, err := net.ListenUDP("udp", lAddr)
+	if err != nil {
+		appendLog(fmt.Sprintf("RTP UDP bind error on %s:%d: %v", localIP, localPort, err))
+		return
+	}
+	defer conn.Close()
+
+	appendLog(fmt.Sprintf("RTP UDP socket bound to %s:%d. Remote Peer: %s:%d", localIP, localPort, remoteIP, remotePort))
+
+	// Start packet receiver
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+				n, _, err := conn.ReadFrom(buf)
+				if err != nil {
+					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+						continue
+					}
+					return // Socket closed or error, exit receiver
+				}
+				if n >= 20 {
+					c.mu.Lock()
+					c.PacketsRecv++
+					
+					// Parse timestamp from payload (bytes 12-20)
+					sentNano := int64(binary.BigEndian.Uint64(buf[12:20]))
+					if sentNano > 0 {
+						rttMs := float64(time.Now().UnixNano()-sentNano) / 1e6
+						if rttMs > 0 && rttMs < 5000 {
+							// Update Jitter (RFC 3550 style estimate)
+							if c.LatencyMs > 0 {
+								diff := rttMs - c.LatencyMs
+								if diff < 0 {
+									diff = -diff
+								}
+								c.JitterMs = c.JitterMs + (diff-c.JitterMs)/16.0
+							}
+							c.LatencyMs = rttMs
+						}
+					}
+					c.mu.Unlock()
+				}
+			}
+		}
+	}()
+
+	// Start packet sender
+	ticker := time.NewTicker(20 * time.Millisecond) // 50 packets/sec
+	defer ticker.Stop()
+
+	rtpHeader := make([]byte, 40)
+	rtpHeader[0] = 0x80 // RFC 1889 Version 2
+	rtpHeader[1] = 0x60 // AMR-WB payload type
+
+	var seq uint16 = 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.mu.Lock()
+			c.PacketsSent++
+			c.mu.Unlock()
+
+			// Put sequence number (bytes 2-3)
+			binary.BigEndian.PutUint16(rtpHeader[2:4], seq)
+			seq++
+
+			// Put timestamp in payload (bytes 12-20)
+			nowNano := time.Now().UnixNano()
+			binary.BigEndian.PutUint64(rtpHeader[12:20], uint64(nowNano))
+
+			_, _ = conn.WriteTo(rtpHeader, rAddr)
+		}
+	}
+}
+
 func handleUEVonrDial(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodPost {
@@ -428,6 +561,10 @@ func handleUEVonrDial(w http.ResponseWriter, r *http.Request) {
 	if old, ok := activeCalls[req.CallerID]; ok {
 		old.cancel()
 		delete(activeCalls, req.CallerID)
+	}
+
+	if req.CalleeID == "echo" {
+		startVoiceEchoServer()
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -468,50 +605,89 @@ func runVonrCallSimulation(ctx context.Context, c *ActiveCall, uCaller *ueContex
 	appendLog("Content-Type: application/sdp")
 	appendLog("SDP: m=audio 5004 RTP/AVP 96 (AMR-WB voice codec)")
 	appendLog("SIP ACK sent")
-	appendLog("RTP media stream started on local UDP port 5004")
 
-	// Try setting up a real UDP connection between UEs if both are active IP tunnels
-	var realUdpConn *net.UDPConn
-	var targetUdpAddr *net.UDPAddr
+	// Determine if we can do real UDP connection
+	callerIP := strings.Split(uCaller.GetIp(c.CallerID), ",")[0]
 	isRealUdpExchange := false
 
-	callerIP := strings.Split(uCaller.GetIp(c.CallerID), ",")[0]
-	if callerIP != "" && c.CalleeID != "echo" {
-		calleeIdInt, err := strconv.Atoi(c.CalleeID)
-		if err == nil {
-			uCallee := ueContext.GetActiveUE(uint8(calleeIdInt))
-			if uCallee != nil {
-				calleeIP := strings.Split(uCallee.GetIp(uint8(calleeIdInt)), ",")[0]
-				if calleeIP != "" {
-					// We can establish a real UDP binding between callerIP and calleeIP!
-					lAddr, _ := net.ResolveUDPAddr("udp", callerIP+":5004")
-					rAddr, _ := net.ResolveUDPAddr("udp", calleeIP+":5004")
-					conn, err := net.ListenUDP("udp", lAddr)
-					if err == nil {
-						realUdpConn = conn
-						targetUdpAddr = rAddr
+	var localIP, remoteIP string
+	var localPort, remotePort int
+
+	if callerIP != "" {
+		if c.CalleeID == "echo" {
+			localIP = callerIP
+			remoteIP = "127.0.0.2"
+			localPort = 5004
+			remotePort = 5005
+			isRealUdpExchange = true
+			appendLog(fmt.Sprintf("Established real user-plane VoNR voice echo loop: %s:5004 <-> %s:5005", localIP, remoteIP))
+		} else {
+			calleeIdInt, err := strconv.Atoi(c.CalleeID)
+			if err == nil {
+				uCallee := ueContext.GetActiveUE(uint8(calleeIdInt))
+				if uCallee != nil {
+					calleeIP := strings.Split(uCallee.GetIp(uint8(calleeIdInt)), ",")[0]
+					if calleeIP != "" {
+						localIP = callerIP
+						remoteIP = calleeIP
+						localPort = 5004
+						remotePort = 5004
 						isRealUdpExchange = true
-						appendLog(fmt.Sprintf("Established real GTP-U user-plane RTP exchange: %s:5004 <-> %s:5004", callerIP, calleeIP))
+						appendLog(fmt.Sprintf("Established real peer-to-peer VoNR exchange: %s:5004 <-> %s:5004", localIP, remoteIP))
+
+						// Set callee status in activeCalls map
+						calleeIDUint := uint8(calleeIdInt)
+						calleeCall := &ActiveCall{
+							CallerID:  calleeIDUint,
+							CalleeID:  fmt.Sprintf("%d", c.CallerID),
+							Status:    "connected",
+							SipLogs: []string{
+								fmt.Sprintf("[%s] Incoming call from UE-%d...", time.Now().Format("15:04:05.000"), c.CallerID),
+								fmt.Sprintf("[%s] SIP/2.0 200 OK (Call Accepted)", time.Now().Format("15:04:05.000")),
+							},
+							StartedAt: c.StartedAt,
+							cancel:    c.cancel, // share cancel
+						}
+
+						callsMu.Lock()
+						activeCalls[calleeIDUint] = calleeCall
+						callsMu.Unlock()
+
+						// Start peer loop for callee in background
+						go startRealRtpLoop(ctx, calleeCall, calleeIP, callerIP, 5004, 5004, func(l string) {
+							calleeCall.mu.Lock()
+							calleeCall.SipLogs = append(calleeCall.SipLogs, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05.000"), l))
+							calleeCall.mu.Unlock()
+						})
 					}
 				}
 			}
 		}
 	}
 
-	if !isRealUdpExchange {
+	if isRealUdpExchange {
+		go startRealRtpLoop(ctx, c, localIP, remoteIP, localPort, remotePort, appendLog)
+	} else {
 		appendLog("Voice Core NAT Fallback: running RTP loop in simulated media mode")
 	}
 
-	// 2. Call Active Loop
+	// 2. Call Active Loop (updates durations, packet loss, and MOS scores)
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	defer func() {
-		if realUdpConn != nil {
-			_ = realUdpConn.Close()
-		}
 		c.Status = "disconnected"
 		appendLog("SIP BYE sent")
 		appendLog("SIP/2.0 200 OK (Call Terminated)")
+
+		// Clean up callee call if peer-to-peer
+		if c.CalleeID != "echo" {
+			calleeIdInt, err := strconv.Atoi(c.CalleeID)
+			if err == nil {
+				callsMu.Lock()
+				delete(activeCalls, uint8(calleeIdInt))
+				callsMu.Unlock()
+			}
+		}
 	}()
 
 	for {
@@ -522,25 +698,32 @@ func runVonrCallSimulation(ctx context.Context, c *ActiveCall, uCaller *ueContex
 			c.mu.Lock()
 			c.CallDuration = int(time.Since(c.StartedAt).Seconds())
 
-			// Codec packets: 50 packets per second (AMR-WB payload is ~32-61 bytes)
-			pkts := int64(50)
-			c.PacketsSent += pkts
-			c.PacketsRecv += pkts
+			if !isRealUdpExchange {
+				// Sim mode: increment simulated packets
+				c.PacketsSent += 50
+				c.PacketsRecv += 50
+				c.LatencyMs = 12.0 + rand.Float64()*18.0
+				c.JitterMs = 1.2 + rand.Float64()*4.0
+				c.PacketLossPct = 0.0
 
-			// Generate quality metrics
-			c.LatencyMs = 12.0 + rand.Float64()*18.0
-			c.JitterMs = 1.2 + rand.Float64()*4.0
-			c.PacketLossPct = 0.0
-
-			// Occasional simulated network drops to show MOS score changes
-			if rand.Intn(20) == 0 {
-				c.PacketLossPct = 0.5 + rand.Float64()*2.0
-				c.JitterMs += 10
-				c.LatencyMs += 30
+				// Occasional simulated network drops to show MOS score changes
+				if rand.Intn(20) == 0 {
+					c.PacketLossPct = 0.5 + rand.Float64()*2.0
+					c.JitterMs += 10
+					c.LatencyMs += 30
+				}
+			} else {
+				// Real mode: calculate packet loss
+				if c.PacketsSent > 0 {
+					loss := 100.0 * float64(c.PacketsSent-c.PacketsRecv) / float64(c.PacketsSent)
+					if loss < 0 {
+						loss = 0
+					}
+					c.PacketLossPct = loss
+				}
 			}
 
 			// MOS Score Calculation
-			// R-factor basic calculation
 			rFactor := 94.2 - (c.LatencyMs * 0.024) - (c.PacketLossPct * 2.5) - (c.JitterMs * 0.4)
 			if rFactor < 0 {
 				rFactor = 0
@@ -552,17 +735,25 @@ func runVonrCallSimulation(ctx context.Context, c *ActiveCall, uCaller *ueContex
 				c.MosScore = 1.0
 			}
 
-			c.mu.Unlock()
-
-			// Exchanging actual UDP payloads on GTP if possible
-			if isRealUdpExchange && realUdpConn != nil && targetUdpAddr != nil {
-				// Send mock RTP header + dummy voice payload
-				rtpDummy := make([]byte, 40)
-				rtpDummy[0] = 0x80 // Version 2
-				rtpDummy[1] = 0x60 // AMR-WB payload type
-				// Write to the other UE via tunnel
-				_, _ = realUdpConn.WriteTo(rtpDummy, targetUdpAddr)
+			// Update Callee call duration and stats in peer-to-peer call
+			if c.CalleeID != "echo" {
+				calleeIdInt, err := strconv.Atoi(c.CalleeID)
+				if err == nil {
+					callsMu.Lock()
+					if calleeCall, ok := activeCalls[uint8(calleeIdInt)]; ok {
+						calleeCall.mu.Lock()
+						calleeCall.CallDuration = c.CallDuration
+						calleeCall.MosScore = c.MosScore
+						calleeCall.LatencyMs = c.LatencyMs
+						calleeCall.JitterMs = c.JitterMs
+						calleeCall.PacketLossPct = c.PacketLossPct
+						calleeCall.mu.Unlock()
+					}
+					callsMu.Unlock()
+				}
 			}
+
+			c.mu.Unlock()
 		}
 	}
 }
