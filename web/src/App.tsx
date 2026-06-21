@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Activity,
   Play,
@@ -568,16 +568,6 @@ const formatHexDump = (hex: string): string => {
   return result;
 };
 
-const getRoleX = (role: string): number => {
-  switch (role) {
-    case 'UE': return 100;
-    case 'gNB-Source': return 280;
-    case 'gNB-Target': return 460;
-    case 'AMF': return 640;
-    case 'UPF': return 820;
-    default: return 1000; // External
-  }
-};
 
 const getProtocolColor = (proto: string): string => {
   switch (proto) {
@@ -660,6 +650,81 @@ export default function App() {
   const [selectedEvent, setSelectedEvent] = useState<PcapEvent | null>(null);
   const [isLogFlow, setIsLogFlow] = useState(false);
   const [showOnlyNgap, setShowOnlyNgap] = useState(false);
+
+  const lanes = useMemo(() => {
+    const ues = new Set<string>();
+    const gnbs = new Set<string>();
+    let hasAmf = false;
+    let hasUpf = false;
+    let hasExternal = false;
+
+    callFlowEvents.forEach(e => {
+      [e.srcRole, e.dstRole].forEach(r => {
+        if (!r) return;
+        if (r === 'UE') {
+          ues.add('UE (1)');
+        } else if (r.startsWith('UE')) {
+          ues.add(r);
+        } else if (r === 'gNB-Source') {
+          gnbs.add('gNB (2)');
+        } else if (r === 'gNB-Target') {
+          gnbs.add('gNB (4)');
+        } else if (r.startsWith('gNB')) {
+          gnbs.add(r);
+        } else if (r === 'AMF') {
+          hasAmf = true;
+        } else if (r === 'UPF') {
+          hasUpf = true;
+        } else if (r === 'External') {
+          hasExternal = true;
+        }
+      });
+    });
+
+    if (ues.size === 0) ues.add('UE (1)');
+    if (gnbs.size === 0) {
+      gnbs.add('gNB (2)');
+      gnbs.add('gNB (4)');
+    }
+
+    const sortedUes = Array.from(ues).sort((a, b) => {
+      const na = parseInt(a.match(/\d+/)?.[0] || '1');
+      const nb = parseInt(b.match(/\d+/)?.[0] || '1');
+      return na - nb;
+    });
+
+    const sortedGnbs = Array.from(gnbs).sort((a, b) => {
+      const na = parseInt(a.match(/\d+/)?.[0] || '1');
+      const nb = parseInt(b.match(/\d+/)?.[0] || '1');
+      return na - nb;
+    });
+
+    const result = [...sortedUes, ...sortedGnbs];
+    if (hasAmf || callFlowEvents.length === 0) result.push('AMF');
+    if (hasUpf || callFlowEvents.length === 0) result.push('UPF');
+    if (hasExternal || callFlowEvents.length === 0) result.push('External');
+    return result;
+  }, [callFlowEvents]);
+
+  const getLaneX = useCallback((role: string): number => {
+    let normalized = role;
+    if (role === 'UE') {
+      normalized = 'UE (1)';
+    } else if (role === 'gNB-Source') {
+      normalized = 'gNB (2)';
+    } else if (role === 'gNB-Target') {
+      normalized = 'gNB (4)';
+    }
+    const index = lanes.indexOf(normalized);
+    if (index === -1) {
+      return 80 + lanes.length * 180;
+    }
+    return 80 + index * 180;
+  }, [lanes]);
+
+  const svgWidth = useMemo(() => {
+    return Math.max(1100, 100 + lanes.length * 180);
+  }, [lanes]);
 
   const openCallFlow = async (fileName?: string) => {
     setCallFlowLoading(true);
@@ -5619,7 +5684,7 @@ export default function App() {
                   <span style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>No call flow events found in this file.</span>
                 </div>
               ) : (
-                <div style={{ minWidth: '1200px', position: 'relative' }}>
+                <div style={{ minWidth: `${svgWidth + 100}px`, position: 'relative' }}>
                   
                   {/* Lifeline titles */}
                   <div style={{
@@ -5633,16 +5698,16 @@ export default function App() {
                     alignItems: 'center'
                   }}>
                     <div style={{ width: '80px' }} /> {/* space for time */}
-                    <div style={{ position: 'relative', width: '1100px', height: '100%' }}>
-                      {['UE', 'gNB-Source', 'gNB-Target', 'AMF', 'UPF', 'External'].map((name) => {
-                        const x = getRoleX(name);
+                    <div style={{ position: 'relative', width: `${svgWidth - 80}px`, height: '100%' }}>
+                      {lanes.map((name) => {
+                        const x = getLaneX(name);
                         return (
                           <div key={name} style={{ position: 'absolute', left: `${x}px`, transform: 'translateX(-50%)', top: '10px', textAlign: 'center' }}>
                             <span style={{
                               fontSize: '11px',
                               fontWeight: 'bold',
-                              background: name === 'UE' ? 'rgba(59, 130, 246, 0.15)' : name === 'AMF' ? 'rgba(168, 85, 247, 0.15)' : 'rgba(148, 163, 184, 0.1)',
-                              color: name === 'UE' ? '#60a5fa' : name === 'AMF' ? '#c084fc' : 'var(--text-secondary)',
+                              background: name.startsWith('UE') ? 'rgba(59, 130, 246, 0.15)' : name === 'AMF' ? 'rgba(168, 85, 247, 0.15)' : 'rgba(148, 163, 184, 0.1)',
+                              color: name.startsWith('UE') ? '#60a5fa' : name === 'AMF' ? '#c084fc' : 'var(--text-secondary)',
                               padding: '6px 12px',
                               borderRadius: '6px',
                               border: '1px solid var(--border-color)',
@@ -5664,8 +5729,8 @@ export default function App() {
                     return (
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
                         {displayedEvents.map((event, idx) => {
-                      const srcX = getRoleX(event.srcRole);
-                      const dstX = getRoleX(event.dstRole);
+                      const srcX = getLaneX(event.srcRole);
+                      const dstX = getLaneX(event.dstRole);
                       const isSelf = srcX === dstX;
                       const color = getProtocolColor(event.protocol);
                       
@@ -5692,7 +5757,7 @@ export default function App() {
                           </div>
 
                           {/* SVG column */}
-                          <svg width="1100" height="65" style={{ display: 'block' }}>
+                          <svg width={svgWidth} height="65" style={{ display: 'block' }}>
                             <defs>
                               <marker
                                 id={`arrow-${idx}`}
@@ -5708,8 +5773,8 @@ export default function App() {
                             </defs>
 
                             {/* Lifeline vertical lines */}
-                            {['UE', 'gNB-Source', 'gNB-Target', 'AMF', 'UPF', 'External'].map((lane) => {
-                              const lx = getRoleX(lane);
+                            {lanes.map((lane) => {
+                              const lx = getLaneX(lane);
                               return (
                                 <line
                                   key={lane}

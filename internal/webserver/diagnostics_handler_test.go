@@ -126,14 +126,14 @@ func TestPcapLogParsers(t *testing.T) {
 	if role := getLifelineRole("127.0.0.1", 5005); role != "UPF" {
 		t.Errorf("Expected role 'UPF'; got '%s'", role)
 	}
-	if role := getLifelineRole("127.0.0.1", 5004); role != "UE" {
-		t.Errorf("Expected role 'UE'; got '%s'", role)
+	if role := getLifelineRole("127.0.0.1", 5004); role != "UE (1)" {
+		t.Errorf("Expected role 'UE (1)'; got '%s'", role)
 	}
-	if role := getLifelineRole("127.0.0.1", 9487); role != "gNB-Source" {
-		t.Errorf("Expected role 'gNB-Source'; got '%s'", role)
+	if role := getLifelineRole("127.0.0.1", 9487); role != "gNB (1)" {
+		t.Errorf("Expected role 'gNB (1)'; got '%s'", role)
 	}
-	if role := getLifelineRole("127.0.0.1", 9497); role != "gNB-Target" {
-		t.Errorf("Expected role 'gNB-Target'; got '%s'", role)
+	if role := getLifelineRole("127.0.0.1", 9497); role != "gNB (2)" {
+		t.Errorf("Expected role 'gNB (2)'; got '%s'", role)
 	}
 	if role := getLifelineRole("1.2.3.4", 12345); role != "External" {
 		t.Errorf("Expected role 'External'; got '%s'", role)
@@ -171,16 +171,16 @@ time="2026-06-21T11:00:03Z" level=info msg="PDU Session Establishment Request"`
 		t.Fatalf("Expected 4 events from log parsing; got %d", len(events))
 	}
 
-	if events[0].MessageName != "NGSetupRequest" || events[0].SrcRole != "gNB-Source" || events[0].DstRole != "AMF" {
+	if events[0].MessageName != "NGSetupRequest" || events[0].SrcRole != "gNB (2)" || events[0].DstRole != "AMF" {
 		t.Errorf("Event 0 parsed incorrectly: %+v", events[0])
 	}
-	if events[1].MessageName != "InitialUEMessage (Registration Request)" || events[1].SrcRole != "gNB-Source" || events[1].DstRole != "AMF" {
+	if events[1].MessageName != "InitialUEMessage (Registration Request)" || events[1].SrcRole != "gNB (2)" || events[1].DstRole != "AMF" {
 		t.Errorf("Event 1 parsed incorrectly: %+v", events[1])
 	}
-	if events[2].MessageName != "InitialContextSetupRequest (Registration Accept)" || events[2].SrcRole != "AMF" || events[2].DstRole != "gNB-Source" {
+	if events[2].MessageName != "InitialContextSetupRequest (Registration Accept)" || events[2].SrcRole != "AMF" || events[2].DstRole != "gNB (2)" {
 		t.Errorf("Event 2 parsed incorrectly: %+v", events[2])
 	}
-	if events[3].MessageName != "UplinkNASTransport (PDU Session Est. Request)" || events[3].SrcRole != "gNB-Source" || events[3].DstRole != "AMF" {
+	if events[3].MessageName != "UplinkNASTransport (PDU Session Est. Request)" || events[3].SrcRole != "gNB (2)" || events[3].DstRole != "AMF" {
 		t.Errorf("Event 3 parsed incorrectly: %+v", events[3])
 	}
 }
@@ -259,8 +259,8 @@ func TestParsePcapEventsSctpNgap(t *testing.T) {
 	if ev.Protocol != "NGAP" {
 		t.Errorf("Expected Protocol='NGAP'; got '%s'", ev.Protocol)
 	}
-	if ev.SrcRole != "gNB-Source" || ev.DstRole != "AMF" {
-		t.Errorf("Expected Roles gNB-Source -> AMF; got %s -> %s", ev.SrcRole, ev.DstRole)
+	if ev.SrcRole != "gNB (1)" || ev.DstRole != "AMF" {
+		t.Errorf("Expected Roles gNB (1) -> AMF; got %s -> %s", ev.SrcRole, ev.DstRole)
 	}
 	if !strings.Contains(ev.MessageName, "NGAP") {
 		t.Errorf("Expected MessageName to refer to NGAP; got '%s'", ev.MessageName)

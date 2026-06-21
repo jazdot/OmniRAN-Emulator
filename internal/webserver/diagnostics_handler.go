@@ -14,10 +14,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"strconv"
 	"syscall"
 	"time"
 
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	ueContext "OmniRAN-Emulator/internal/control_test_engine/ue/context"
 	"OmniRAN-Emulator/lib/ngap"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 	"github.com/sirupsen/logrus"
@@ -682,29 +684,58 @@ func getLifelineRole(ip string, port uint16) string {
 		return "UPF"
 	}
 	if port == 5004 {
-		return "UE"
+		return "UE (1)"
 	}
 
 	// Check ActiveGNBs
 	context.ActiveGNBsMu.RLock()
 	defer context.ActiveGNBsMu.RUnlock()
+
+	// 1. Try exact port match first (control port, link port, xn/udp etc)
 	for _, g := range context.ActiveGNBs {
 		if g.GetGnbIp() == ip {
 			if uint16(g.GetGnbPort()) == port || uint16(g.GetLinkPort()) == port || uint16(g.GetLinkPort()+1) == port {
-				if g.GetGnbId() == "000002" || strings.Contains(strings.ToLower(g.GetGnbId()), "target") {
-					return "gNB-Target"
+				gnbIdStr := g.GetGnbId()
+				if val, err := strconv.ParseInt(gnbIdStr, 16, 64); err == nil {
+					return fmt.Sprintf("gNB (%d)", val)
 				}
-				return "gNB-Source"
+				return fmt.Sprintf("gNB (%s)", gnbIdStr)
+			}
+		}
+	}
+
+	// 2. Try IP match as fallback (if the IP is uniquely assigned to a gNB)
+	var matchedGnb *context.GNBContext
+	matchCount := 0
+	for _, g := range context.ActiveGNBs {
+		if g.GetGnbIp() == ip {
+			matchedGnb = g
+			matchCount++
+		}
+	}
+	if matchCount == 1 && matchedGnb != nil {
+		gnbIdStr := matchedGnb.GetGnbId()
+		if val, err := strconv.ParseInt(gnbIdStr, 16, 64); err == nil {
+			return fmt.Sprintf("gNB (%d)", val)
+		}
+		return fmt.Sprintf("gNB (%s)", gnbIdStr)
+	}
+
+	// Check Active UEs by checking dynamic PDU session IP allocation
+	for _, u := range ueContext.GetAllActiveUEs() {
+		for _, sess := range u.PduSessions {
+			if u.GetIp(sess.Id) == ip {
+				return fmt.Sprintf("UE (%d)", u.GetUeId())
 			}
 		}
 	}
 
 	// Fallback mappings
-	if port == 9487 || port == 9488 {
-		return "gNB-Source"
+	if port == 9487 || port == 9488 || port == 9489 {
+		return "gNB (1)"
 	}
-	if port == 9497 || port == 9498 {
-		return "gNB-Target"
+	if port == 9497 || port == 9498 || port == 9499 {
+		return "gNB (2)"
 	}
 
 	return "External"
@@ -953,6 +984,36 @@ func decodeNgapMessage(pdu *ngapType.NGAPPDU) (string, string, map[string]interf
 					}
 				}
 			}
+		case ngapType.ProcedureCodePathSwitchRequest:
+			msgName = "PathSwitchRequest"
+			summary = "Target gNB requests path switch"
+			if initVal.Value.PathSwitchRequest != nil {
+				for _, ie := range initVal.Value.PathSwitchRequest.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDSourceAMFUENGAPID {
+						if ie.Value.SourceAMFUENGAPID != nil {
+							details["SourceAMFUENGAPID"] = ie.Value.SourceAMFUENGAPID.Value
+						}
+					}
+				}
+			}
+		case ngapType.ProcedureCodeUEContextRelease:
+			msgName = "UEContextReleaseCommand"
+			summary = "AMF commands source gNB to release UE context"
+			if initVal.Value.UEContextReleaseCommand != nil {
+				for _, ie := range initVal.Value.UEContextReleaseCommand.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDUENGAPIDs {
+						if ie.Value.UENGAPIDs != nil {
+							uengapids := ie.Value.UENGAPIDs
+							if uengapids.Present == ngapType.UENGAPIDsPresentUENGAPIDPair && uengapids.UENGAPIDPair != nil {
+								details["AMFUENGAPID"] = uengapids.UENGAPIDPair.AMFUENGAPID.Value
+								details["RANUENGAPID"] = uengapids.UENGAPIDPair.RANUENGAPID.Value
+							} else if uengapids.Present == ngapType.UENGAPIDsPresentAMFUENGAPID && uengapids.AMFUENGAPID != nil {
+								details["AMFUENGAPID"] = uengapids.AMFUENGAPID.Value
+							}
+						}
+					}
+				}
+			}
 		}
 	case ngapType.NGAPPDUPresentSuccessfulOutcome:
 		succVal := pdu.SuccessfulOutcome
@@ -998,6 +1059,9 @@ func decodeNgapMessage(pdu *ngapType.NGAPPDU) (string, string, map[string]interf
 		case ngapType.ProcedureCodePathSwitchRequest:
 			msgName = "PathSwitchRequestAcknowledge"
 			summary = "AMF acknowledges path switch"
+		case ngapType.ProcedureCodeUEContextRelease:
+			msgName = "UEContextReleaseComplete"
+			summary = "Source gNB confirms UE context release"
 		}
 	case ngapType.NGAPPDUPresentUnsuccessfulOutcome:
 		failVal := pdu.UnsuccessfulOutcome
@@ -1262,7 +1326,7 @@ func parsePcapEvents(r io.Reader) ([]PcapEvent, error) {
 
 	var filtered []PcapEvent
 	for _, ev := range events {
-		if ev.Protocol == "NGAP" || ev.Protocol == "HTTP" {
+		if ev.Protocol == "NGAP" || ev.Protocol == "HTTP" || ev.Protocol == "XnAP" || ev.Protocol == "RRC" {
 			filtered = append(filtered, ev)
 		}
 	}
@@ -1270,6 +1334,86 @@ func parsePcapEvents(r io.Reader) ([]PcapEvent, error) {
 }
 
 func parseLogEvents(r io.Reader) []PcapEvent {
+	extractUeRole := func(msg string) string {
+		for _, tag := range []string{"UE ID ", "UE ", "AMF UE ID: ", "ranUeId: ", "RAN UE ID: "} {
+			if idx := strings.Index(msg, tag); idx != -1 {
+				sub := msg[idx+len(tag):]
+				var digits []rune
+				for _, r := range sub {
+					if r >= '0' && r <= '9' {
+						digits = append(digits, r)
+					} else {
+						break
+					}
+				}
+				if len(digits) > 0 {
+					return fmt.Sprintf("UE (%s)", string(digits))
+				}
+			}
+		}
+		return "UE (101)"
+	}
+
+	extractGnbRole := func(msg string, defaultRole string) string {
+		if strings.Contains(msg, "gNB-West") {
+			return "gNB (2)"
+		}
+		if strings.Contains(msg, "gNB-East") {
+			return "gNB (4)"
+		}
+		if strings.Contains(msg, "gNB-Default") {
+			return "gNB (1)"
+		}
+
+		for _, tag := range []string{"gNB-ID: ", "GNB-ID: ", "gNB-ID ", "GNB-ID ", "GNB[ID:", "gNB-FLEET] ", "gNB ", "GNB "} {
+			if idx := strings.Index(msg, tag); idx != -1 {
+				sub := msg[idx+len(tag):]
+				var digits []rune
+				for _, r := range sub {
+					if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
+						digits = append(digits, r)
+					} else {
+						break
+					}
+				}
+				if len(digits) > 0 {
+					val, err := strconv.ParseInt(string(digits), 16, 64)
+					if err == nil {
+						return fmt.Sprintf("gNB (%d)", val)
+					}
+				}
+			}
+		}
+
+		// Search for any 6-digit hex/decimal GNB ID prefix like "000001" or "000002"
+		for i := 0; i <= len(msg)-6; i++ {
+			sub := msg[i : i+6]
+			if strings.HasPrefix(sub, "000") {
+				isHex := true
+				for _, r := range sub {
+					if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+						isHex = false
+						break
+					}
+				}
+				if isHex {
+					val, err := strconv.ParseInt(sub, 16, 64)
+					if err == nil {
+						return fmt.Sprintf("gNB (%d)", val)
+					}
+				}
+			}
+		}
+
+		if defaultRole == "gNB-Source" {
+			return "gNB (2)"
+		}
+		if defaultRole == "gNB-Target" {
+			return "gNB (4)"
+		}
+		return defaultRole
+	}
+
 	var events []PcapEvent
 	scanner := bufio.NewScanner(r)
 
@@ -1453,13 +1597,28 @@ func parseLogEvents(r io.Reader) []PcapEvent {
 		}
 
 		if msgName != "" {
+			finalSrc := srcRole
+			finalDst := dstRole
+
+			if srcRole == "UE" {
+				finalSrc = extractUeRole(msg)
+			} else if strings.HasPrefix(srcRole, "gNB-") {
+				finalSrc = extractGnbRole(msg, srcRole)
+			}
+
+			if dstRole == "UE" {
+				finalDst = extractUeRole(msg)
+			} else if strings.HasPrefix(dstRole, "gNB-") {
+				finalDst = extractGnbRole(msg, dstRole)
+			}
+
 			events = append(events, PcapEvent{
 				Timestamp:   timestamp,
 				Protocol:    proto,
 				SrcIp:       "Logs",
 				DstIp:       "Logs",
-				SrcRole:     srcRole,
-				DstRole:     dstRole,
+				SrcRole:     finalSrc,
+				DstRole:     finalDst,
 				MessageName: msgName,
 				Summary:     msg,
 				Details:     details,
@@ -1469,7 +1628,7 @@ func parseLogEvents(r io.Reader) []PcapEvent {
 
 	var filtered []PcapEvent
 	for _, ev := range events {
-		if ev.Protocol == "NGAP" || ev.Protocol == "HTTP" {
+		if ev.Protocol == "NGAP" || ev.Protocol == "HTTP" || ev.Protocol == "XnAP" || ev.Protocol == "RRC" {
 			filtered = append(filtered, ev)
 		}
 	}
