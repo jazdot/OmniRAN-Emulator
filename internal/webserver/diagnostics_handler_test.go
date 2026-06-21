@@ -82,6 +82,21 @@ func TestParsePacket(t *testing.T) {
 	if proto != 1 {
 		t.Errorf("Expected proto=1; got %d", proto)
 	}
+
+	// 6. Mock BSD Null/Loopback Packet (4-byte header + 20-byte IPv4)
+	bsdLoopback := make([]byte, 4+20)
+	binary.LittleEndian.PutUint32(bsdLoopback[0:4], 2) // Family IPv4
+	bsdLoopback[4] = 0x45                              // Version 4, IHL 5
+	bsdLoopback[4+9] = 132                             // Protocol SCTP (132)
+
+	ipStart, ethType = parsePacket(bsdLoopback)
+	if ipStart != 4 || ethType != 0x0800 {
+		t.Errorf("Expected ipStart=4, ethType=0x0800; got ipStart=%d, ethType=0x%04x", ipStart, ethType)
+	}
+	proto = getIpProtocol(bsdLoopback[ipStart:], ethType)
+	if proto != 132 {
+		t.Errorf("Expected proto=132; got %d", proto)
+	}
 }
 
 func TestWrapInEthernet(t *testing.T) {
@@ -167,5 +182,87 @@ time="2026-06-21T11:00:03Z" level=info msg="PDU Session Establishment Request"`
 	}
 	if events[3].MessageName != "UplinkNASTransport (PDU Session Est. Request)" || events[3].SrcRole != "gNB-Source" || events[3].DstRole != "AMF" {
 		t.Errorf("Event 3 parsed incorrectly: %+v", events[3])
+	}
+}
+
+func TestParsePcapEventsSctpNgap(t *testing.T) {
+	// Construct in-memory PCAP file with 1 SCTP DATA packet containing NGAP payload
+	pcapBytes := make([]byte, 0)
+
+	// 1. Global Header (24 bytes)
+	globalHeader := make([]byte, 24)
+	binary.LittleEndian.PutUint32(globalHeader[0:4], 0xa1b2c3d4)
+	binary.LittleEndian.PutUint16(globalHeader[4:6], 2)
+	binary.LittleEndian.PutUint16(globalHeader[6:8], 4)
+	binary.LittleEndian.PutUint32(globalHeader[8:12], 0)
+	binary.LittleEndian.PutUint32(globalHeader[12:16], 0)
+	binary.LittleEndian.PutUint32(globalHeader[16:20], 65535)
+	binary.LittleEndian.PutUint32(globalHeader[20:24], 1) // LinkType Ethernet
+	pcapBytes = append(pcapBytes, globalHeader...)
+
+	// 2. Packet Header (16 bytes)
+	// Len: 14 (Eth) + 20 (IP) + 12 (SCTP) + 16 (DATA Chunk) + 4 (Payload) = 66 bytes
+	pktLen := uint32(66)
+	pktHeader := make([]byte, 16)
+	binary.LittleEndian.PutUint32(pktHeader[0:4], 1718967600) // Seconds
+	binary.LittleEndian.PutUint32(pktHeader[4:8], 123456)     // Microseconds
+	binary.LittleEndian.PutUint32(pktHeader[8:12], pktLen)
+	binary.LittleEndian.PutUint32(pktHeader[12:16], pktLen)
+	pcapBytes = append(pcapBytes, pktHeader...)
+
+	// 3. Packet Data (66 bytes)
+	pktData := make([]byte, 66)
+
+	// Ethernet Header (14 bytes)
+	pktData[12] = 0x08; pktData[13] = 0x00 // EtherType IPv4
+
+	// IP Header (20 bytes at offset 14)
+	pktData[14] = 0x45 // Version 4, IHL 5
+	binary.BigEndian.PutUint16(pktData[14+2:14+4], 52) // Total Length (52)
+	pktData[14+9] = 132 // Protocol SCTP
+	// Src IP: 127.0.0.1
+	pktData[14+12] = 127; pktData[14+13] = 0; pktData[14+14] = 0; pktData[14+15] = 1
+	// Dst IP: 127.0.0.1
+	pktData[14+16] = 127; pktData[14+17] = 0; pktData[14+18] = 0; pktData[14+19] = 1
+
+	// SCTP Header (12 bytes at offset 34)
+	binary.BigEndian.PutUint16(pktData[34:36], 9487)  // Src Port (gNB-Source)
+	binary.BigEndian.PutUint16(pktData[36:38], 38412) // Dst Port (AMF)
+
+	// SCTP DATA Chunk Header (16 bytes at offset 46)
+	pktData[46] = 0 // Chunk Type (DATA)
+	pktData[47] = 3 // Chunk Flags (U, B, E)
+	binary.BigEndian.PutUint16(pktData[46+2:46+4], 20) // Chunk Length (20)
+	binary.BigEndian.PutUint16(pktData[46+8:46+10], 1) // Stream ID
+	binary.BigEndian.PutUint16(pktData[46+10:46+12], 0) // Stream Seq Num
+	binary.BigEndian.PutUint32(pktData[46+12:46+16], 60) // PPID (60 = NGAP)
+
+	// Payload (4 bytes at offset 62)
+	pktData[62] = 0x00; pktData[63] = 0x01; pktData[64] = 0x02; pktData[65] = 0x03
+
+	pcapBytes = append(pcapBytes, pktData...)
+
+	// Run parser
+	importReader := strings.NewReader(string(pcapBytes)) // Note: using raw string reader might corrupt binary, use bytes reader
+	// Let's import bytes and use bytes.NewReader. Wait, "bytes" is not imported in diagnostics_handler_test.go!
+	// Let's use strings.NewReader by converting bytes to string, which is fine in Go as string holds raw bytes.
+	events, err := parsePcapEvents(importReader)
+	if err != nil {
+		t.Fatalf("Failed to parse mock PCAP: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event; got %d", len(events))
+	}
+
+	ev := events[0]
+	if ev.Protocol != "NGAP" {
+		t.Errorf("Expected Protocol='NGAP'; got '%s'", ev.Protocol)
+	}
+	if ev.SrcRole != "gNB-Source" || ev.DstRole != "AMF" {
+		t.Errorf("Expected Roles gNB-Source -> AMF; got %s -> %s", ev.SrcRole, ev.DstRole)
+	}
+	if !strings.Contains(ev.MessageName, "NGAP") {
+		t.Errorf("Expected MessageName to refer to NGAP; got '%s'", ev.MessageName)
 	}
 }

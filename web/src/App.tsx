@@ -659,6 +659,7 @@ export default function App() {
   const [callFlowTitle, setCallFlowTitle] = useState('');
   const [selectedEvent, setSelectedEvent] = useState<PcapEvent | null>(null);
   const [isLogFlow, setIsLogFlow] = useState(false);
+  const [showOnlyNgap, setShowOnlyNgap] = useState(false);
 
   const openCallFlow = async (fileName?: string) => {
     setCallFlowLoading(true);
@@ -5407,22 +5408,34 @@ export default function App() {
                 Interactive 3GPP sequence visualizer. Click any message to inspect frame parameters.
               </p>
             </div>
-            <button
-              onClick={() => setCallFlowOpen(false)}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer',
-                padding: '4px',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              <X size={20} />
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px', userSelect: 'none' }}>
+                <input
+                  type="checkbox"
+                  checked={showOnlyNgap}
+                  onChange={(e) => setShowOnlyNgap(e.target.checked)}
+                  style={{ cursor: 'pointer' }}
+                />
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Show Only NGAP</span>
+              </label>
+
+              <button
+                onClick={() => setCallFlowOpen(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
           </div>
 
           {/* Content body */}
@@ -5644,8 +5657,13 @@ export default function App() {
                   </div>
 
                   {/* Sequence Rows */}
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    {callFlowEvents.map((event, idx) => {
+                  {(() => {
+                    const displayedEvents = showOnlyNgap 
+                      ? callFlowEvents.filter(e => e.protocol === 'NGAP') 
+                      : callFlowEvents;
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        {displayedEvents.map((event, idx) => {
                       const srcX = getRoleX(event.srcRole);
                       const dstX = getRoleX(event.dstRole);
                       const isSelf = srcX === dstX;
@@ -5789,10 +5807,12 @@ export default function App() {
                       );
                     })}
                   </div>
-                </div>
-              )}
-              </div>
+                );
+              })()}
             </div>
+          )}
+          </div>
+        </div>
 
             {/* Right side: Detailed Frame Inspector */}
             <div style={{

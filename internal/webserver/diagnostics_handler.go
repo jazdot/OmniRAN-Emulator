@@ -95,7 +95,22 @@ func wrapInEthernet(data []byte, ethType uint16) []byte {
 }
 
 func parsePacket(data []byte) (ipStart int, ethType uint16) {
-	// 1. Try SLL (Linux Cooked Capture v1, 16-byte header)
+	// 1. Try Null/Loopback (4-byte header, BSD Null/Loopback)
+	if len(data) >= 24 { // 4 bytes + 20 bytes IPv4
+		// check family (can be big or little endian)
+		familyLE := binary.LittleEndian.Uint32(data[0:4])
+		familyBE := binary.BigEndian.Uint32(data[0:4])
+		
+		ipVersion := data[4] >> 4
+		if (familyLE == 2 || familyBE == 2) && ipVersion == 4 {
+			return 4, 0x0800
+		}
+		if (familyLE == 24 || familyLE == 28 || familyLE == 30 || familyBE == 24 || familyBE == 28 || familyBE == 30) && ipVersion == 6 {
+			return 4, 0x86dd
+		}
+	}
+
+	// 2. Try SLL (Linux Cooked Capture v1, 16-byte header)
 	if len(data) >= 16 {
 		proto := binary.BigEndian.Uint16(data[14:16])
 		if proto == 0x0800 || proto == 0x86dd {
@@ -106,7 +121,7 @@ func parsePacket(data []byte) (ipStart int, ethType uint16) {
 		}
 	}
 
-	// 2. Try Ethernet (14-byte header)
+	// 3. Try Ethernet (14-byte header)
 	if len(data) >= 14 {
 		proto := binary.BigEndian.Uint16(data[12:14])
 		if proto == 0x0800 || proto == 0x86dd {
@@ -117,7 +132,18 @@ func parsePacket(data []byte) (ipStart int, ethType uint16) {
 		}
 	}
 
-	// 3. Try Raw IP
+	// 4. Try SLL2 (Linux Cooked Capture v2, 20-byte header)
+	if len(data) >= 40 {
+		proto := binary.BigEndian.Uint16(data[0:2])
+		if proto == 0x0800 || proto == 0x86dd {
+			version := data[20] >> 4
+			if (proto == 0x0800 && version == 4) || (proto == 0x86dd && version == 6) {
+				return 20, proto
+			}
+		}
+	}
+
+	// 5. Try Raw IP
 	if len(data) >= 20 {
 		version := data[0] >> 4
 		if version == 4 {
@@ -997,9 +1023,9 @@ func parsePcapEvents(r io.Reader) ([]PcapEvent, error) {
 
 	magic := binary.LittleEndian.Uint32(globalHeader[0:4])
 	var isLittleEndian = true
-	if magic == 0xd4c3b2a1 {
+	if magic == 0xd4c3b2a1 || magic == 0x4d3cb2a1 {
 		isLittleEndian = false
-	} else if magic != 0xa1b2c3d4 {
+	} else if magic != 0xa1b2c3d4 && magic != 0xa1b23c4d {
 		return nil, fmt.Errorf("invalid pcap magic number: 0x%x", magic)
 	}
 
@@ -1192,7 +1218,7 @@ func parsePcapEvents(r io.Reader) ([]PcapEvent, error) {
 
 					if chunkType == 0 { // DATA Chunk
 						if len(chunks) >= 16 {
-							ppid := binary.BigEndian.Uint32(chunks[8:12])
+							ppid := binary.BigEndian.Uint32(chunks[12:16])
 							if ppid == 60 { // PPID NGAP
 								protocolName = "NGAP"
 								ngapPayload := chunks[16:chunkLen]
