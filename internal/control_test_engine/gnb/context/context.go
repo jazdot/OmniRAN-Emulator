@@ -11,6 +11,33 @@ import (
 	"sync"
 )
 
+var (
+	ActiveGNBsMu sync.RWMutex
+	ActiveGNBs   = make(map[string]*GNBContext)
+)
+
+func FindUeInOtherGnb(excludeGnbId string, amfUeId int64) (*GNBContext, *GNBUe) {
+	ActiveGNBsMu.RLock()
+	defer ActiveGNBsMu.RUnlock()
+	for gId, g := range ActiveGNBs {
+		if gId == excludeGnbId {
+			continue
+		}
+		var foundUe *GNBUe
+		g.RangeUePool(func(ranUeId int64, ue *GNBUe) bool {
+			if ue.GetAmfUeId() == amfUeId {
+				foundUe = ue
+				return false
+			}
+			return true
+		})
+		if foundUe != nil {
+			return g, foundUe
+		}
+	}
+	return nil, nil
+}
+
 type GNBContext struct {
 	dataInfo       DataInfo    // gnb data plane information
 	controlInfo    ControlInfo // gnb control plane information
@@ -52,6 +79,7 @@ type ControlInfo struct {
 	linkType     string
 	linkPort     int
 	socketPath   string
+	xnConn       *net.UDPConn
 }
 
 func (gnb *GNBContext) NewRanGnbContext(gnbId, mcc, mnc, tac, sst, sd, ip, ipData string, port, portData int) {
@@ -73,6 +101,10 @@ func (gnb *GNBContext) NewRanGnbContext(gnbId, mcc, mnc, tac, sst, sd, ip, ipDat
 	gnb.dataInfo.upfIp = ""
 	gnb.dataInfo.gnbIp = ipData
 	gnb.dataInfo.gnbPort = portData
+
+	ActiveGNBsMu.Lock()
+	ActiveGNBs[gnbId] = gnb
+	ActiveGNBsMu.Unlock()
 }
 
 func (gnb *GNBContext) NewGnBUe(conn net.Conn) *GNBUe {
@@ -487,6 +519,12 @@ func (gnb *GNBContext) Terminate() {
 		n2.Close()
 	}
 
+	xn := gnb.GetXnConn()
+	if xn != nil {
+		log.Info("[GNB][XnAP] Xn UDP Service Terminated")
+		xn.Close()
+	}
+
 	// TODO: problem in close de N3 socket in gtp library
 	/*
 		n3 := gnb.GetN3Plane()
@@ -495,6 +533,10 @@ func (gnb *GNBContext) Terminate() {
 			log.Info("[GNB][UPF] N3/NG-U Terminated")
 		}
 	*/
+
+	ActiveGNBsMu.Lock()
+	delete(ActiveGNBs, gnb.GetGnbId())
+	ActiveGNBsMu.Unlock()
 
 	log.Info("GNB Terminated")
 }
@@ -539,4 +581,12 @@ func (gnb *GNBContext) GetSocketPath() string {
 		return "/tmp/gnb.sock"
 	}
 	return gnb.controlInfo.socketPath
+}
+
+func (gnb *GNBContext) GetXnConn() *net.UDPConn {
+	return gnb.controlInfo.xnConn
+}
+
+func (gnb *GNBContext) SetXnConn(conn *net.UDPConn) {
+	gnb.controlInfo.xnConn = conn
 }

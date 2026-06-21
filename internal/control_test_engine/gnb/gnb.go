@@ -55,6 +55,13 @@ func InitGnb(conf config.Config, wg *sync.WaitGroup) {
 		log.Info("[GNB] UNIX/NAS service is running")
 	}
 
+	// start Xn UDP service
+	if err := serviceNgap.StartXnListener(gnb); err != nil {
+		log.Warnf("[GNB] Failed to start Xn listener: %v", err)
+	} else {
+		log.Info("[GNB] Xn/UDP service is running")
+	}
+
 	trigger.SendNgSetupRequest(gnb, amf)
 
 	// control the signals
@@ -114,6 +121,13 @@ func InitGnbForUeLatency(conf config.Config, sigGnb chan bool, synch chan bool) 
 	} else {
 		log.Info("[GNB] UNIX/NAS service is running")
 
+	}
+
+	// start Xn UDP service
+	if err := serviceNgap.StartXnListener(gnb); err != nil {
+		log.Warnf("[GNB] Failed to start Xn listener: %v", err)
+	} else {
+		log.Info("[GNB] Xn/UDP service is running")
 	}
 
 	trigger.SendNgSetupRequest(gnb, amf)
@@ -281,6 +295,12 @@ func InitGnbFleet(conf config.Config, ctx stdctx.Context, gnbSocketPath string) 
 			return
 		}
 		log.Infof("[GNB-FLEET] %s NAS service running", conf.GNodeB.PlmnList.GnbId)
+
+		if err := serviceNgap.StartXnListener(g); err != nil {
+			log.Warnf("[GNB-FLEET] %s Xn listener failed: %v", conf.GNodeB.PlmnList.GnbId, err)
+		} else {
+			log.Infof("[GNB-FLEET] %s Xn service running", conf.GNodeB.PlmnList.GnbId)
+		}
 
 		trigger.SendNgSetupRequest(g, amf)
 		log.Infof("[GNB-FLEET] %s NG Setup Request sent", conf.GNodeB.PlmnList.GnbId)

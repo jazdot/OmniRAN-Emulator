@@ -234,6 +234,37 @@ func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort in
 	// Legacy / Xn Handover Flow: Close source conn, connect to target immediately
 	oldConn := ue.GetUnixConn()
 	if oldConn != nil {
+		// Send Xn Handover Trigger to Source GNodeB:
+		// [0x00, 0x06] [Target GNodeB IP (4 bytes)] [Target GNodeB Port (2 bytes)] [AMF UE ID (8 bytes)] [PDU Session ID (1 byte)]
+		amfUeId := ue.GetAmfUeId()
+		var pduSessionId uint8 = 1
+		for id := range ue.PduSessions {
+			pduSessionId = id
+			break
+		}
+
+		triggerMsg := make([]byte, 17)
+		triggerMsg[0] = 0x00
+		triggerMsg[1] = 0x06 // Xn Handover UE-to-Source Trigger
+
+		// Target IP
+		targetIp := net.ParseIP(targetGnbIp).To4()
+		if targetIp == nil {
+			targetIp = []byte{127, 0, 0, 1}
+		}
+		copy(triggerMsg[2:6], targetIp)
+
+		// Target Port (GNodeB's link port)
+		binary.BigEndian.PutUint16(triggerMsg[6:8], uint16(targetGnbPort))
+		binary.BigEndian.PutUint64(triggerMsg[8:16], uint64(amfUeId))
+		triggerMsg[16] = pduSessionId
+
+		_, _ = oldConn.Write(triggerMsg)
+		log.Infof("[UE] Sent Xn Handover Trigger to Source GNodeB. AMF UE ID: %d", amfUeId)
+
+		// Sleep briefly for Xn Handover handshake to complete between GNodeBs
+		time.Sleep(100 * time.Millisecond)
+
 		_ = oldConn.Close()
 	}
 

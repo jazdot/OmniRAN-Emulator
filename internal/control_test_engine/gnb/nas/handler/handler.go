@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/binary"
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/nas_transport"
@@ -12,6 +13,9 @@ import (
 )
 
 func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBContext) {
+	if handleXnHandoverTrigger(ue, message, gnb) {
+		return
+	}
 
 	// 1. Check if this is N2 Handover Trigger (0x02) from UE to Source GNodeB (size 28)
 	if len(message) == 28 && message[0] == 0x00 && message[1] == 0x02 {
@@ -167,6 +171,9 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 }
 
 func HandlerUeOngoing(ue *context.GNBUe, message []byte, gnb *context.GNBContext) {
+	if handleXnHandoverTrigger(ue, message, gnb) {
+		return
+	}
 
 	ngap, err := nas_transport.SendUplinkNasTransport(message, ue, gnb)
 	if err != nil {
@@ -182,6 +189,9 @@ func HandlerUeOngoing(ue *context.GNBUe, message []byte, gnb *context.GNBContext
 }
 
 func HandlerUeReady(ue *context.GNBUe, message []byte, gnb *context.GNBContext) {
+	if handleXnHandoverTrigger(ue, message, gnb) {
+		return
+	}
 
 	// Send Uplink Nas Transport
 	ngap, err := nas_transport.SendUplinkNasTransport(message, ue, gnb)
@@ -196,4 +206,32 @@ func HandlerUeReady(ue *context.GNBUe, message []byte, gnb *context.GNBContext) 
 		log.Info("[GNB][AMF] Error sending Uplink Nas Transport: ", err)
 	}
 
+}
+
+func handleXnHandoverTrigger(ue *context.GNBUe, message []byte, gnb *context.GNBContext) bool {
+	if len(message) == 17 && message[0] == 0x00 && message[1] == 0x06 {
+		targetIp := net.IP(message[2:6])
+		targetPort := binary.BigEndian.Uint16(message[6:8])
+		amfUeId := int64(binary.BigEndian.Uint64(message[8:16]))
+
+		targetXnAddrStr := fmt.Sprintf("%s:%d", targetIp.String(), targetPort+1)
+		targetXnAddr, err := net.ResolveUDPAddr("udp", targetXnAddrStr)
+		if err != nil {
+			log.Errorf("[GNB-Source] Error resolving Target Xn UDP address: %v", err)
+			return true
+		}
+
+		log.Infof("[GNB-Source][XnAP] Initiating Xn Handover. Sending XN HANDOVER REQUEST to Target GNodeB at %s", targetXnAddrStr)
+
+		reqMsg := make([]byte, 11)
+		reqMsg[0] = 0x58; reqMsg[1] = 0x4e; reqMsg[2] = 0x01
+		binary.BigEndian.PutUint64(reqMsg[3:11], uint64(amfUeId))
+
+		_, err = gnb.GetXnConn().WriteToUDP(reqMsg, targetXnAddr)
+		if err != nil {
+			log.Errorf("[GNB-Source][XnAP] Error sending XN HANDOVER REQUEST: %v", err)
+		}
+		return true
+	}
+	return false
 }

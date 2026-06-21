@@ -723,6 +723,20 @@ func HandlerPathSwitchRequestAcknowledge(gnb *context.GNBContext, message *ngapT
 	if err == nil && ue != nil {
 		ue.SetAmfUeId(amfUeId)
 		log.Infof("[GNB][NGAP] Handover Completed for UE ID %d", ranUeId)
+
+		// Xn Handover Context Release: Send XN UE CONTEXT RELEASE back to Source GNodeB if it exists
+		sourceGnb, _ := context.FindUeInOtherGnb(gnb.GetGnbId(), amfUeId)
+		if sourceGnb != nil && gnb.GetXnConn() != nil {
+			sourceXnAddrStr := fmt.Sprintf("%s:%d", sourceGnb.GetGnbIp(), sourceGnb.GetLinkPort()+1)
+			sourceXnAddr, err := net.ResolveUDPAddr("udp", sourceXnAddrStr)
+			if err == nil {
+				log.Infof("[GNB-Target][XnAP] Sending XN UE CONTEXT RELEASE to Source GNodeB at %s", sourceXnAddrStr)
+				relMsg := make([]byte, 11)
+				relMsg[0] = 0x58; relMsg[1] = 0x4e; relMsg[2] = 0x03
+				binary.BigEndian.PutUint64(relMsg[3:11], uint64(amfUeId))
+				_, _ = gnb.GetXnConn().WriteToUDP(relMsg, sourceXnAddr)
+			}
+		}
 	}
 }
 

@@ -77,49 +77,59 @@ func writePcapPacketHeader(w io.Writer, length int, timestamp time.Time) error {
 	return err
 }
 
-func wrapInEthernet(data []byte) []byte {
-	// If it starts directly with IPv4 (0x45) or IPv6 (0x60), prepend a dummy Ethernet header.
-	// This makes it instantly parsable in Wireshark as standard Ethernet link-type.
-	if len(data) >= 20 && (data[0] == 0x45 || (data[0]&0xf0 == 0x60)) {
-		eth := make([]byte, 14+len(data))
-		// Dst MAC: 00:00:00:00:00:02
-		eth[0] = 0x00; eth[1] = 0x00; eth[2] = 0x00; eth[3] = 0x00; eth[4] = 0x00; eth[5] = 0x02
-		// Src MAC: 00:00:00:00:00:01
-		eth[6] = 0x00; eth[7] = 0x00; eth[8] = 0x00; eth[9] = 0x00; eth[10] = 0x00; eth[11] = 0x01
-		
-		if data[0] == 0x45 {
-			eth[12] = 0x08; eth[13] = 0x00 // IPv4 type
-		} else {
-			eth[12] = 0x86; eth[13] = 0xdd // IPv6 type
-		}
-		copy(eth[14:], data)
-		return eth
-	}
-	return data
+func wrapInEthernet(data []byte, ethType uint16) []byte {
+	eth := make([]byte, 14+len(data))
+	// Dst MAC: 00:00:00:00:00:02
+	eth[0] = 0x00; eth[1] = 0x00; eth[2] = 0x00; eth[3] = 0x00; eth[4] = 0x00; eth[5] = 0x02
+	// Src MAC: 00:00:00:00:00:01
+	eth[6] = 0x00; eth[7] = 0x00; eth[8] = 0x00; eth[9] = 0x00; eth[10] = 0x00; eth[11] = 0x01
+	
+	binary.BigEndian.PutUint16(eth[12:14], ethType)
+	copy(eth[14:], data)
+	return eth
 }
 
-func getIpProtocol(data []byte, isRawIp bool) uint8 {
-	var ipStart = 0
-	if !isRawIp {
-		if len(data) < 14 {
-			return 0
+func parsePacket(data []byte) (ipStart int, ethType uint16) {
+	// 1. Try SLL (Linux Cooked Capture v1, 16-byte header)
+	if len(data) >= 16 {
+		proto := binary.BigEndian.Uint16(data[14:16])
+		if proto == 0x0800 || proto == 0x86dd {
+			version := data[16] >> 4
+			if (proto == 0x0800 && version == 4) || (proto == 0x86dd && version == 6) {
+				return 16, proto
+			}
 		}
-		etherType := binary.BigEndian.Uint16(data[12:14])
-		if etherType != 0x0800 && etherType != 0x86dd {
-			return 0
-		}
-		ipStart = 14
 	}
 
-	if len(data) < ipStart+20 {
-		return 0
+	// 2. Try Ethernet (14-byte header)
+	if len(data) >= 14 {
+		proto := binary.BigEndian.Uint16(data[12:14])
+		if proto == 0x0800 || proto == 0x86dd {
+			version := data[14] >> 4
+			if (proto == 0x0800 && version == 4) || (proto == 0x86dd && version == 6) {
+				return 14, proto
+			}
+		}
 	}
 
-	version := data[ipStart] >> 4
-	if version == 4 {
-		return data[ipStart+9] // IPv4 Protocol
-	} else if version == 6 {
-		return data[ipStart+6] // IPv6 Next Header
+	// 3. Try Raw IP
+	if len(data) >= 20 {
+		version := data[0] >> 4
+		if version == 4 {
+			return 0, 0x0800
+		} else if version == 6 {
+			return 0, 0x86dd
+		}
+	}
+
+	return -1, 0
+}
+
+func getIpProtocol(ipPayload []byte, ethType uint16) uint8 {
+	if ethType == 0x0800 && len(ipPayload) >= 20 {
+		return ipPayload[9]
+	} else if ethType == 0x86dd && len(ipPayload) >= 40 {
+		return ipPayload[6]
 	}
 	return 0
 }
@@ -323,19 +333,20 @@ func captureLoop(fd int, file *os.File, filter string, isRawIp bool, stopChan ch
 			packet := make([]byte, n)
 			copy(packet, buf[:n])
 
-			// Extract IP protocol and filter
-			proto := getIpProtocol(packet, isRawIp)
+			// Parse packet format and extract IP payload
+			ipStart, ethType := parsePacket(packet)
+			if ipStart < 0 {
+				continue
+			}
+
+			ipPayload := packet[ipStart:]
+			proto := getIpProtocol(ipPayload, ethType)
 			if !matchesProtocol(proto, filter) {
 				continue
 			}
 
-			// Wrap IP packet in dummy Ethernet if interface is raw IP
-			var writeData []byte
-			if isRawIp {
-				writeData = wrapInEthernet(packet)
-			} else {
-				writeData = packet
-			}
+			// Re-encapsulate raw IP payload in standard 14-byte Ethernet header
+			writeData := wrapInEthernet(ipPayload, ethType)
 
 			// Write PCAP packet header and data
 			pcapMgr.mu.Lock()
