@@ -58,7 +58,7 @@ func BuildNGSetupRequest(gnb *context.GNBContext) (pdu ngapType.NGAPPDU) {
 	ie.Value.RANNodeName = new(ngapType.RANNodeName)
 
 	rANNodeName := ie.Value.RANNodeName
-	rANNodeName.Value = "my5gRANTester"
+	rANNodeName.Value = "OmniRANEmulator"
 	nGSetupRequestIEs.List = append(nGSetupRequestIEs.List, ie)
 	// SupportedTAList
 	ie = ngapType.NGSetupRequestIEs{}

@@ -100,6 +100,9 @@ func DispatchState(ue *context.UEContext, message []byte) {
 			} else {
 				log.Info("[UE] Cell switch completed. Target cell access trigger sent successfully.")
 			}
+		} else if len(message) == 2 && message[1] == 0x06 {
+			log.Info("[UE] Received Connection Release (CM-IDLE) trigger from GNodeB. Releasing user plane tunnels...")
+			ue.ReleaseConnection()
 		}
 	} else {
 		// It's an IP plane configuration message from GNodeB.

@@ -341,6 +341,7 @@ func GetFleetRunningSummary() FleetRunningSummary {
 			GnbId:            u.GetGnbId(),
 			GnbProfileName:   u.GetGnbProfileName(),
 			PduSessions:      pduSessions,
+			ConnectionState:  getUeConnectionState(u),
 		})
 	}
 	sort.Slice(ueStatuses, func(i, j int) bool {

@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"github.com/ishidawataru/sctp"
 	log "github.com/sirupsen/logrus"
+	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap"
 	"net"
+	"strconv"
+	"time"
 )
 
 func InitConn(amf *context.GNBAmf, gnb *context.GNBContext) error {
@@ -117,12 +120,60 @@ func processXnMessage(gnb *context.GNBContext, data []byte, remoteAddr *net.UDPA
 	switch msgType {
 	case 0x01: // XN HANDOVER REQUEST
 		log.Infof("[GNB-Target][XnAP] Received XN HANDOVER REQUEST from %v", remoteAddr)
+		var amfUeId int64 = 0
+		if len(data) >= 11 {
+			amfUeId = int64(binary.BigEndian.Uint64(data[3:11]))
+		}
 		// Respond with XN HANDOVER REQUEST ACKNOWLEDGE
-		ackMsg := []byte{0x58, 0x4e, 0x02}
+		ackMsg := make([]byte, 11)
+		ackMsg[0] = 0x58; ackMsg[1] = 0x4e; ackMsg[2] = 0x02
+		binary.BigEndian.PutUint64(ackMsg[3:11], uint64(amfUeId))
+
+		if config.PcapHook != nil {
+			config.PcapHook(gnb.GetGnbIp(), remoteAddr.IP.String(), uint16(gnb.GetLinkPort()+1), uint16(remoteAddr.Port), 17, ackMsg)
+			time.Sleep(5 * time.Millisecond)
+		}
 		_, _ = gnb.GetXnConn().WriteToUDP(ackMsg, remoteAddr)
 		log.Infof("[GNB-Target][XnAP] Sent XN HANDOVER REQUEST ACKNOWLEDGE to %v", remoteAddr)
+
 	case 0x02: // XN HANDOVER REQUEST ACKNOWLEDGE
 		log.Infof("[GNB-Source][XnAP] Received XN HANDOVER REQUEST ACKNOWLEDGE from %v", remoteAddr)
+		var amfUeId int64 = 0
+		if len(data) >= 11 {
+			amfUeId = int64(binary.BigEndian.Uint64(data[3:11]))
+		}
+		var targetUe *context.GNBUe
+		gnb.RangeUePool(func(id int64, ue *context.GNBUe) bool {
+			if ue.GetAmfUeId() == amfUeId {
+				targetUe = ue
+				return false
+			}
+			return true
+		})
+		if targetUe != nil {
+			// 1. RRCReconfiguration (HO Command) (0x08)
+			if config.PcapHook != nil {
+				ueIp := "10.200.200." + strconv.Itoa(int(targetUe.GetRanUeId()))
+				gnbIp := gnb.GetGnbIp()
+				gnbPort := uint16(gnb.GetLinkPort())
+				config.PcapHook(gnbIp, ueIp, gnbPort, 9999, 17, []byte{0x52, 0x52, 0x43, 0x08})
+				time.Sleep(5 * time.Millisecond)
+			}
+			// 2. XN SN STATUS TRANSFER (0x04)
+			snMsg := make([]byte, 11)
+			snMsg[0] = 0x58; snMsg[1] = 0x4e; snMsg[2] = 0x04
+			binary.BigEndian.PutUint64(snMsg[3:11], uint64(amfUeId))
+			if config.PcapHook != nil {
+				config.PcapHook(gnb.GetGnbIp(), remoteAddr.IP.String(), uint16(gnb.GetLinkPort()+1), uint16(remoteAddr.Port), 17, snMsg)
+				time.Sleep(5 * time.Millisecond)
+			}
+			_, _ = gnb.GetXnConn().WriteToUDP(snMsg, remoteAddr)
+			log.Infof("[GNB-Source][XnAP] Sent XN SN STATUS TRANSFER to %v", remoteAddr)
+		}
+
+	case 0x04: // XN SN STATUS TRANSFER
+		log.Infof("[GNB-Target][XnAP] Received XN SN STATUS TRANSFER from %v", remoteAddr)
+
 	case 0x03: // XN UE CONTEXT RELEASE
 		log.Infof("[GNB-Source][XnAP] Received XN UE CONTEXT RELEASE from %v. Cleaning up UE context...", remoteAddr)
 		if len(data) >= 11 {

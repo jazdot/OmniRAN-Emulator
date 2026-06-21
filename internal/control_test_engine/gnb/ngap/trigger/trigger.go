@@ -47,7 +47,7 @@ func SendInitialContextSetupResponse(ue *context.GNBUe) {
 func SendNgSetupRequest(gnb *context.GNBContext, amf *context.GNBAmf) {
 
 	// send NG setup response.
-	ngapMsg, err := interface_management.NGSetupRequest(gnb, "my5gRANTester")
+	ngapMsg, err := interface_management.NGSetupRequest(gnb, "OmniRANEmulator")
 	if err != nil {
 		log.Info("[GNB][NGAP] Error sending NG Setup Request")
 

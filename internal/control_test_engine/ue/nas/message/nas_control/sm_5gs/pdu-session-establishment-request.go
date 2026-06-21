@@ -108,3 +108,51 @@ func GetPduSessionReleaseComplete(pduSessionId uint8) (nasPdu []byte) {
 	nasPdu = data.Bytes()
 	return
 }
+
+// GetPduSessionModificationRequest builds a PDU Session Modification Request NAS message
+func GetPduSessionModificationRequest(pduSessionId uint8) (nasPdu []byte) {
+	m := nas.NewMessage()
+	m.GsmMessage = nas.NewGsmMessage()
+	m.GsmHeader.SetMessageType(nas.MsgTypePDUSessionModificationRequest)
+
+	pduSessionModificationRequest := nasMessage.NewPDUSessionModificationRequest(0)
+	pduSessionModificationRequest.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
+	pduSessionModificationRequest.SetMessageType(nas.MsgTypePDUSessionModificationRequest)
+	pduSessionModificationRequest.PDUSessionID.SetPDUSessionID(pduSessionId)
+	pduSessionModificationRequest.PTI.SetPTI(0x01)
+
+	m.GsmMessage.PDUSessionModificationRequest = pduSessionModificationRequest
+
+	data := new(bytes.Buffer)
+	err := m.GsmMessageEncode(data)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	nasPdu = data.Bytes()
+	return
+}
+
+// GetPduSessionModificationComplete builds a PDU Session Modification Complete NAS message
+func GetPduSessionModificationComplete(pduSessionId uint8) (nasPdu []byte) {
+	m := nas.NewMessage()
+	m.GsmMessage = nas.NewGsmMessage()
+	m.GsmHeader.SetMessageType(nas.MsgTypePDUSessionModificationComplete)
+
+	pduSessionModificationComplete := nasMessage.NewPDUSessionModificationComplete(0)
+	pduSessionModificationComplete.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
+	pduSessionModificationComplete.SetMessageType(nas.MsgTypePDUSessionModificationComplete)
+	pduSessionModificationComplete.PDUSessionID.SetPDUSessionID(pduSessionId)
+	pduSessionModificationComplete.PTI.SetPTI(0x01)
+
+	m.GsmMessage.PDUSessionModificationComplete = pduSessionModificationComplete
+
+	data := new(bytes.Buffer)
+	err := m.GsmMessageEncode(data)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	nasPdu = data.Bytes()
+	return
+}

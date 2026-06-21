@@ -187,6 +187,20 @@ func HandlerDlNasTransportPduaccept(ue *context.UEContext, message *nas.Message)
 
 		sender.SendToGnb(ue, releaseComplete)
 		log.Infof("[UE][NAS] PDU Session Release Complete sent back to network for ID %d", pduSessionId)
+	} else if msgType == nas.MsgTypePDUSessionModificationCommand {
+		log.Info("[UE][NAS] Receiving PDU Session Modification Command")
+
+		pduSessionId := payloadContainer.PDUSessionModificationCommand.PDUSessionID.GetPDUSessionID()
+
+		// send PDUSessionModificationComplete back
+		modComplete, err := mm_5gs.UlNasTransportModificationComplete(ue, pduSessionId)
+		if err != nil {
+			log.Errorf("[UE][NAS] Error encoding PDUSessionModificationComplete: %v", err)
+			return
+		}
+
+		sender.SendToGnb(ue, modComplete)
+		log.Infof("[UE][NAS] PDU Session Modification Complete sent back to network for ID %d", pduSessionId)
 	}
 }
 

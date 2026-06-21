@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 	serviceGateway "OmniRAN-Emulator/internal/control_test_engine/gnb/data/service"
 	serviceGtp "OmniRAN-Emulator/internal/control_test_engine/gnb/gtp/service"
@@ -15,6 +16,7 @@ import (
 	"OmniRAN-Emulator/lib/aper"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 	"net"
+	"strconv"
 	"time"
 )
 
@@ -206,6 +208,20 @@ func HandlerInitialContextSetupRequest(gnb *context.GNBContext, message *ngapTyp
 		log.Info("[GNB][UE] Allowed Nssai-- Sst: ", sst, " Sd: ", sd)
 	}
 
+	// Inject RRC Reconfiguration messages into PCAP
+	if config.PcapHook != nil {
+		ueIp := "10.200.200." + strconv.Itoa(int(ue.GetRanUeId()))
+		gnbIp := gnb.GetGnbIp()
+		gnbPort := uint16(gnb.GetLinkPort())
+		
+		// RRCReconfiguration (0x05)
+		config.PcapHook(gnbIp, ueIp, gnbPort, 9999, 17, []byte{0x52, 0x52, 0x43, 0x05})
+		time.Sleep(5 * time.Millisecond)
+		// RRCReconfigurationComplete (0x06)
+		config.PcapHook(ueIp, gnbIp, 9999, gnbPort, 17, []byte{0x52, 0x52, 0x43, 0x06})
+		time.Sleep(5 * time.Millisecond)
+	}
+
 	// send NAS message to UE.
 	log.Info("[GNB][NAS][UE] Send Registration Accept.")
 	sender.SendToUe(ue, messageNas)
@@ -368,6 +384,20 @@ func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *nga
 	if gnb.GetUpfIp() == "" {
 		upfIp := fmt.Sprintf("%d.%d.%d.%d", upfAddress[0], upfAddress[1], upfAddress[2], upfAddress[3])
 		gnb.SetUpfIp(upfIp)
+	}
+
+	// Inject RRC Reconfiguration messages into PCAP
+	if config.PcapHook != nil {
+		ueIp := "10.200.200." + strconv.Itoa(int(ue.GetRanUeId()))
+		gnbIp := gnb.GetGnbIp()
+		gnbPort := uint16(gnb.GetLinkPort())
+		
+		// RRCReconfiguration (0x05)
+		config.PcapHook(gnbIp, ueIp, gnbPort, 9999, 17, []byte{0x52, 0x52, 0x43, 0x05})
+		time.Sleep(5 * time.Millisecond)
+		// RRCReconfigurationComplete (0x06)
+		config.PcapHook(ueIp, gnbIp, 9999, gnbPort, 17, []byte{0x52, 0x52, 0x43, 0x06})
+		time.Sleep(5 * time.Millisecond)
 	}
 
 	// send NAS message to UE.
@@ -734,6 +764,12 @@ func HandlerPathSwitchRequestAcknowledge(gnb *context.GNBContext, message *ngapT
 				relMsg := make([]byte, 11)
 				relMsg[0] = 0x58; relMsg[1] = 0x4e; relMsg[2] = 0x03
 				binary.BigEndian.PutUint64(relMsg[3:11], uint64(amfUeId))
+				
+				if config.PcapHook != nil {
+					config.PcapHook(gnb.GetGnbIp(), sourceGnb.GetGnbIp(), uint16(gnb.GetLinkPort()+1), uint16(sourceGnb.GetLinkPort()+1), 17, relMsg)
+					time.Sleep(5 * time.Millisecond)
+				}
+				
 				_, _ = gnb.GetXnConn().WriteToUDP(relMsg, sourceXnAddr)
 			}
 		}
@@ -891,8 +927,39 @@ func HandlerUeContextReleaseCommand(gnb *context.GNBContext, message *ngapType.N
 
 	log.Infof("[GNB-Source][NGAP] UE Context Release Command received for RAN UE ID: %d, AMF UE ID: %d", ranUeId, amfUeId)
 
-	// Clean up context from GNodeB
-	gnb.DeleteGnBUe(ranUeId)
+	// Keep the UE in the pool but transition it to CM-IDLE
+	ue, err := gnb.GetGnbUe(ranUeId)
+	if err == nil && ue != nil {
+		// Notify the UE over UNIX/TCP control socket
+		conn := ue.GetUnixSocket()
+		if conn != nil {
+			_, err := conn.Write([]byte{0x00, 0x06})
+			if err != nil {
+				log.Errorf("[GNB] Error sending connection release trigger to UE: %v", err)
+			} else {
+				log.Info("[GNB] Connection release trigger (CM-IDLE) sent successfully to UE")
+			}
+		}
+
+		// Clean up data-plane mappings in GNB Context (GTP-U tunnels)
+		gnb.DeleteGnBUeByTeid(ue.GetTeidDownlink())
+		gnb.DeleteGnBUeByIp(ue.GetIp().String())
+		pduSessions := ue.GetPduSessions()
+		if pduSessions != nil {
+			for _, sess := range pduSessions {
+				gnb.DeleteGnBUeByTeid(sess.GetDownlinkTeid())
+				if sess.GetRanUeIP() != nil {
+					gnb.DeleteGnBUeByIp(sess.GetRanUeIP().String())
+				}
+			}
+		}
+
+		// Reset UE state in GNodeB context
+		ue.SetStateInitialized()
+		log.Infof("[GNB] UE RanUeId %d moved to CM-IDLE (socket retained, tunnels released)", ranUeId)
+	} else {
+		log.Warnf("[GNB] UE Context Release Command: UE RanUeId %d not found in GNodeB", ranUeId)
+	}
 
 	// Respond with UEContextReleaseComplete
 	completeMsg, err := ue_context_management.GetUEContextReleaseComplete(ranUeId, amfUeId)

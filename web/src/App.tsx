@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Globe,
   Layers,
+  Bell,
   Trash2,
   Sliders,
   Sun,
@@ -588,6 +589,54 @@ export default function App() {
   });
   const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity' | 'fleet' | 'diagnostics'>('dashboard');
   const [selectedNode, setSelectedNode] = useState<'ue' | 'gnb' | 'amf' | 'upf' | 'dn' | 'uu-link' | 'n2-link' | 'n3-link' | 'n6-link' | null>('ue');
+  
+  // Custom Scenarios & Chaos State variables
+  const [scenarioMode, setScenarioMode] = useState<'presets' | 'custom'>('presets');
+  const [customScenarioText, setCustomScenarioText] = useState<string>(() => {
+    return JSON.stringify({
+      name: "Custom Registration with link delay",
+      description: "Registers UE, waits 3 seconds, sets up packet delay rules, and verifies connection",
+      steps: [
+        {
+          type: "start_gnb",
+          params: { id: "000001", tac: "000001", socketPath: "/tmp/gnb_source.sock" }
+        },
+        {
+          type: "start_ue",
+          params: { ueId: 1, regType: "initial", gnbSocket: "/tmp/gnb_source.sock" }
+        },
+        {
+          type: "wait_ue_state",
+          params: { ueId: 1, state: "MM5G_REGISTERED", timeout: 10 }
+        },
+        {
+          type: "chaos_inject",
+          params: { target: "nas", ueId: 1, dropRate: 0.0, delayMs: 1500, msgType: "DeregistrationRequest", enabled: true }
+        },
+        {
+          type: "sleep",
+          params: { seconds: 3 }
+        }
+      ]
+    }, null, 2);
+  });
+  const [customScenarioStatus, setCustomScenarioStatus] = useState<any>(null);
+  const [chaosStats, setChaosStats] = useState<any>(null);
+  const [chaosTarget, setChaosTarget] = useState<'nas' | 'ngap'>('nas');
+  const [chaosUeId, setChaosUeId] = useState<number>(1);
+  const [chaosGnbId, setChaosGnbId] = useState<string>('000001');
+  const [chaosDropRate, setChaosDropRate] = useState<number>(0.0);
+  const [chaosDelayMs, setChaosDelayMs] = useState<number>(0);
+  const [chaosMsgType, setChaosMsgType] = useState<string>('');
+
+  // Protocol Mutation Fuzzer State
+  const [fuzzTargetMsg, setFuzzTargetMsg] = useState<string>('RegistrationRequest');
+  const [fuzzType, setFuzzType] = useState<string>('bit_flip');
+  const [fuzzProbability, setFuzzProbability] = useState<number>(0.1);
+  const [fuzzEnabled, setFuzzEnabled] = useState<boolean>(false);
+  const [telemetryHistory, setTelemetryHistory] = useState<any>({});
+  const [packetLogs, setPacketLogs] = useState<any[]>([]);
+
   // 3GPP Spec Release State
   const [activeRelease, setActiveRelease] = useState<string>('15');
   const [selectedInspectMsg, setSelectedInspectMsg] = useState<string>('ng-setup');
@@ -654,6 +703,7 @@ export default function App() {
   const lanes = useMemo(() => {
     const ues = new Set<string>();
     const gnbs = new Set<string>();
+    const sbiServices = new Set<string>();
     let hasAmf = false;
     let hasUpf = false;
     let hasExternal = false;
@@ -671,6 +721,8 @@ export default function App() {
           gnbs.add('gNB (4)');
         } else if (r.startsWith('gNB')) {
           gnbs.add(r);
+        } else if (r.endsWith('-SBI')) {
+          sbiServices.add(r);
         } else if (r === 'AMF') {
           hasAmf = true;
         } else if (r === 'UPF') {
@@ -702,6 +754,8 @@ export default function App() {
     const result = [...sortedUes, ...sortedGnbs];
     if (hasAmf || callFlowEvents.length === 0) result.push('AMF');
     if (hasUpf || callFlowEvents.length === 0) result.push('UPF');
+    // Append sorted SBI services
+    Array.from(sbiServices).sort().forEach(svc => result.push(svc));
     if (hasExternal || callFlowEvents.length === 0) result.push('External');
     return result;
   }, [callFlowEvents]);
@@ -855,7 +909,7 @@ export default function App() {
   const [controlUeId, setControlUeId] = useState<number | null>(null);
 
   // User Plane Traffic simulation states
-  const [inspectorTab, setInspectorTab] = useState<'details' | 'traffic'>('details');
+  const [inspectorTab, setInspectorTab] = useState<'details' | 'traffic' | 'telemetry'>('details');
   const [trafficStats, setTrafficStats] = useState<any>({});
   const [uePingTarget, setUePingTarget] = useState('8.8.8.8');
   const [uePingLog, setUePingLog] = useState('');
@@ -880,6 +934,15 @@ export default function App() {
   const [selectedTargetGnbName, setSelectedTargetGnbName] = useState('');
   const [selectedUeId, setSelectedUeId] = useState<number | null>(null);
   const [selectedGnbName, setSelectedGnbName] = useState<string | null>(null);
+
+  // Slice SLA configuration states
+  const [sliceSlas, setSliceSlas] = useState<any[]>([]);
+  const [slaSst, setSlaSst] = useState<number>(1);
+  const [slaSd, setSlaSd] = useState<string>('');
+  const [slaMaxThroughput, setSlaMaxThroughput] = useState<number>(100);
+  const [slaBaselineLatency, setSlaBaselineLatency] = useState<number>(10);
+  const [slaBaselineLoss, setSlaBaselineLoss] = useState<number>(0);
+  const [slaCongested, setSlaCongested] = useState<boolean>(false);
 
 
 
@@ -2145,6 +2208,7 @@ export default function App() {
       fetchStatus();
       fetchActiveUEs();
       fetchTrafficStats();
+      fetchTelemetryHistory();
     }, 2000);
     return () => clearInterval(timer);
   }, [autoRefresh]);
@@ -2243,6 +2307,323 @@ export default function App() {
     }
   };
 
+  // Custom Scenario triggers & management
+  const runCustomScenario = async () => {
+    try {
+      let parsed;
+      try {
+        parsed = JSON.parse(customScenarioText);
+      } catch (e: any) {
+        alert(`Invalid JSON format: ${e.message}`);
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}/scenarios/custom/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed)
+      });
+
+      if (res.ok) {
+        setCustomScenarioStatus({
+          status: 'running',
+          currentStep: 0,
+          totalSteps: parsed.steps.length,
+          logs: ['Scenario triggered.']
+        });
+        fetchStatus();
+      } else {
+        const text = await res.text();
+        alert(`Failed to start custom scenario: ${text}`);
+      }
+    } catch (err) {
+      console.error("Error starting custom scenario:", err);
+    }
+  };
+
+  const stopCustomScenario = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/scenarios/custom/stop`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        pollCustomScenario();
+      }
+    } catch (err) {
+      console.error("Error stopping custom scenario:", err);
+    }
+  };
+
+  const pollCustomScenario = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/scenarios/custom/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setCustomScenarioStatus(data);
+        if (data.status !== 'running') {
+          fetchStatus();
+        }
+      }
+    } catch (err) {
+      console.error("Error polling custom scenario:", err);
+    }
+  };
+
+  // Chaos controls
+  const applyChaosRule = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/chaos/configure`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target: chaosTarget,
+          ueId: Number(chaosUeId),
+          gnbId: chaosGnbId,
+          dropProbability: Number(chaosDropRate),
+          delayMs: Number(chaosDelayMs),
+          targetMsgType: chaosMsgType,
+          enabled: true
+        })
+      });
+      if (res.ok) {
+        fetchChaosStatus();
+        alert('Chaos rule applied successfully!');
+      } else {
+        const text = await res.text();
+        alert(`Failed to apply chaos rule: ${text}`);
+      }
+    } catch (err) {
+      console.error("Error applying chaos rule:", err);
+    }
+  };
+
+  const resetChaosRules = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/chaos/reset`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        fetchChaosStatus();
+        alert('All chaos rules reset.');
+      }
+    } catch (err) {
+      console.error("Error resetting chaos rules:", err);
+    }
+  };
+
+  const fetchChaosStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/chaos/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setChaosStats(data);
+      }
+    } catch (err) {
+      console.error("Error fetching chaos status:", err);
+    }
+  };
+
+  const fetchFuzzStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/chaos/fuzz/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setFuzzTargetMsg(data.targetMsg || 'RegistrationRequest');
+        setFuzzType(data.fuzzType || 'bit_flip');
+        setFuzzProbability(data.probability || 0.1);
+        setFuzzEnabled(data.enabled || false);
+      }
+    } catch (err) {
+      console.error('Error fetching fuzz status:', err);
+    }
+  };
+  const fetchSliceSlas = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/slices/sla`);
+      if (res.ok) {
+        const data = await res.json();
+        setSliceSlas(data || []);
+      }
+    } catch (err) {
+      console.error('Error fetching slice SLAs:', err);
+    }
+  };
+
+  const saveSliceSla = async (sst: number, sd: string, maxThroughput: number, baselineLatency: number, baselineLoss: number, congested: boolean) => {
+    try {
+      const res = await fetch(`${API_BASE}/slices/sla`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sst,
+          sd,
+          maxThroughput,
+          baselineLatency,
+          baselineLoss,
+          congested
+        })
+      });
+      if (res.ok) {
+        fetchSliceSlas();
+      } else {
+        const text = await res.text();
+        alert(`Failed to save SLA: ${text}`);
+      }
+    } catch (err) {
+      console.error('Error saving slice SLA:', err);
+    }
+  };
+  const applyFuzzRule = async (enabledState: boolean) => {
+    try {
+      const res = await fetch(`${API_BASE}/chaos/fuzz/configure`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          targetMsg: fuzzTargetMsg,
+          fuzzType: fuzzType,
+          probability: Number(fuzzProbability),
+          enabled: enabledState,
+        }),
+      });
+      if (res.ok) {
+        setFuzzEnabled(enabledState);
+      } else {
+        const text = await res.text();
+        alert(`Failed to configure fuzzer: ${text}`);
+      }
+    } catch (err) {
+      console.error('Error configuring fuzzer:', err);
+    }
+  };
+
+  const fetchTelemetryHistory = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/ue/traffic/performance`);
+      if (res.ok) {
+        const data = await res.json();
+        setTelemetryHistory(data || {});
+      }
+    } catch (err) {
+      console.error('Error fetching telemetry history:', err);
+    }
+  };
+
+  const modifyPduSession = async (ueId: number, pduSessionId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/ue/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ueId: ueId,
+          action: 'pdu-modify',
+          pduSessionId: pduSessionId
+        })
+      });
+      if (res.ok) {
+        alert(`PDU Session ${pduSessionId} Modification Request sent.`);
+        fetchActiveUEs();
+      } else {
+        const text = await res.text();
+        alert(`Failed to modify PDU Session: ${text}`);
+      }
+    } catch (err) {
+      console.error('Error modifying PDU session:', err);
+    }
+  };
+
+  const releasePduSession = async (ueId: number, pduSessionId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/ue/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ueId: ueId,
+          action: 'pdu-release',
+          pduSessionId: pduSessionId
+        })
+      });
+      if (res.ok) {
+        alert(`PDU Session ${pduSessionId} Release Request sent.`);
+        fetchActiveUEs();
+      } else {
+        const text = await res.text();
+        alert(`Failed to release PDU Session: ${text}`);
+      }
+    } catch (err) {
+      console.error('Error releasing PDU session:', err);
+    }
+  };
+
+  const fetchPacketLogs = async (ueId: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/ue/traffic/packets?ueId=${ueId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPacketLogs(data || []);
+      }
+    } catch (err) {
+      console.error('Error fetching packet logs:', err);
+    }
+  };
+
+  const triggerSctpFailover = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/chaos/sctp-failover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gnbId: chaosGnbId })
+      });
+      if (res.ok) {
+        alert(`SCTP Link dropped on GNodeB ${chaosGnbId}. Reconnection will trigger in 3 seconds.`);
+      } else {
+        const text = await res.text();
+        alert(`Failover trigger failed: ${text}`);
+      }
+    } catch (err) {
+      console.error('Error triggering SCTP failover:', err);
+    }
+  };
+
+  useEffect(() => {
+    const activeUe = getActiveUeToInspect();
+    if (!activeUe || inspectorTab !== 'telemetry') return;
+    
+    fetchPacketLogs(activeUe.id);
+    const timer = setInterval(() => {
+      fetchPacketLogs(activeUe.id);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [selectedUeId, inspectorTab, status?.runningUes]);
+
+  useEffect(() => {
+    let interval: any;
+    if (customScenarioStatus && customScenarioStatus.status === 'running') {
+      interval = setInterval(pollCustomScenario, 800);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [customScenarioStatus?.status]);
+
+  useEffect(() => {
+    let interval: any;
+    if (activeTab === 'diagnostics') {
+      fetchChaosStatus();
+      fetchFuzzStatus();
+      fetchSliceSlas();
+      interval = setInterval(() => {
+        fetchChaosStatus();
+        fetchFuzzStatus();
+        fetchSliceSlas();
+      }, 2000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [activeTab]);
+
   // Run ping test
   const executePing = async () => {
     if (pingRunning) return;
@@ -2316,6 +2697,89 @@ export default function App() {
   const activeTuns = status?.interfaces?.filter(
     (i) => i.name.startsWith('uetun')
   ) || [];
+
+  const maxHistoryPoints = 30;
+
+  const renderTelemetryChart = (metricName: string, color: string, dataKey: string, maxVal: number, unit: string) => {
+    const activeUe = getActiveUeToInspect();
+    if (!activeUe) return null;
+    const points = telemetryHistory[activeUe.id]?.history || [];
+    
+    // If no data points yet
+    if (points.length === 0) {
+      return (
+        <div style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.01)', borderRadius: '6px', border: '1px dashed var(--border-color)', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '12px' }}>
+          Waiting for telemetry data...
+        </div>
+      );
+    }
+
+    // Find max value in history to auto-scale, or fallback to maxVal
+    const vals = points.map((p: any) => p[dataKey] || 0);
+    const currentMax = Math.max(...vals, 0.1);
+    const scaleMax = currentMax > maxVal ? currentMax * 1.1 : maxVal;
+
+    const width = 260;
+    const height = 65;
+    const padding = 5;
+
+    // Convert points to SVG coords
+    const svgPoints = points.map((p: any, idx: number) => {
+      const x = padding + (idx / (maxHistoryPoints - 1)) * (width - 2 * padding);
+      const y = height - padding - ((p[dataKey] || 0) / scaleMax) * (height - 2 * padding);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+
+    const pathD = svgPoints.length > 0 ? `M ${svgPoints.join(' L ')}` : '';
+    const areaD = svgPoints.length > 0 ? `${pathD} L ${width - padding},${height - padding} L ${padding},${height - padding} Z` : '';
+
+    // Get current value
+    const curVal = points[points.length - 1][dataKey] || 0;
+
+    return (
+      <div style={{ marginBottom: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '3px', fontWeight: 'bold' }}>
+          <span style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{metricName}</span>
+          <span style={{ color: color }}>{curVal.toFixed(2)} {unit}</span>
+        </div>
+        <div style={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '6px', overflow: 'hidden', position: 'relative' }}>
+          <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
+            {/* Grid lines */}
+            <line x1={padding} y1={height/2} x2={width-padding} y2={height/2} stroke="rgba(255,255,255,0.04)" strokeDasharray="3,3" />
+            
+            {/* Filled Area */}
+            {areaD && (
+              <path
+                d={areaD}
+                fill={`url(#grad-${dataKey})`}
+                opacity="0.15"
+              />
+            )}
+            
+            {/* Line */}
+            {pathD && (
+              <path
+                d={pathD}
+                fill="none"
+                stroke={color}
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            )}
+
+            {/* Gradients definitions */}
+            <defs>
+              <linearGradient id={`grad-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={color} />
+                <stop offset="100%" stopColor={color} stopOpacity="0" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="app-container">
@@ -2644,7 +3108,7 @@ export default function App() {
                               onClick={() => setInspectorTab('details')}
                               style={{
                                 flex: 1,
-                                padding: '6px 8px',
+                                padding: '6px 4px',
                                 background: 'transparent',
                                 border: 'none',
                                 borderBottom: inspectorTab === 'details' ? '2px solid var(--color-success)' : '2px solid transparent',
@@ -2663,7 +3127,7 @@ export default function App() {
                               onClick={() => setInspectorTab('traffic')}
                               style={{
                                 flex: 1,
-                                padding: '6px 8px',
+                                padding: '6px 4px',
                                 background: 'transparent',
                                 border: 'none',
                                 borderBottom: inspectorTab === 'traffic' ? '2px solid var(--color-success)' : '2px solid transparent',
@@ -2675,11 +3139,30 @@ export default function App() {
                                 transition: 'all 0.2s'
                               }}
                             >
-                              Data Plane Tools
+                              Tools
+                            </button>
+                            <button 
+                              className={`inspector-tab-btn ${inspectorTab === 'telemetry' ? 'active' : ''}`}
+                              onClick={() => setInspectorTab('telemetry')}
+                              style={{
+                                flex: 1,
+                                padding: '6px 4px',
+                                background: 'transparent',
+                                border: 'none',
+                                borderBottom: inspectorTab === 'telemetry' ? '2px solid var(--color-success)' : '2px solid transparent',
+                                color: inspectorTab === 'telemetry' ? 'var(--color-success)' : 'var(--text-muted)',
+                                cursor: 'pointer',
+                                fontWeight: '600',
+                                fontSize: '11px',
+                                textAlign: 'center',
+                                transition: 'all 0.2s'
+                              }}
+                            >
+                              Telemetry
                             </button>
                           </div>
 
-                          {inspectorTab === 'details' ? (
+                          {inspectorTab === 'details' && (
                             <div className="inspector-details" style={{ maxHeight: '380px', overflowY: 'auto' }}>
                               <div className="detail-row">
                                 <span className="detail-label">SUPI</span>
@@ -2725,20 +3208,43 @@ export default function App() {
                                 <span className="detail-label" style={{ marginBottom: '4px' }}>PDU Sessions ({activeUe.pduSessions?.length || 0})</span>
                                 {activeUe.pduSessions && activeUe.pduSessions.length > 0 ? (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
-                                    {activeUe.pduSessions.map(s => (
-                                      <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', width: '100%' }}>
-                                        <span style={{ color: 'var(--color-info)' }}>PDU #{s.id} ({s.dnn}):</span>
-                                        <span className="font-mono ml-auto" style={{ marginRight: '6px' }}>{s.ueIp || '—'}</span>
-                                        <span className={`fleet-state-badge sm ${s.stateDesc?.includes('ACTIVE') ? 'registered' : 'pending'}`}>{s.stateDesc}</span>
-                                      </div>
-                                    ))}
+                                    {activeUe.pduSessions.map(s => {
+                                      const isActive = s.stateDesc?.includes('ACTIVE');
+                                      return (
+                                        <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '6px', width: '100%' }}>
+                                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', width: '100%' }}>
+                                            <span style={{ color: 'var(--color-info)' }}>PDU #{s.id} ({s.dnn}):</span>
+                                            <span className="font-mono ml-auto" style={{ marginRight: '6px' }}>{s.ueIp || '—'}</span>
+                                            <span className={`fleet-state-badge sm ${isActive ? 'registered' : 'pending'}`}>{s.stateDesc}</span>
+                                          </div>
+                                          {isActive && (
+                                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '2px' }}>
+                                              <button 
+                                                onClick={() => modifyPduSession(activeUe.id, s.id)}
+                                                style={{ padding: '2px 6px', fontSize: '9px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', borderRadius: '3px', cursor: 'pointer', fontWeight: '600' }}
+                                              >
+                                                Modify QoS
+                                              </button>
+                                              <button 
+                                                onClick={() => releasePduSession(activeUe.id, s.id)}
+                                                style={{ padding: '2px 6px', fontSize: '9px', background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '3px', cursor: 'pointer', fontWeight: '600' }}
+                                              >
+                                                Release
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
                                   </div>
                                 ) : (
                                   <span className="detail-val" style={{ color: 'var(--text-muted)', fontSize: '11px' }}>None</span>
                                 )}
                               </div>
                             </div>
-                          ) : (
+                          )}
+
+                          {inspectorTab === 'traffic' && (
                             <div className="inspector-details" style={{ maxHeight: '380px', overflowY: 'auto', paddingRight: '4px' }}>
                               
                               {/* Warning overlay if PDU session not active */}
@@ -3052,6 +3558,56 @@ export default function App() {
                                 )}
                               </div>
 
+                            </div>
+                          )}
+
+                          {inspectorTab === 'telemetry' && (
+                            <div className="inspector-details" style={{ maxHeight: '380px', overflowY: 'auto', paddingRight: '4px' }}>
+                              {/* Render telemetry charts */}
+                              {renderTelemetryChart('Throughput', 'var(--color-primary)', 'throughput', 10.0, 'Mbps')}
+                              {renderTelemetryChart('Latency', 'var(--color-success)', 'latency', 30.0, 'ms')}
+                              {renderTelemetryChart('Packet Loss', '#ef4444', 'packetLossPct', 5.0, '%')}
+
+                              {/* GTP-U Packet Stream Console */}
+                              <div style={{ marginTop: '16px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '12px' }}>
+                                <h5 style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 'bold', color: 'var(--color-primary)', margin: '0 0 8px 0' }}>
+                                  <Activity size={12} /> GTP-U Packet Dissector Logs
+                                </h5>
+                                <div style={{ 
+                                  background: '#070b13', 
+                                  border: '1px solid rgba(255,255,255,0.05)', 
+                                  borderRadius: '6px', 
+                                  maxHeight: '130px', 
+                                  overflowY: 'auto', 
+                                  padding: '6px',
+                                  fontSize: '9px',
+                                  fontFamily: 'monospace',
+                                  color: '#a1a1aa'
+                                }}>
+                                  {packetLogs.length === 0 ? (
+                                    <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '12px' }}>
+                                      No packets captured. Establish active user-plane session tools first.
+                                    </div>
+                                  ) : (
+                                    packetLogs.map((p, idx) => {
+                                      const timeStr = new Date(p.timestamp).toLocaleTimeString();
+                                      const typeColor = p.payloadType === 'vonr' ? '#10b981' : p.payloadType === 'http' ? '#a855f7' : p.payloadType === 'ping' ? '#f59e0b' : '#3b82f6';
+                                      return (
+                                        <div key={idx} style={{ 
+                                          display: 'flex', 
+                                          justifyContent: 'space-between',
+                                          borderBottom: '1px solid rgba(255,255,255,0.02)',
+                                          paddingBottom: '3px',
+                                          marginBottom: '3px'
+                                        }}>
+                                          <span>[{timeStr}] <strong style={{ color: '#fff' }}>GTP-U</strong> TEID: <strong style={{ color: 'var(--color-info)' }}>0x{p.teid.toString(16).toUpperCase()}</strong></span>
+                                          <span>Seq: <strong>{p.seqNumber}</strong> | <span style={{ color: typeColor, fontWeight: 'bold' }}>{p.payloadType.toUpperCase()}</span> ({p.length}B)</span>
+                                        </div>
+                                      );
+                                    })
+                                  )}
+                                </div>
+                              </div>
                             </div>
                           )}
                         </>
@@ -3516,6 +4072,17 @@ export default function App() {
                               }}>
                                 {ue.stateMmDesc}
                               </span>
+                              <span style={{ 
+                                marginLeft: '6px',
+                                padding: '2px 8px', 
+                                borderRadius: '4px', 
+                                fontSize: '11px', 
+                                fontWeight: 'bold', 
+                                background: ue.connectionState === 'CONNECTED' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(245, 158, 11, 0.15)', 
+                                color: ue.connectionState === 'CONNECTED' ? 'var(--color-info)' : 'var(--color-warning)' 
+                              }}>
+                                {ue.connectionState || 'CONNECTED'}
+                              </span>
                             </td>
                             <td style={{ padding: '10px', fontFamily: 'monospace' }}>{ue.amfUeNgapId || 'N/A'}</td>
                             <td style={{ padding: '10px' }}>
@@ -3576,6 +4143,20 @@ export default function App() {
                       style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}
                     >
                       <RefreshCw size={14} /> Send Service Request (Connected)
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => triggerUeAction('connection-release')}
+                      style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', background: 'rgba(245, 158, 11, 0.05)', borderColor: 'rgba(245, 158, 11, 0.2)', color: 'var(--color-warning)' }}
+                    >
+                      <Layers size={14} /> Release Connection (Go IDLE)
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => triggerUeAction('paging')}
+                      style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', background: 'rgba(59, 130, 246, 0.05)', borderColor: 'rgba(59, 130, 246, 0.2)', color: 'var(--color-info)' }}
+                    >
+                      <Bell size={14} /> Page UE (Wakeup)
                     </button>
                     <button
                       className="btn btn-secondary"
@@ -3824,159 +4405,398 @@ export default function App() {
               </div>
             )}
 
-            <div className="scenarios-grid">
-              {scenarios.map((scen) => {
-                const isRunningThis = status?.isRunning && status.runningName === scen.id;
-                return (
-                  <div className="card scenario-card" key={scen.id}>
-                    <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span className="card-title font-bold text-white">{scen.name}</span>
-                      {isRunningThis ? (
-                        <Activity size={12} className="animate-pulse" style={{ color: '#f59e0b' }} />
-                      ) : (
-                        <Play size={12} style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
-                      )}
-                    </div>
-                    <div className="card-body">
-                      <p className="scenario-description">{scen.description}</p>
+            {/* Mode selection buttons */}
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px' }}>
+              <button 
+                className={`btn ${scenarioMode === 'presets' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setScenarioMode('presets')}
+                style={{ padding: '8px 16px', fontSize: '13px', fontWeight: 'bold' }}
+              >
+                Standard Presets
+              </button>
+              <button 
+                className={`btn ${scenarioMode === 'custom' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setScenarioMode('custom')}
+                style={{ padding: '8px 16px', fontSize: '13px', fontWeight: 'bold' }}
+              >
+                Custom Scripting Engine
+              </button>
+            </div>
 
-                      {/* Display custom inputs for specific scenarios */}
-                      {scen.id === 'handover' && (
-                        <div className="scenario-inputs">
-                          <div className="input-group">
-                            <label>Target gNB IP</label>
-                            <input
-                              type="text"
-                              value={targetGnbIp}
-                              onChange={(e) => setTargetGnbIp(e.target.value)}
-                            />
+            {scenarioMode === 'presets' ? (
+              <div className="scenarios-grid">
+                {scenarios.map((scen) => {
+                  const isRunningThis = status?.isRunning && status.runningName === scen.id;
+                  return (
+                    <div className="card scenario-card" key={scen.id}>
+                      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span className="card-title font-bold text-white">{scen.name}</span>
+                        {isRunningThis ? (
+                          <Activity size={12} className="animate-pulse" style={{ color: '#f59e0b' }} />
+                        ) : (
+                          <Play size={12} style={{ color: 'var(--text-secondary)', opacity: 0.4 }} />
+                        )}
+                      </div>
+                      <div className="card-body">
+                        <p className="scenario-description">{scen.description}</p>
+
+                        {/* Display custom inputs for specific scenarios */}
+                        {scen.id === 'handover' && (
+                          <div className="scenario-inputs">
+                            <div className="input-group">
+                              <label>Target gNB IP</label>
+                              <input
+                                type="text"
+                                value={targetGnbIp}
+                                onChange={(e) => setTargetGnbIp(e.target.value)}
+                              />
+                            </div>
+                            <div className="input-group">
+                              <label>Target gNB Port</label>
+                              <input
+                                type="number"
+                                value={targetGnbPort}
+                                onChange={(e) => setTargetGnbPort(parseInt(e.target.value))}
+                              />
+                            </div>
+                            <div className="input-group">
+                              <label>Delay (seconds)</label>
+                              <input
+                                type="number"
+                                value={delay}
+                                onChange={(e) => setDelay(parseInt(e.target.value))}
+                              />
+                            </div>
                           </div>
-                          <div className="input-group">
-                            <label>Target gNB Port</label>
-                            <input
-                              type="number"
-                              value={targetGnbPort}
-                              onChange={(e) => setTargetGnbPort(parseInt(e.target.value))}
-                            />
+                        )}
+
+                        {scen.id === 'full-lifecycle' && (
+                          <div className="scenario-inputs">
+                            <div className="input-group">
+                              <label>Idle Delay (sec)</label>
+                              <input
+                                type="number"
+                                value={idleSeconds}
+                                onChange={(e) => setIdleSeconds(parseInt(e.target.value))}
+                              />
+                            </div>
                           </div>
-                          <div className="input-group">
-                            <label>Delay (seconds)</label>
-                            <input
-                              type="number"
-                              value={delay}
-                              onChange={(e) => setDelay(parseInt(e.target.value))}
-                            />
+                        )}
+
+                        {scen.id === 'load-test' && (
+                          <div className="scenario-inputs">
+                            <div className="input-group">
+                              <label>Number of UEs</label>
+                              <input
+                                type="number"
+                                value={ueCount}
+                                onChange={(e) => setUeCount(parseInt(e.target.value))}
+                              />
+                            </div>
+                            <div className="input-group" style={{ justifyContent: 'flex-start', gap: '10px' }}>
+                              <input
+                                type="checkbox"
+                                checked={ueOnly}
+                                id="ueOnlyCheckbox"
+                                onChange={(e) => setUeOnly(e.target.checked)}
+                                style={{ width: 'auto', transform: 'scale(1.1)', cursor: 'pointer' }}
+                              />
+                              <label htmlFor="ueOnlyCheckbox" style={{ cursor: 'pointer' }}>UE Only (GNodeB already active)</label>
+                            </div>
                           </div>
+                        )}
+
+                        {scen.id === 'amf-load-loop' && (
+                          <div className="scenario-inputs">
+                            <div className="input-group">
+                              <label>Requests/sec</label>
+                              <input
+                                type="number"
+                                value={requests}
+                                onChange={(e) => setRequests(parseInt(e.target.value))}
+                              />
+                            </div>
+                            <div className="input-group">
+                              <label>Duration (sec)</label>
+                              <input
+                                type="number"
+                                value={duration}
+                                onChange={(e) => setDuration(parseInt(e.target.value))}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {scen.id === 'ue-latency-interval' && (
+                          <div className="scenario-inputs">
+                            <div className="input-group">
+                              <label>Total Requests</label>
+                              <input
+                                type="number"
+                                value={requests}
+                                onChange={(e) => setRequests(parseInt(e.target.value))}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {scen.id === 'amf-availability' && (
+                          <div className="scenario-inputs">
+                            <div className="input-group">
+                              <label>Uptime Duration (sec)</label>
+                              <input
+                                type="number"
+                                value={duration}
+                                onChange={(e) => setDuration(parseInt(e.target.value))}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{ marginTop: 'auto' }}>
+                          <button
+                            className={`btn btn-primary`}
+                            disabled={status?.isRunning}
+                            onClick={() => runScenario(scen.id)}
+                          >
+                            {isRunningThis ? (
+                              <>
+                                <RefreshCw size={14} className="animate-spin" />
+                                <span>RUNNING...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Play size={14} />
+                                <span>LAUNCH SCENARIO</span>
+                              </>
+                            )}
+                          </button>
                         </div>
-                      )}
-
-                      {scen.id === 'full-lifecycle' && (
-                        <div className="scenario-inputs">
-                          <div className="input-group">
-                            <label>Idle Delay (sec)</label>
-                            <input
-                              type="number"
-                              value={idleSeconds}
-                              onChange={(e) => setIdleSeconds(parseInt(e.target.value))}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {scen.id === 'load-test' && (
-                        <div className="scenario-inputs">
-                          <div className="input-group">
-                            <label>Number of UEs</label>
-                            <input
-                              type="number"
-                              value={ueCount}
-                              onChange={(e) => setUeCount(parseInt(e.target.value))}
-                            />
-                          </div>
-                          <div className="input-group" style={{ justifyContent: 'flex-start', gap: '10px' }}>
-                            <input
-                              type="checkbox"
-                              checked={ueOnly}
-                              id="ueOnlyCheckbox"
-                              onChange={(e) => setUeOnly(e.target.checked)}
-                              style={{ width: 'auto', transform: 'scale(1.1)', cursor: 'pointer' }}
-                            />
-                            <label htmlFor="ueOnlyCheckbox" style={{ cursor: 'pointer' }}>UE Only (GNodeB already active)</label>
-                          </div>
-                        </div>
-                      )}
-
-                      {scen.id === 'amf-load-loop' && (
-                        <div className="scenario-inputs">
-                          <div className="input-group">
-                            <label>Requests/sec</label>
-                            <input
-                              type="number"
-                              value={requests}
-                              onChange={(e) => setRequests(parseInt(e.target.value))}
-                            />
-                          </div>
-                          <div className="input-group">
-                            <label>Duration (sec)</label>
-                            <input
-                              type="number"
-                              value={duration}
-                              onChange={(e) => setDuration(parseInt(e.target.value))}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {scen.id === 'ue-latency-interval' && (
-                        <div className="scenario-inputs">
-                          <div className="input-group">
-                            <label>Total Requests</label>
-                            <input
-                              type="number"
-                              value={requests}
-                              onChange={(e) => setRequests(parseInt(e.target.value))}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {scen.id === 'amf-availability' && (
-                        <div className="scenario-inputs">
-                          <div className="input-group">
-                            <label>Uptime Duration (sec)</label>
-                            <input
-                              type="number"
-                              value={duration}
-                              onChange={(e) => setDuration(parseInt(e.target.value))}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      <div style={{ marginTop: 'auto' }}>
-                        <button
-                          className={`btn btn-primary`}
-                          disabled={status?.isRunning}
-                          onClick={() => runScenario(scen.id)}
-                        >
-                          {isRunningThis ? (
-                            <>
-                              <RefreshCw size={14} className="animate-spin" />
-                              <span>RUNNING...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Play size={14} />
-                              <span>LAUNCH SCENARIO</span>
-                            </>
-                          )}
-                        </button>
                       </div>
                     </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '24px', height: 'calc(100vh - 280px)', minHeight: '500px' }}>
+                {/* Left Column: Script Editor */}
+                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 'bold' }}>JSON Scenario Script</h3>
+                    <select
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                        border: '1px solid var(--border-color)',
+                        background: 'var(--bg-input)',
+                        color: 'var(--text-main)',
+                        fontSize: '12px'
+                      }}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'reg') {
+                          setCustomScenarioText(JSON.stringify({
+                            name: "Custom Registration with link delay",
+                            description: "Registers UE, waits 3 seconds, sets up packet delay rules, and verifies connection",
+                            steps: [
+                              { type: "start_gnb", params: { id: "000001", tac: "000001", socketPath: "/tmp/gnb_source.sock" } },
+                              { type: "start_ue", params: { ueId: 1, regType: "initial", gnbSocket: "/tmp/gnb_source.sock" } },
+                              { type: "wait_ue_state", params: { ueId: 1, state: "MM5G_REGISTERED", timeout: 10 } },
+                              { type: "chaos_inject", params: { target: "nas", ueId: 1, dropRate: 0.0, delayMs: 1500, msgType: "DeregistrationRequest", enabled: true } },
+                              { type: "sleep", params: { seconds: 3 } }
+                            ]
+                          }, null, 2));
+                        } else if (val === 'ho') {
+                          setCustomScenarioText(JSON.stringify({
+                            name: "Xn Handover with packet loss",
+                            description: "Starts source and target GNodeBs, registers UE, configures packet drops, triggers handover",
+                            steps: [
+                              { type: "start_gnb", params: { id: "000001", tac: "000001", socketPath: "/tmp/gnb_source.sock", linkPort: 9489 } },
+                              { type: "start_gnb", params: { id: "000002", tac: "000002", socketPath: "/tmp/gnb_target.sock", linkPort: 9499, port: 9500, dataPort: 2170 } },
+                              { type: "start_ue", params: { ueId: 1, regType: "initial", gnbSocket: "/tmp/gnb_source.sock" } },
+                              { type: "wait_ue_state", params: { ueId: 1, state: "MM5G_REGISTERED", timeout: 10 } },
+                              { type: "chaos_inject", params: { target: "ngap", gnbId: "000001", dropRate: 0.5, delayMs: 0, msgType: "HandoverRequired", enabled: true } },
+                              { type: "trigger_handover", params: { ueId: 1, targetGnbIp: "127.0.0.1", targetGnbPort: 9499, targetGnbSocket: "/tmp/gnb_target.sock", isXn: true, targetGnbId: "000002", targetGnbName: "gNB-Target" } },
+                              { type: "sleep", params: { seconds: 5 } }
+                            ]
+                          }, null, 2));
+                        } else if (val === 'emerg') {
+                          setCustomScenarioText(JSON.stringify({
+                            name: "Emergency Registration Scenario",
+                            description: "Executes initial emergency registration update cycle",
+                            steps: [
+                              { type: "start_gnb", params: { id: "000001", tac: "000001", socketPath: "/tmp/gnb_source.sock" } },
+                              { type: "start_ue", params: { ueId: 2, regType: "emergency", gnbSocket: "/tmp/gnb_source.sock" } },
+                              { type: "sleep", params: { seconds: 5 } }
+                            ]
+                          }, null, 2));
+                        }
+                      }}
+                    >
+                      <option value="reg">Preset: Registration + Link Delay</option>
+                      <option value="ho">Preset: Xn Handover + Packet Loss</option>
+                      <option value="emerg">Preset: Emergency Registration</option>
+                    </select>
                   </div>
-                );
-              })}
-            </div>
+
+                  <textarea
+                    style={{
+                      flexGrow: 1,
+                      fontFamily: 'monospace',
+                      fontSize: '12px',
+                      background: theme === 'dark' ? '#0f172a' : '#f8fafc',
+                      color: theme === 'dark' ? '#38bdf8' : '#0f766e',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      padding: '12px',
+                      resize: 'none',
+                      lineHeight: '1.5',
+                      outline: 'none'
+                    }}
+                    value={customScenarioText}
+                    onChange={(e) => setCustomScenarioText(e.target.value)}
+                    spellCheck={false}
+                  />
+
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    {customScenarioStatus?.status === 'running' ? (
+                      <button
+                        className="btn btn-danger"
+                        onClick={stopCustomScenario}
+                        style={{ flex: 1, padding: '10px', fontWeight: 'bold' }}
+                      >
+                        STOP SCENARIO
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn-primary"
+                        onClick={runCustomScenario}
+                        disabled={status?.isRunning}
+                        style={{ flex: 1, padding: '10px', fontWeight: 'bold' }}
+                      >
+                        LAUNCH SCENARIO
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right Column: Execution Telemetry & Steps */}
+                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%', overflowY: 'auto' }}>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Activity size={16} />
+                    Live Step Stepper
+                  </h3>
+
+                  {!customScenarioStatus ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGrow: 1, color: 'var(--text-secondary)', gap: '12px' }}>
+                      <Play size={24} style={{ opacity: 0.3 }} />
+                      <span style={{ fontSize: '12px', fontStyle: 'italic' }}>No scenario running. Draft your script on the left and click Launch.</span>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flexGrow: 1 }}>
+                      {/* Scenario status bar */}
+                      <div
+                        style={{
+                          padding: '12px 16px',
+                          borderRadius: '8px',
+                          background: customScenarioStatus.status === 'running' ? 'rgba(245, 158, 11, 0.1)' :
+                                      customScenarioStatus.status === 'success' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                          border: `1px solid ${
+                            customScenarioStatus.status === 'running' ? 'rgba(245, 158, 11, 0.2)' :
+                            customScenarioStatus.status === 'success' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'
+                          }`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between'
+                        }}
+                      >
+                        <span style={{ fontSize: '13px', fontWeight: '600' }}>
+                          Status: <span style={{ textTransform: 'uppercase', color: 
+                            customScenarioStatus.status === 'running' ? '#f59e0b' :
+                            customScenarioStatus.status === 'success' ? '#10b981' : '#ef4444'
+                          }}>{customScenarioStatus.status}</span>
+                        </span>
+                        {customScenarioStatus.error && (
+                          <span style={{ fontSize: '11px', color: '#ef4444', maxWidth: '60%', wordBreak: 'break-all' }}>
+                            Error: {customScenarioStatus.error}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Stepper progress list */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingLeft: '8px' }}>
+                        {(() => {
+                          try {
+                            const parsed = JSON.parse(customScenarioText);
+                            return parsed.steps?.map((step: any, idx: number) => {
+                              const isCurrent = customScenarioStatus.status === 'running' && customScenarioStatus.currentStep === idx + 1;
+                              const isCompleted = customScenarioStatus.status === 'success' || customScenarioStatus.currentStep > idx + 1;
+                              
+                              return (
+                                <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                  <div
+                                    style={{
+                                      width: '24px',
+                                      height: '24px',
+                                      borderRadius: '50%',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontSize: '11px',
+                                      fontWeight: 'bold',
+                                      background: isCompleted ? '#10b981' : isCurrent ? '#f59e0b' : '#334155',
+                                      color: '#fff',
+                                      transition: 'all 0.3s'
+                                    }}
+                                  >
+                                    {isCompleted ? '✓' : idx + 1}
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <span style={{ fontSize: '13px', fontWeight: isCurrent ? 'bold' : 'normal', color: isCurrent ? '#f59e0b' : 'var(--text-main)' }}>
+                                      {step.type}
+                                    </span>
+                                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                      {JSON.stringify(step.params)}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            });
+                          } catch (e) {
+                            return <div style={{ color: '#ef4444', fontSize: '12px' }}>Failed to parse stepper steps.</div>;
+                          }
+                        })()}
+                      </div>
+
+                      {/* Logs output console */}
+                      <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px', display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: '150px' }}>
+                        <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)', marginBottom: '8px', textTransform: 'uppercase' }}>
+                          STEP LOGS
+                        </div>
+                        <div
+                          style={{
+                            background: '#090d16',
+                            color: '#10b981',
+                            fontFamily: 'monospace',
+                            fontSize: '11px',
+                            padding: '12px',
+                            borderRadius: '6px',
+                            flexGrow: 1,
+                            overflowY: 'auto',
+                            maxHeight: '200px',
+                            lineHeight: '1.6'
+                          }}
+                        >
+                          {customScenarioStatus.logs?.map((l: string, idx: number) => (
+                            <div key={idx}>{l}</div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -4404,7 +5224,7 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="fleet-live-grid">
+                <div className="fleet-live-grid" style={{ gridTemplateColumns: fleetRunning.runningUes?.length > 0 ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr 1fr' }}>
                   {/* Active UEs */}
                   <div className="fleet-live-section">
                     <h4 className="fleet-live-title">
@@ -4486,125 +5306,125 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                </div>
 
-                {/* Handover Control Panel */}
-                {(fleetRunning.runningUes?.length > 0) && (
-                  <div className="fleet-handover-panel">
-                    <h4 className="fleet-live-title"><Layers size={14}/> Handover Control</h4>
-                    <p className="fleet-hint" style={{ margin: '8px 0 12px 0' }}>
-                      Select a registered UE and a target gNodeB cell to trigger N2 or Xn handover procedures.
-                    </p>
-                    <div className="fleet-ho-form">
-                      <div className="form-group" style={{ flex: 1, minWidth: '160px' }}>
-                        <label>UE ID</label>
-                        <select className="form-input" value={controlUeId ?? ''} onChange={e => setControlUeId(Number(e.target.value))}>
-                          <option value="">Select UE</option>
-                          {fleetRunning.runningUes.map(u => (
-                            <option key={u.id} value={u.id}>UE-{u.id} ({u.supi})</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="form-group" style={{ flex: 1, minWidth: '200px' }}>
-                        <label>Target gNB</label>
-                        {fleetRunning.runningGnbs && fleetRunning.runningGnbs.length > 0 ? (
-                          <select
-                            className="form-input"
-                            value={selectedTargetGnbName}
-                            onChange={(e) => {
-                              const name = e.target.value;
-                              setSelectedTargetGnbName(name);
-                              const gnb = fleetRunning.runningGnbs.find(g => g.profileName === name);
-                              if (gnb) {
-                                setHoTargetIp(gnb.controlIp);
-                                setHoTargetPort(gnb.linkPort || 9489);
-                                setHoTargetLinkType(gnb.linkType);
-                                setHoTargetSocketPath(gnb.socketPath || '');
-                              }
-                            }}
-                          >
-                            <option value="">Select Target gNB</option>
-                            {fleetRunning.runningGnbs.map(g => (
-                              <option key={g.profileName} value={g.profileName}>
-                                {g.profileName} ({g.gnbId}) - {g.linkType === 'unix' ? 'UNIX' : `${g.controlIp}:${g.linkPort}`}
-                              </option>
+                  {/* Mobility Controller (Handover Control Panel) */}
+                  {(fleetRunning.runningUes?.length > 0) && (
+                    <div className="fleet-live-section">
+                      <h4 className="fleet-live-title">
+                        <Layers size={14}/> Mobility Controller
+                      </h4>
+                      <div className="fleet-gnb-card" style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(59, 130, 246, 0.02)', borderColor: 'rgba(59, 130, 246, 0.2)' }}>
+                        <p className="fleet-hint" style={{ margin: 0 }}>
+                          Select a registered UE and a target gNodeB cell to trigger N2 or Xn handover procedures.
+                        </p>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>UE ID</label>
+                          <select className="form-input" style={{ width: '100%' }} value={controlUeId ?? ''} onChange={e => setControlUeId(Number(e.target.value))}>
+                            <option value="">Select UE</option>
+                            {fleetRunning.runningUes.map(u => (
+                              <option key={u.id} value={u.id}>UE-{u.id} ({u.supi})</option>
                             ))}
                           </select>
-                        ) : (
-                          <input className="form-input" disabled placeholder="No running gNBs" />
-                        )}
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Target gNodeB</label>
+                          {fleetRunning.runningGnbs && fleetRunning.runningGnbs.length > 0 ? (
+                            <select
+                              className="form-input"
+                              style={{ width: '100%' }}
+                              value={selectedTargetGnbName}
+                              onChange={(e) => {
+                                const name = e.target.value;
+                                setSelectedTargetGnbName(name);
+                                const gnb = fleetRunning.runningGnbs.find(g => g.profileName === name);
+                                if (gnb) {
+                                  setHoTargetIp(gnb.controlIp);
+                                  setHoTargetPort(gnb.linkPort || 9489);
+                                  setHoTargetLinkType(gnb.linkType);
+                                  setHoTargetSocketPath(gnb.socketPath || '');
+                                }
+                              }}
+                            >
+                              <option value="">Select Target gNB</option>
+                              {fleetRunning.runningGnbs.map(g => (
+                                <option key={g.profileName} value={g.profileName}>
+                                  {g.profileName} ({g.gnbId})
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input className="form-input" style={{ width: '100%' }} disabled placeholder="No running gNBs" />
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                          <button
+                            className="btn btn-xs btn-primary"
+                            style={{ flex: 1, padding: '8px 4px', fontWeight: 'bold' }}
+                            disabled={!controlUeId || !selectedTargetGnbName}
+                            onClick={async () => {
+                              if (!controlUeId) return;
+                              const targetGnbObj = fleetRunning.runningGnbs?.find(g => g.profileName === selectedTargetGnbName);
+                              const targetGnbId = targetGnbObj?.gnbId || "";
+                              const targetGnbName = targetGnbObj?.profileName || "";
+                              try {
+                                const res = await fetch(`${API_BASE}/ue/action`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    ueId: controlUeId,
+                                    action: 'handover',
+                                    targetGnbIp: hoTargetIp,
+                                    targetGnbPort: hoTargetPort,
+                                    targetGnbLinkType: hoTargetLinkType,
+                                    targetGnbSocketPath: hoTargetSocketPath,
+                                    targetGnbId: targetGnbId,
+                                    targetGnbName: targetGnbName
+                                  })
+                                });
+                                if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+                                showFleetMsg(`N2 Handover triggered for UE-${controlUeId} → ${selectedTargetGnbName}`, 'success');
+                              } catch(e) { showFleetMsg(`Error: ${e}`, 'error'); }
+                            }}
+                          >
+                            N2 Handover
+                          </button>
+                          <button
+                            className="btn btn-xs btn-primary"
+                            style={{ flex: 1, padding: '8px 4px', fontWeight: 'bold', backgroundColor: 'var(--accent-color)', borderColor: 'var(--accent-color)' }}
+                            disabled={!controlUeId || !selectedTargetGnbName}
+                            onClick={async () => {
+                              if (!controlUeId) return;
+                              const targetGnbObj = fleetRunning.runningGnbs?.find(g => g.profileName === selectedTargetGnbName);
+                              const targetGnbId = targetGnbObj?.gnbId || "";
+                              const targetGnbName = targetGnbObj?.profileName || "";
+                              try {
+                                const res = await fetch(`${API_BASE}/ue/action`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    ueId: controlUeId,
+                                    action: 'xn-handover',
+                                    targetGnbIp: hoTargetIp,
+                                    targetGnbPort: hoTargetPort,
+                                    targetGnbLinkType: hoTargetLinkType,
+                                    targetGnbSocketPath: hoTargetSocketPath,
+                                    targetGnbId: targetGnbId,
+                                    targetGnbName: targetGnbName
+                                  })
+                                });
+                                if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+                                showFleetMsg(`Xn Handover triggered for UE-${controlUeId} → ${selectedTargetGnbName}`, 'success');
+                              } catch(e) { showFleetMsg(`Error: ${e}`, 'error'); }
+                            }}
+                          >
+                            Xn Handover
+                          </button>
+                        </div>
                       </div>
+                    </div>
+                  )}
 
-                      <div className="form-group" style={{ flex: '0 0 auto', alignSelf: 'flex-end', display: 'flex', gap: '8px' }}>
-                        <button
-                          className="btn btn-primary"
-                          disabled={!controlUeId || !selectedTargetGnbName}
-                          onClick={async () => {
-                            if (!controlUeId) return;
-                            const targetGnbObj = fleetRunning.runningGnbs?.find(g => g.profileName === selectedTargetGnbName);
-                            const targetGnbId = targetGnbObj?.gnbId || "";
-                            const targetGnbName = targetGnbObj?.profileName || "";
-                            try {
-                              const res = await fetch(`${API_BASE}/ue/action`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  ueId: controlUeId,
-                                  action: 'handover',
-                                  targetGnbIp: hoTargetIp,
-                                  targetGnbPort: hoTargetPort,
-                                  targetGnbLinkType: hoTargetLinkType,
-                                  targetGnbSocketPath: hoTargetSocketPath,
-                                  targetGnbId: targetGnbId,
-                                  targetGnbName: targetGnbName
-                                })
-                              });
-                              if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
-                              showFleetMsg(`N2 Handover triggered for UE-${controlUeId} → ${selectedTargetGnbName}`, 'success');
-                            } catch(e) { showFleetMsg(`Error: ${e}`, 'error'); }
-                          }}
-                        >
-                          Trigger N2 Handover
-                        </button>
-                        <button
-                          className="btn btn-primary"
-                          style={{ backgroundColor: 'var(--accent-color)' }}
-                          disabled={!controlUeId || !selectedTargetGnbName}
-                          onClick={async () => {
-                            if (!controlUeId) return;
-                            const targetGnbObj = fleetRunning.runningGnbs?.find(g => g.profileName === selectedTargetGnbName);
-                            const targetGnbId = targetGnbObj?.gnbId || "";
-                            const targetGnbName = targetGnbObj?.profileName || "";
-                            try {
-                              const res = await fetch(`${API_BASE}/ue/action`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  ueId: controlUeId,
-                                  action: 'xn-handover',
-                                  targetGnbIp: hoTargetIp,
-                                  targetGnbPort: hoTargetPort,
-                                  targetGnbLinkType: hoTargetLinkType,
-                                  targetGnbSocketPath: hoTargetSocketPath,
-                                  targetGnbId: targetGnbId,
-                                  targetGnbName: targetGnbName
-                                })
-                              });
-                              if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
-                              showFleetMsg(`Xn Handover triggered for UE-${controlUeId} → ${selectedTargetGnbName}`, 'success');
-                            } catch(e) { showFleetMsg(`Error: ${e}`, 'error'); }
-                          }}
-                        >
-                          Trigger Xn Handover
-                        </button>
-                      </div>
-                    </div>
-                    <div className="fleet-info-box">
-                      <strong>ℹ Handover Support:</strong> Both <strong>N2 Path Switch Handover</strong> (via AMF path switch) and <strong>Xn Handover</strong> (direct peer-to-peer Xn interface signaling followed by path switch) are supported.
-                    </div>
-                  </div>
-                )}
+                </div>
               </div>
             )}
 
@@ -4759,6 +5579,218 @@ export default function App() {
                     </div>
                   </div>
                 )}
+
+                {/* Chaos Injector Control Panel */}
+                <div className="card" style={{ borderColor: 'rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.01)', marginTop: '24px' }}>
+                  <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', letterSpacing: '0.05em', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <AlertTriangle size={14} className="animate-pulse" />
+                    5G CHAOS TESTING CONTROL
+                  </h4>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button
+                        className={`btn ${chaosTarget === 'nas' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setChaosTarget('nas')}
+                        style={{ flex: 1, padding: '6px', fontSize: '12px', background: chaosTarget === 'nas' ? '#ef4444' : 'transparent', color: '#fff', border: '1px solid #ef4444' }}
+                      >
+                        NAS Target (UE)
+                      </button>
+                      <button
+                        className={`btn ${chaosTarget === 'ngap' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setChaosTarget('ngap')}
+                        style={{ flex: 1, padding: '6px', fontSize: '12px', background: chaosTarget === 'ngap' ? '#ef4444' : 'transparent', color: '#fff', border: '1px solid #ef4444' }}
+                      >
+                        NGAP Target (gNB)
+                      </button>
+                    </div>
+
+                    {chaosTarget === 'nas' ? (
+                      <div className="form-group">
+                        <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Target UE ID</label>
+                        <input
+                          type="number"
+                          value={chaosUeId}
+                          onChange={(e) => setChaosUeId(Number(e.target.value))}
+                          style={{ width: '100%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)' }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="form-group">
+                        <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Target GNodeB ID</label>
+                        <input
+                          type="text"
+                          value={chaosGnbId}
+                          onChange={(e) => setChaosGnbId(e.target.value)}
+                          style={{ width: '100%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)' }}
+                        />
+                        <button
+                          onClick={triggerSctpFailover}
+                          style={{ 
+                            width: '100%', 
+                            padding: '6px', 
+                            fontSize: '11px', 
+                            background: 'rgba(239, 68, 68, 0.1)', 
+                            color: '#ef4444', 
+                            border: '1px solid #ef4444', 
+                            borderRadius: '4px', 
+                            fontWeight: 'bold', 
+                            marginTop: '8px', 
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          SIMULATE SCTP FAILOVER RECOVERY
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="form-group">
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Message Type Filter</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. RegistrationRequest, empty for all"
+                        value={chaosMsgType}
+                        onChange={(e) => setChaosMsgType(e.target.value)}
+                        style={{ width: '100%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '16px' }}>
+                      <div className="form-group">
+                        <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                          Drop Rate: {(chaosDropRate * 100).toFixed(0)}%
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1.0"
+                          step="0.05"
+                          value={chaosDropRate}
+                          onChange={(e) => setChaosDropRate(Number(e.target.value))}
+                          style={{ width: '100%', cursor: 'pointer' }}
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Delay (ms)</label>
+                        <input
+                          type="number"
+                          placeholder="e.g. 500"
+                          value={chaosDelayMs}
+                          onChange={(e) => setChaosDelayMs(Number(e.target.value))}
+                          style={{ width: '100%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                      <button
+                        className="btn"
+                        onClick={applyChaosRule}
+                        style={{ flex: 1, padding: '8px', fontSize: '12px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}
+                      >
+                        ENGAGE CHAOS
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={resetChaosRules}
+                        style={{ flex: 1, padding: '8px', fontSize: '12px', borderRadius: '4px' }}
+                      >
+                        RESET RULES
+                      </button>
+                    </div>
+
+                    {/* Chaos Telemetry Stats */}
+                    {chaosStats && (
+                      <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px', marginTop: '8px' }}>
+                        <div style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--text-secondary)', marginBottom: '8px', textTransform: 'uppercase' }}>
+                          INJECTED FAULT TELEMETRY
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '11px', fontFamily: 'monospace' }}>
+                          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '4px' }}>
+                            Dropped NAS: <span style={{ color: '#ef4444', fontWeight: 'bold' }}>{chaosStats.stats?.droppedNas || 0}</span>
+                          </div>
+                          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '4px' }}>
+                            Delayed NAS: <span style={{ color: '#f59e0b', fontWeight: 'bold' }}>{chaosStats.stats?.delayedNas || 0}</span>
+                          </div>
+                          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '4px' }}>
+                            Dropped NGAP: <span style={{ color: '#ef4444', fontWeight: 'bold' }}>{chaosStats.stats?.droppedNgap || 0}</span>
+                          </div>
+                          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '4px' }}>
+                            Delayed NGAP: <span style={{ color: '#f59e0b', fontWeight: 'bold' }}>{chaosStats.stats?.delayedNgap || 0}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* L3 Protocol Mutation Fuzzer Control Panel */}
+                <div className="card" style={{ borderColor: 'rgba(168, 85, 247, 0.3)', background: 'rgba(168, 85, 247, 0.01)', marginTop: '24px' }}>
+                  <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', letterSpacing: '0.05em', color: '#a855f7', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Sliders size={14} className="animate-pulse" />
+                    L3 PROTOCOL MUTATION FUZZER
+                  </h4>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div className="form-group">
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Target Message</label>
+                      <select
+                        value={fuzzTargetMsg}
+                        onChange={(e) => setFuzzTargetMsg(e.target.value)}
+                        style={{ width: '100%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)' }}
+                      >
+                        <option value="RegistrationRequest">RegistrationRequest (NAS GMM)</option>
+                        <option value="AuthenticationResponse">AuthenticationResponse (NAS GMM)</option>
+                        <option value="SecurityModeComplete">SecurityModeComplete (NAS GMM)</option>
+                        <option value="PduSessionEstablishmentRequest">PduSessionEstablishmentRequest (NAS GSM)</option>
+                        <option value="NGSetupRequest">NGSetupRequest (NGAP)</option>
+                        <option value="InitialUEMessage">InitialUEMessage (NGAP)</option>
+                        <option value="PathSwitchRequest">PathSwitchRequest (NGAP)</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Mutation Type</label>
+                      <select
+                        value={fuzzType}
+                        onChange={(e) => setFuzzType(e.target.value)}
+                        style={{ width: '100%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)' }}
+                      >
+                        <option value="bit_flip">Bit Flips (random byte/bit inversion)</option>
+                        <option value="truncate">Packet Truncation (malformed length)</option>
+                        <option value="overflow">Buffer Overflow (+256B junk bytes)</option>
+                        <option value="zero_out">Zero Out Range (nullify bytes)</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                        Fuzz Probability: {(fuzzProbability * 100).toFixed(0)}%
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1.0"
+                        step="0.05"
+                        value={fuzzProbability}
+                        onChange={(e) => setFuzzProbability(Number(e.target.value))}
+                        style={{ width: '100%', cursor: 'pointer' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                      <button
+                        className="btn"
+                        onClick={() => applyFuzzRule(!fuzzEnabled)}
+                        style={{ flex: 1, padding: '8px', fontSize: '12px', background: fuzzEnabled ? '#ef4444' : '#a855f7', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}
+                      >
+                        {fuzzEnabled ? 'DISABLE FUZZER' : 'ENABLE FUZZER'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Right Column: Saved Capture Files */}
@@ -4855,6 +5887,293 @@ export default function App() {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* ─── Slice SLA & QoS Management ────────────────────────────────── */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '24px', marginBottom: '24px' }}>
+              
+              {/* Left Panel: Slice SLA Configurator */}
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Sliders size={18} className="text-blue" />
+                  Slice SLA Configurator
+                </h3>
+                <p className="fleet-hint" style={{ marginTop: 0 }}>
+                  Define QoS limits and SLA profiles per S-NSSAI (SST/SD). Changes apply dynamically to live user plane tunnels.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>SST (Slice/Service Type)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="255"
+                        value={slaSst}
+                        onChange={(e) => setSlaSst(Number(e.target.value))}
+                        className="form-input"
+                        style={{ width: '100%', padding: '8px' }}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>SD (Slice Differentiator)</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 010203 or empty"
+                        value={slaSd}
+                        onChange={(e) => setSlaSd(e.target.value)}
+                        className="form-input"
+                        style={{ width: '100%', padding: '8px' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Max Throughput limit (Mbps)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={slaMaxThroughput}
+                      onChange={(e) => setSlaMaxThroughput(Number(e.target.value))}
+                      className="form-input"
+                      style={{ width: '100%', padding: '8px' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Baseline Latency SLA (ms)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={slaBaselineLatency}
+                        onChange={(e) => setSlaBaselineLatency(Number(e.target.value))}
+                        className="form-input"
+                        style={{ width: '100%', padding: '8px' }}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Baseline Packet Loss (%)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={slaBaselineLoss}
+                        onChange={(e) => setSlaBaselineLoss(Number(e.target.value))}
+                        className="form-input"
+                        style={{ width: '100%', padding: '8px' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '8px 0' }}>
+                    <input
+                      type="checkbox"
+                      id="slaCongested"
+                      checked={slaCongested}
+                      onChange={(e) => setSlaCongested(e.target.checked)}
+                      style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                    />
+                    <label htmlFor="slaCongested" style={{ fontSize: '12px', color: 'var(--text-primary)', cursor: 'pointer', fontWeight: 500 }}>
+                      ⚠️ Inject Slice Congestion (Spikes Latency/Loss, Throttles BW)
+                    </label>
+                  </div>
+
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => saveSliceSla(slaSst, slaSd, slaMaxThroughput, slaBaselineLatency, slaBaselineLoss, slaCongested)}
+                    style={{ width: '100%', padding: '10px', fontWeight: 'bold' }}
+                  >
+                    Save Slice SLA Profile
+                  </button>
+                </div>
+
+                {/* List of configured SLA profiles */}
+                {sliceSlas.length > 0 && (
+                  <div style={{ marginTop: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--text-secondary)', marginBottom: '8px', textTransform: 'uppercase' }}>
+                      Configured Slice Profiles
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '180px', overflowY: 'auto' }}>
+                      {sliceSlas.map((s, idx) => (
+                        <div
+                          key={idx}
+                          onClick={() => {
+                            setSlaSst(s.sst);
+                            setSlaSd(s.sd || '');
+                            setSlaMaxThroughput(s.maxThroughput);
+                            setSlaBaselineLatency(s.baselineLatency);
+                            setSlaBaselineLoss(s.baselineLoss);
+                            setSlaCongested(s.congested);
+                          }}
+                          style={{
+                            background: 'rgba(255,255,255,0.02)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '6px',
+                            padding: '8px 10px',
+                            fontSize: '11px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            transition: 'all 0.2s'
+                          }}
+                          className="primary-hover"
+                        >
+                          <div>
+                            <strong>S-NSSAI: {s.sst}{s.sd ? `/${s.sd}` : ''}</strong>
+                            <div style={{ color: 'var(--text-muted)', marginTop: '2px' }}>
+                              BW: {s.maxThroughput}M | Lat: {s.baselineLatency}ms | Loss: {s.baselineLoss}%
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {s.congested && (
+                              <span style={{ fontSize: '9px', fontWeight: 'bold', background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', padding: '2px 6px', borderRadius: '4px' }}>
+                                CONGESTED
+                              </span>
+                            )}
+                            <span style={{ color: 'var(--color-primary)', fontSize: '12px' }}>✎</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right Panel: SLA Violations Monitor */}
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Activity size={18} className="text-blue" />
+                  SLA Violations Monitor
+                </h3>
+                <p className="fleet-hint" style={{ marginTop: 0 }}>
+                  Real-time SLA compliance tracking across active 5G network slices.
+                </p>
+
+                <div className="fleet-table-wrapper" style={{ flex: 1, overflowY: 'auto', maxHeight: '420px' }}>
+                  {activeUEs.length === 0 ? (
+                    <div className="fleet-empty" style={{ padding: '60px 0' }}>
+                      No active UEs registered. Launch UEs to monitor slice SLA compliance.
+                    </div>
+                  ) : (
+                    (() => {
+                      const uesWithSla = activeUEs.flatMap(ue => {
+                        if (!ue.pduSessions || ue.pduSessions.length === 0) return [];
+                        return ue.pduSessions.map((pdu: any) => {
+                          // Find SLA profile
+                          const sla = sliceSlas.find(s => s.sst === pdu.sst && s.sd === pdu.sd) ||
+                                      sliceSlas.find(s => s.sst === pdu.sst && (s.sd === "" || !s.sd));
+                          
+                          // Get latest performance point
+                          const historyObj = telemetryHistory[ue.id];
+                          const latestPoint = historyObj && historyObj.history && historyObj.history.length > 0
+                            ? historyObj.history[historyObj.history.length - 1]
+                            : null;
+
+                          let violationReasons: string[] = [];
+                          let isViolating = false;
+
+                          if (sla && latestPoint) {
+                            if (sla.congested) {
+                              isViolating = true;
+                              violationReasons.push("Slice Congested");
+                            }
+                            if (latestPoint.latency > sla.baselineLatency + 5.0) {
+                              isViolating = true;
+                              violationReasons.push(`Latency: ${latestPoint.latency.toFixed(1)}ms > ${sla.baselineLatency}ms`);
+                            }
+                            if (latestPoint.packetLossPct > sla.baselineLoss + 1.0) {
+                              isViolating = true;
+                              violationReasons.push(`Loss: ${latestPoint.packetLossPct.toFixed(1)}% > ${sla.baselineLoss}%`);
+                            }
+                          }
+
+                          return {
+                            ueId: ue.id,
+                            supi: ue.supi,
+                            sst: pdu.sst,
+                            sd: pdu.sd,
+                            sla,
+                            latestPoint,
+                            isViolating,
+                            violationReasons
+                          };
+                        });
+                      });
+
+                      if (uesWithSla.length === 0) {
+                        return (
+                          <div className="fleet-empty" style={{ padding: '60px 0' }}>
+                            No active PDU sessions / slices found. Establish PDU sessions to monitor SLAs.
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <table className="fleet-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr>
+                              <th style={{ textAlign: 'left', padding: '10px' }}>UE / SUPI</th>
+                              <th style={{ textAlign: 'left', padding: '10px' }}>Slice (S-NSSAI)</th>
+                              <th style={{ textAlign: 'left', padding: '10px' }}>Live Latency</th>
+                              <th style={{ textAlign: 'left', padding: '10px' }}>Live Loss</th>
+                              <th style={{ textAlign: 'left', padding: '10px' }}>Live Throughput</th>
+                              <th style={{ textAlign: 'right', padding: '10px' }}>SLA Compliance</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {uesWithSla.map((item, idx) => (
+                              <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                <td style={{ padding: '10px', verticalAlign: 'middle' }}>
+                                  <strong className="mono">UE #{item.ueId}</strong>
+                                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{item.supi}</div>
+                                </td>
+                                <td style={{ padding: '10px', verticalAlign: 'middle' }}>
+                                  <span className="fleet-tag unix">SST: {item.sst}</span>
+                                  {item.sd && <span className="fleet-tag tcp" style={{ marginLeft: '4px' }}>SD: {item.sd}</span>}
+                                </td>
+                                <td style={{ padding: '10px', verticalAlign: 'middle', fontFamily: 'monospace' }}>
+                                  {item.latestPoint ? `${item.latestPoint.latency.toFixed(1)} ms` : '—'}
+                                  {item.sla && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>SLA Target: &lt; {item.sla.baselineLatency}ms</div>}
+                                </td>
+                                <td style={{ padding: '10px', verticalAlign: 'middle', fontFamily: 'monospace' }}>
+                                  {item.latestPoint ? `${item.latestPoint.packetLossPct.toFixed(1)}%` : '—'}
+                                  {item.sla && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>SLA Target: {item.sla.baselineLoss}%</div>}
+                                </td>
+                                <td style={{ padding: '10px', verticalAlign: 'middle', fontFamily: 'monospace' }}>
+                                  {item.latestPoint ? `${item.latestPoint.throughput.toFixed(2)} Mbps` : '—'}
+                                  {item.sla && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>SLA Max: {item.sla.maxThroughput} Mbps</div>}
+                                </td>
+                                <td style={{ padding: '10px', textAlign: 'right', verticalAlign: 'middle' }}>
+                                  {!item.sla ? (
+                                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No SLA Configured</span>
+                                  ) : item.isViolating ? (
+                                    <div>
+                                      <span className="fleet-state-badge pending" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }}>
+                                        ⚠️ VIOLATION
+                                      </span>
+                                      <div style={{ fontSize: '10px', color: '#f87171', marginTop: '4px' }}>
+                                        {item.violationReasons.join(', ')}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span className="fleet-state-badge registered">
+                                      ✓ COMPLIANT
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      );
+                    })()
+                  )}
+                </div>
+              </div>
+
             </div>
 
             {/* 3GPP Decoded Frame Inspector Card */}
@@ -5527,21 +6846,24 @@ export default function App() {
                 }}>
                   {/* KPI 1: Registration Delay */}
                   {(() => {
-                    const req = callFlowEvents.find(e => 
+                    const reqIdx = callFlowEvents.findIndex(e => 
                       e.messageName.toLowerCase().includes("registration request") || 
                       e.messageName.includes("InitialUEMessage")
                     );
-                    const resp = callFlowEvents.find(e => 
-                      e.messageName.toLowerCase().includes("registration accept") || 
-                      e.messageName.toLowerCase().includes("registration complete") ||
-                      e.messageName.includes("InitialContextSetupRequest")
-                    );
                     let delayStr = 'N/A';
-                    if (req && resp) {
-                      const t1 = new Date(req.timestamp).getTime();
-                      const t2 = new Date(resp.timestamp).getTime();
-                      if (!isNaN(t1) && !isNaN(t2) && t2 > t1) {
-                        delayStr = `${t2 - t1} ms`;
+                    if (reqIdx !== -1) {
+                      const req = callFlowEvents[reqIdx];
+                      const resp = callFlowEvents.slice(reqIdx + 1).find(e => 
+                        e.messageName.toLowerCase().includes("registration accept") || 
+                        e.messageName.toLowerCase().includes("registration complete") ||
+                        e.messageName.includes("InitialContextSetupRequest")
+                      );
+                      if (resp) {
+                        const t1 = new Date(req.timestamp).getTime();
+                        const t2 = new Date(resp.timestamp).getTime();
+                        if (!isNaN(t1) && !isNaN(t2) && t2 > t1) {
+                          delayStr = `${t2 - t1} ms`;
+                        }
                       }
                     }
                     return (
@@ -5567,20 +6889,23 @@ export default function App() {
 
                   {/* KPI 2: PDU Session Setup Delay */}
                   {(() => {
-                    const req = callFlowEvents.find(e => 
+                    const reqIdx = callFlowEvents.findIndex(e => 
                       e.messageName.toLowerCase().includes("pdu session est. request") || 
                       e.messageName.includes("PDUSessionResourceSetupRequest")
                     );
-                    const resp = callFlowEvents.find(e => 
-                      e.messageName.toLowerCase().includes("pdu session est. accept") || 
-                      e.messageName.includes("PDUSessionResourceSetupResponse")
-                    );
                     let delayStr = 'N/A';
-                    if (req && resp) {
-                      const t1 = new Date(req.timestamp).getTime();
-                      const t2 = new Date(resp.timestamp).getTime();
-                      if (!isNaN(t1) && !isNaN(t2) && t2 > t1) {
-                        delayStr = `${t2 - t1} ms`;
+                    if (reqIdx !== -1) {
+                      const req = callFlowEvents[reqIdx];
+                      const resp = callFlowEvents.slice(reqIdx + 1).find(e => 
+                        e.messageName.toLowerCase().includes("pdu session est. accept") || 
+                        e.messageName.includes("PDUSessionResourceSetupResponse")
+                      );
+                      if (resp) {
+                        const t1 = new Date(req.timestamp).getTime();
+                        const t2 = new Date(resp.timestamp).getTime();
+                        if (!isNaN(t1) && !isNaN(t2) && t2 > t1) {
+                          delayStr = `${t2 - t1} ms`;
+                        }
                       }
                     }
                     return (
@@ -5606,22 +6931,25 @@ export default function App() {
 
                   {/* KPI 3: Handover Latency */}
                   {(() => {
-                    const req = callFlowEvents.find(e => 
+                    const reqIdx = callFlowEvents.findIndex(e => 
                       e.messageName.includes("HandoverRequired") || 
                       e.messageName.includes("HandoverRequest") ||
                       e.messageName.includes("XN HANDOVER REQUEST")
                     );
-                    const resp = callFlowEvents.find(e => 
-                      e.messageName.includes("HandoverNotify") || 
-                      e.messageName.includes("PathSwitchRequest") ||
-                      e.messageName.includes("XN UE CONTEXT RELEASE")
-                    );
                     let delayStr = 'N/A';
-                    if (req && resp) {
-                      const t1 = new Date(req.timestamp).getTime();
-                      const t2 = new Date(resp.timestamp).getTime();
-                      if (!isNaN(t1) && !isNaN(t2) && t2 > t1) {
-                        delayStr = `${t2 - t1} ms`;
+                    if (reqIdx !== -1) {
+                      const req = callFlowEvents[reqIdx];
+                      const resp = callFlowEvents.slice(reqIdx + 1).find(e => 
+                        e.messageName.includes("HandoverNotify") || 
+                        e.messageName.includes("PathSwitchRequest") ||
+                        e.messageName.includes("XN UE CONTEXT RELEASE")
+                      );
+                      if (resp) {
+                        const t1 = new Date(req.timestamp).getTime();
+                        const t2 = new Date(resp.timestamp).getTime();
+                        if (!isNaN(t1) && !isNaN(t2) && t2 > t1) {
+                          delayStr = `${t2 - t1} ms`;
+                        }
                       }
                     }
                     return (
@@ -5964,15 +7292,33 @@ export default function App() {
                             <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 'bold', textTransform: 'uppercase' }}>
                               {key}
                             </div>
-                            <div style={{
-                              fontSize: '12px',
-                              fontFamily: 'monospace',
-                              marginTop: '4px',
-                              wordBreak: 'break-all',
-                              color: theme === 'dark' ? '#38bdf8' : '#0369a1'
-                            }}>
-                              {typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val)}
-                            </div>
+                            {key === 'payload' ? (
+                              <pre style={{
+                                fontSize: '11px',
+                                fontFamily: 'monospace',
+                                marginTop: '6px',
+                                overflowX: 'auto',
+                                wordBreak: 'break-all',
+                                whiteSpace: 'pre-wrap',
+                                padding: '12px',
+                                borderRadius: '6px',
+                                background: theme === 'dark' ? '#0f172a' : '#f1f5f9',
+                                color: theme === 'dark' ? '#4ade80' : '#15803d',
+                                border: '1px solid var(--border-color)'
+                              }}>
+                                {JSON.stringify(val, null, 2)}
+                              </pre>
+                            ) : (
+                              <div style={{
+                                fontSize: '12px',
+                                fontFamily: 'monospace',
+                                marginTop: '4px',
+                                wordBreak: 'break-all',
+                                color: theme === 'dark' ? '#38bdf8' : '#0369a1'
+                              }}>
+                                {typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val)}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

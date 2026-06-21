@@ -255,3 +255,7 @@ func (c *Config) Validate() error {
 
 	return nil
 }
+
+// PcapHook is a global callback for injecting simulated control plane packets into active PCAP recordings.
+var PcapHook func(srcIp, dstIp string, srcPort, dstPort uint16, proto uint8, payload []byte)
+

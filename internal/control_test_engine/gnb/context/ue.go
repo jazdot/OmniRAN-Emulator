@@ -122,6 +122,10 @@ func (ue *GNBUe) FindPduSessionByIp(ip string) *PDUSession {
 	return nil
 }
 
+func (ue *GNBUe) GetPduSessions() map[int64]*PDUSession {
+	return ue.pduSessions
+}
+
 func (ue *GNBUe) FindPduSessionByDownlinkTeid(teid uint32) *PDUSession {
 	if ue.pduSessions == nil {
 		return nil
@@ -370,6 +374,10 @@ func (p *PDUSession) GetUplinkTeid() uint32 {
 
 func (p *PDUSession) GetRanUeIP() net.IP {
 	return p.ranUeIP
+}
+
+func (p *PDUSession) GetDownlinkTeid() uint32 {
+	return p.downlinkTeid
 }
 
 func (p *PDUSession) GetPduSessionId() int64 {

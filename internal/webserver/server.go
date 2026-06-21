@@ -15,11 +15,17 @@ import (
 	"time"
 
 	"OmniRAN-Emulator/config"
+	"OmniRAN-Emulator/internal/chaos"
+	gnbContext "OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	serviceNgap "OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/service"
+	triggerNgap "OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/trigger"
 	"OmniRAN-Emulator/internal/control_test_engine/ue"
 	ueContext "OmniRAN-Emulator/internal/control_test_engine/ue/context"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/nas_control/mm_5gs"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/sender"
 	"OmniRAN-Emulator/internal/templates"
+	ueContextMgmt "OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/ue_context_management"
+	senderNgap "OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/sender"
 	"OmniRAN-Emulator/lib/nas/nasMessage"
 	"OmniRAN-Emulator/web"
 
@@ -105,6 +111,17 @@ func StartServer(host string, port int) error {
 	mux.HandleFunc("/api/scenarios", handleScenariosList)
 	mux.HandleFunc("/api/scenarios/run", handleScenarioRun)
 	mux.HandleFunc("/api/scenarios/stop", handleScenarioStop)
+	
+	// Custom Scenario and Chaos API Routes
+	mux.HandleFunc("/api/scenarios/custom/run", handleCustomScenarioRun)
+	mux.HandleFunc("/api/scenarios/custom/status", handleCustomScenarioStatus)
+	mux.HandleFunc("/api/scenarios/custom/stop", handleCustomScenarioStop)
+	mux.HandleFunc("/api/chaos/configure", handleChaosConfigure)
+	mux.HandleFunc("/api/chaos/status", handleChaosStatus)
+	mux.HandleFunc("/api/chaos/reset", handleChaosReset)
+	mux.HandleFunc("/api/chaos/fuzz/configure", handleChaosFuzzConfigure)
+	mux.HandleFunc("/api/chaos/fuzz/status", handleChaosFuzzStatus)
+	mux.HandleFunc("/api/chaos/sctp-failover", handleChaosSctpFailover)
 	mux.HandleFunc("/api/ue/active", handleActiveUEs)
 	mux.HandleFunc("/api/ue/action", handleUEAction)
 	mux.HandleFunc("/api/ping", handlePingTest)
@@ -117,6 +134,9 @@ func StartServer(host string, port int) error {
 	mux.HandleFunc("/api/ue/vonr/dial", handleUEVonrDial)
 	mux.HandleFunc("/api/ue/vonr/hangup", handleUEVonrHangup)
 	mux.HandleFunc("/api/ue/traffic/stats", handleUETrafficStats)
+	mux.HandleFunc("/api/ue/traffic/performance", handleUETrafficPerformance)
+	mux.HandleFunc("/api/ue/traffic/packets", handleUETrafficPackets)
+	mux.HandleFunc("/api/slices/sla", handleSlicesSla)
 
 	// Fleet Manager API Routes
 	mux.HandleFunc("/api/fleet/ue", handleFleetUEProfiles)
@@ -352,6 +372,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 			GnbId:            u.GetGnbId(),
 			GnbProfileName:   u.GetGnbProfileName(),
 			PduSessions:      pduSessions,
+			ConnectionState:  getUeConnectionState(u),
 		})
 	}
 	resp.RunningUes = runningUEs
@@ -460,6 +481,7 @@ func handleScenariosList(w http.ResponseWriter, r *http.Request) {
 		{"handover", "N2 Handover (Path Switch)", "Simulates cell change by executing a Path Switch Request between gNodeBs"},
 		{"xn-handover", "Xn Handover (Inter-gNB)", "Starts two GNodeBs (Source and Target), registers a UE, establishes a PDU session, and performs Xn-based handover between GNodeBs"},
 		{"pdu-lifecycle", "PDU Session Lifecycle", "Registers a UE, establishes a PDU session, releases the PDU session, and validates state transitions back to INACTIVE"},
+		{"pdu-mod-lifecycle", "PDU Session Modification Lifecycle", "Registers a UE, establishes a PDU session, modifies session parameters, and clean releases the session"},
 		{"full-lifecycle", "Full UE Lifecycle", "Executes full sequence: Attach → PDU Active → CM-IDLE → Service Request → Detach"},
 		{"deregister", "UE-initiated Deregistration", "Registers a UE and performs a clean power-off Deregistration Request"},
 		{"load-test", "Multi-UE Load Endurance Test", "Stress tests the AMF by attaching multiple simulated UEs sequentially in a queue"},
@@ -469,6 +491,7 @@ func handleScenariosList(w http.ResponseWriter, r *http.Request) {
 		{"r17-ntn", "3GPP Rel 17: RedCap & NTN Attachment", "Demonstrates Release 17 capabilities, including RedCap cell access, satellite orbit parameter IEs, and XR low-latency QoS flows"},
 		{"r18-uav", "3GPP Rel 18: UAV Flight & Slicing", "Demonstrates Release 18 capabilities: Aerial drone trajectory registration, PEI support, and Slice Groups handover"},
 		{"r19-sensing", "3GPP Rel 19: AI & ISAC Sensing", "Demonstrates Release 19 capabilities: Ambient IoT passive sensor relay tags, direct RAN AI model inference deployment, and ISAC radar target sweeps"},
+		{"storm", "AMF Registration Storm", "Simulates cell-congestion by launching a rapid burst of concurrent registration requests to stress-test the AMF core"},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(scenarios)
@@ -560,6 +583,10 @@ func handleScenarioRun(w http.ResponseWriter, r *http.Request) {
 			templates.ScenarioPduLifecycle(func() bool {
 				return atomic.LoadInt32(&runningState) == 0
 			})
+		case "pdu-mod-lifecycle":
+			templates.ScenarioPduModificationLifecycle(func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
 		case "full-lifecycle":
 			idle := req.IdleSeconds
 			if idle == 0 {
@@ -578,6 +605,10 @@ func handleScenarioRun(w http.ResponseWriter, r *http.Request) {
 			})
 		case "r19-sensing":
 			templates.ScenarioRelease19AISensing(func() bool {
+				return atomic.LoadInt32(&runningState) == 0
+			})
+		case "storm":
+			templates.ScenarioRegistrationStorm(func() bool {
 				return atomic.LoadInt32(&runningState) == 0
 			})
 		case "deregister":
@@ -715,6 +746,33 @@ type UEStatus struct {
 	GnbId            string             `json:"gnbId"`
 	GnbProfileName   string             `json:"gnbProfileName"`
 	PduSessions      []PDUSessionStatus `json:"pduSessions"`
+	ConnectionState  string             `json:"connectionState"` // "CONNECTED" or "IDLE"
+}
+
+func getUeConnectionState(u *ueContext.UEContext) string {
+	if u.GetStateMM() != 3 { // MM5G_REGISTERED = 3
+		return "IDLE"
+	}
+	gnbContext.ActiveGNBsMu.RLock()
+	gnb, exists := gnbContext.ActiveGNBs[u.GetGnbId()]
+	gnbContext.ActiveGNBsMu.RUnlock()
+	if !exists || gnb == nil {
+		return "IDLE"
+	}
+	isConnected := false
+	gnb.RangeUePool(func(ranUeId int64, gUe *gnbContext.GNBUe) bool {
+		if gUe.GetAmfUeId() == u.GetAmfUeId() {
+			if gUe.GetState() == 2 { // Ready = 2
+				isConnected = true
+			}
+			return false
+		}
+		return true
+	})
+	if isConnected {
+		return "CONNECTED"
+	}
+	return "IDLE"
 }
 
 type PDUSessionStatus struct {
@@ -808,6 +866,7 @@ func handleActiveUEs(w http.ResponseWriter, r *http.Request) {
 			GnbId:            u.GetGnbId(),
 			GnbProfileName:   u.GetGnbProfileName(),
 			PduSessions:      pduSessions,
+			ConnectionState:  getUeConnectionState(u),
 		})
 	}
 	sort.Slice(resp, func(i, j int) bool {
@@ -887,23 +946,78 @@ func handleUEAction(w http.ResponseWriter, r *http.Request) {
 		sender.SendToGnb(u, ulNasTransport)
 		logrus.Infof("[WEB][ACTION] Secondary PDU Session establishment sent for ID %d", req.PduSessionId)
 
+	case "pdu-modify":
+		if req.PduSessionId == 0 || req.PduSessionId > 15 {
+			http.Error(w, "PDU Session ID must be between 1 and 15", http.StatusBadRequest)
+			return
+		}
+		sess := u.GetPduSession(req.PduSessionId)
+		if sess == nil {
+			http.Error(w, fmt.Sprintf("PDU Session with ID %d is not active", req.PduSessionId), http.StatusNotFound)
+			return
+		}
+		ulNasTransport, err := mm_5gs.UlNasTransportModification(u, req.PduSessionId)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to build UlNasTransportModification: %v", err), http.StatusInternalServerError)
+			return
+		}
+		sender.SendToGnb(u, ulNasTransport)
+		logrus.Infof("[WEB][ACTION] PDU Session Modification sent for ID %d", req.PduSessionId)
+
+	case "pdu-release":
+		if req.PduSessionId == 0 || req.PduSessionId > 15 {
+			http.Error(w, "PDU Session ID must be between 1 and 15", http.StatusBadRequest)
+			return
+		}
+		sess := u.GetPduSession(req.PduSessionId)
+		if sess == nil {
+			http.Error(w, fmt.Sprintf("PDU Session with ID %d is not active", req.PduSessionId), http.StatusNotFound)
+			return
+		}
+		ulNasTransport, err := mm_5gs.UlNasTransportRelease(u, req.PduSessionId)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to build UlNasTransportRelease: %v", err), http.StatusInternalServerError)
+			return
+		}
+		sender.SendToGnb(u, ulNasTransport)
+		logrus.Infof("[WEB][ACTION] PDU Session Release sent for ID %d", req.PduSessionId)
+
 	case "handover", "xn-handover":
 		ip := req.TargetGnbIP
+		port := req.TargetGnbPort
+		linkType := req.TargetGnbLinkType
+		socketPath := req.TargetGnbSocketPath
+		targetName := req.TargetGnbName
+
+		if req.TargetGnbId != "" {
+			gnbContext.ActiveGNBsMu.RLock()
+			targetGnb, exists := gnbContext.ActiveGNBs[req.TargetGnbId]
+			gnbContext.ActiveGNBsMu.RUnlock()
+			if exists && targetGnb != nil {
+				ip = targetGnb.GetGnbIp()
+				if targetGnb.GetLinkType() == "tcp" {
+					port = targetGnb.GetLinkPort()
+				} else {
+					port = targetGnb.GetGnbPort()
+				}
+				linkType = targetGnb.GetLinkType()
+				socketPath = targetGnb.GetSocketPath()
+				targetName = targetGnb.GetGnbId()
+			}
+		}
+
 		if ip == "" {
 			ip = "127.0.0.1"
 		}
-		port := req.TargetGnbPort
 		if port == 0 {
 			port = 9489
 		}
-		linkType := req.TargetGnbLinkType
 		if linkType == "" {
 			linkType = u.GetGnbLinkType()
 		}
-		socketPath := req.TargetGnbSocketPath
 		isXn := req.Action == "xn-handover"
 
-		err := ue.TriggerHandover(u, ip, port, linkType, socketPath, isXn, req.TargetGnbId, req.TargetGnbName)
+		err := ue.TriggerHandover(u, ip, port, linkType, socketPath, isXn, req.TargetGnbId, targetName)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Handover trigger failed: %v", err), http.StatusInternalServerError)
 			return
@@ -913,6 +1027,79 @@ func handleUEAction(w http.ResponseWriter, r *http.Request) {
 		} else {
 			logrus.Infof("[WEB][ACTION] Handover triggered successfully to %s:%d (SocketPath: %s, TargetId: %s)", ip, port, socketPath, req.TargetGnbId)
 		}
+
+	case "connection-release":
+		gnbContext.ActiveGNBsMu.RLock()
+		gnb, exists := gnbContext.ActiveGNBs[u.GetGnbId()]
+		gnbContext.ActiveGNBsMu.RUnlock()
+		if !exists || gnb == nil {
+			http.Error(w, fmt.Sprintf("GNodeB with ID %s is not active", u.GetGnbId()), http.StatusNotFound)
+			return
+		}
+
+		var targetGnBUe *gnbContext.GNBUe
+		gnb.RangeUePool(func(ranUeId int64, ue *gnbContext.GNBUe) bool {
+			if ue.GetAmfUeId() == u.GetAmfUeId() {
+				targetGnBUe = ue
+				return false
+			}
+			return true
+		})
+
+		if targetGnBUe == nil {
+			http.Error(w, fmt.Sprintf("UE with AMF ID %d not found in GNodeB", u.GetAmfUeId()), http.StatusNotFound)
+			return
+		}
+
+		releaseMsg, err := ueContextMgmt.GetUEContextReleaseRequest(targetGnBUe.GetRanUeId(), targetGnBUe.GetAmfUeId())
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to build UE Context Release Request: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		err = senderNgap.SendToAmF(releaseMsg, targetGnBUe.GetSCTP())
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to send UE Context Release Request to AMF: %v", err), http.StatusInternalServerError)
+			return
+		}
+		logrus.Infof("[WEB][ACTION] Connection Release Request sent for UE %d", u.GetUeId())
+
+	case "paging":
+		gnbContext.ActiveGNBsMu.RLock()
+		gnb, exists := gnbContext.ActiveGNBs[u.GetGnbId()]
+		gnbContext.ActiveGNBsMu.RUnlock()
+		if !exists || gnb == nil {
+			http.Error(w, fmt.Sprintf("GNodeB with ID %s is not active", u.GetGnbId()), http.StatusNotFound)
+			return
+		}
+
+		var targetGnBUe *gnbContext.GNBUe
+		gnb.RangeUePool(func(ranUeId int64, ue *gnbContext.GNBUe) bool {
+			if ue.GetAmfUeId() == u.GetAmfUeId() {
+				targetGnBUe = ue
+				return false
+			}
+			return true
+		})
+
+		if targetGnBUe == nil {
+			http.Error(w, fmt.Sprintf("UE with AMF ID %d not found in GNodeB", u.GetAmfUeId()), http.StatusNotFound)
+			return
+		}
+
+		conn := targetGnBUe.GetUnixSocket()
+		if conn == nil {
+			http.Error(w, "UNIX/TCP control socket connection to UE is nil, cannot page", http.StatusInternalServerError)
+			return
+		}
+
+		_, err := conn.Write([]byte{0x00, 0x01})
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to write paging trigger to UE socket: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		logrus.Infof("[WEB][ACTION] Paging trigger sent to UE %d", u.GetUeId())
 
 	default:
 		http.Error(w, fmt.Sprintf("Unsupported action: %s", req.Action), http.StatusBadRequest)
@@ -1167,4 +1354,205 @@ func handleFleetRunning(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	summary := GetFleetRunningSummary()
 	_ = json.NewEncoder(w).Encode(summary)
+}
+
+// handleCustomScenarioRun handles POST /api/scenarios/custom/run
+func handleCustomScenarioRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var scen CustomScenario
+	err := json.NewDecoder(r.Body).Decode(&scen)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	GlobalCustomRunner.mu.RLock()
+	isAlreadyRunning := GlobalCustomRunner.Status == "running"
+	GlobalCustomRunner.mu.RUnlock()
+
+	if isAlreadyRunning {
+		http.Error(w, "Another custom scenario is already running", http.StatusConflict)
+		return
+	}
+
+	GlobalCustomRunner.Run(scen)
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"started"}`))
+}
+
+// handleCustomScenarioStatus handles GET /api/scenarios/custom/status
+func handleCustomScenarioStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(GlobalCustomRunner.GetStateJSON())
+}
+
+// handleCustomScenarioStop handles POST /api/scenarios/custom/stop
+func handleCustomScenarioStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	GlobalCustomRunner.Stop()
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"stopped"}`))
+}
+
+// handleChaosConfigure handles POST /api/chaos/configure
+func handleChaosConfigure(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	type ChaosConfigRequest struct {
+		Target          string  `json:"target"` // "nas" or "ngap"
+		UeId            uint8   `json:"ueId"`
+		GnbId           string  `json:"gnbId"`
+		DropProbability float64 `json:"dropProbability"`
+		DelayMs         int64   `json:"delayMs"`
+		TargetMsgType   string  `json:"targetMsgType"`
+		Enabled         bool    `json:"enabled"`
+	}
+	var req ChaosConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	cfg := chaos.ChaosConfig{
+		DropProbability: req.DropProbability,
+		DelayDuration:   time.Duration(req.DelayMs) * time.Millisecond,
+		TargetMsgType:   req.TargetMsgType,
+		Enabled:         req.Enabled,
+	}
+
+	if req.Target == "nas" {
+		chaos.GlobalChaosManager.ConfigureNas(req.UeId, cfg)
+	} else if req.Target == "ngap" {
+		chaos.GlobalChaosManager.ConfigureNgap(req.GnbId, cfg)
+	} else {
+		http.Error(w, "invalid target", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"configured"}`))
+}
+
+// handleChaosStatus handles GET /api/chaos/status
+func handleChaosStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	stats := chaos.GlobalChaosManager.GetStats()
+	
+	nasRules, ngapRules := chaos.GlobalChaosManager.GetRules()
+	
+	response := map[string]interface{}{
+		"stats": stats,
+		"nas":   nasRules,
+		"ngap":  ngapRules,
+	}
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+// handleChaosReset handles POST /api/chaos/reset
+func handleChaosReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	chaos.GlobalChaosManager.Reset()
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"reset"}`))
+}
+
+// handleChaosFuzzConfigure handles POST /api/chaos/fuzz/configure
+func handleChaosFuzzConfigure(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req chaos.FuzzConfig
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	chaos.GlobalChaosManager.ConfigureFuzz(req)
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"configured"}`))
+}
+
+// handleChaosFuzzStatus handles GET /api/chaos/fuzz/status
+func handleChaosFuzzStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	fuzz := chaos.GlobalChaosManager.GetFuzz()
+	_ = json.NewEncoder(w).Encode(fuzz)
+}
+
+// handleChaosSctpFailover handles POST /api/chaos/sctp-failover
+func handleChaosSctpFailover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	type FailoverRequest struct {
+		GnbId string `json:"gnbId"`
+	}
+	var req FailoverRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	go triggerSctpFailover(req.GnbId)
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"failover_triggered"}`))
+}
+
+func triggerSctpFailover(gnbId string) {
+	logrus.Infof("[CHAOS] Initiating SCTP path failover recovery test for GNodeB %s", gnbId)
+
+	gnbContext.ActiveGNBsMu.RLock()
+	g, ok := gnbContext.ActiveGNBs[gnbId]
+	gnbContext.ActiveGNBsMu.RUnlock()
+
+	if !ok || g == nil {
+		logrus.Errorf("[CHAOS] GNodeB %s not found in active fleet", gnbId)
+		return
+	}
+
+	amf := g.GetActiveAmf()
+	if amf == nil {
+		logrus.Errorf("[CHAOS] GNodeB %s has no active AMF association", gnbId)
+		return
+	}
+
+	n2Conn := g.GetN2()
+	if n2Conn == nil {
+		logrus.Errorf("[CHAOS] GNodeB %s has no active SCTP association", gnbId)
+		return
+	}
+
+	// 1. Simulating link drop (close socket)
+	logrus.Warnf("[CHAOS] DROPPING SCTP link for GNodeB %s", gnbId)
+	_ = n2Conn.Close()
+
+	// 2. Sleep to simulate down time
+	time.Sleep(3 * time.Second)
+
+	// 3. Re-dialing to reconnect
+	logrus.Infof("[CHAOS] RECONNECTING SCTP path to AMF for GNodeB %s", gnbId)
+	if err := serviceNgap.InitConn(amf, g); err != nil {
+		logrus.Errorf("[CHAOS] Reconnection failed for GNodeB %s: %v", gnbId, err)
+		return
+	}
+
+	// 4. Send NGSetupRequest
+	triggerNgap.SendNgSetupRequest(g, amf)
+	logrus.Infof("[CHAOS] Sent NG Setup Request over new SCTP connection for GNodeB %s", gnbId)
 }

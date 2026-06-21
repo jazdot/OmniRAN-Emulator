@@ -172,3 +172,91 @@ func getUlNasTransport_PduSessionReleaseComplete(pduSessionId uint8) (nasPdu []b
 	nasPdu = data.Bytes()
 	return
 }
+
+// UlNasTransportModification builds and signs a PDU Session Modification Request inside a UL NAS Transport message
+func UlNasTransportModification(ue *context.UEContext, pduSessionId uint8) ([]byte, error) {
+	pdu := getUlNasTransport_PduSessionModificationRequest(pduSessionId)
+	if pdu == nil {
+		return nil, fmt.Errorf("Error encoding PduSession Modification Request Msg")
+	}
+	pdu, err := nas_control.EncodeNasPduWithSecurity(ue, pdu, nas.SecurityHeaderTypeIntegrityProtectedAndCiphered, true, false)
+	if err != nil {
+		return nil, fmt.Errorf("Error encoding PduSession Modification Request Msg: %w", err)
+	}
+	return pdu, nil
+}
+
+func getUlNasTransport_PduSessionModificationRequest(pduSessionId uint8) (nasPdu []byte) {
+	pduSessionModificationRequest := sm_5gs.GetPduSessionModificationRequest(pduSessionId)
+
+	m := nas.NewMessage()
+	m.GmmMessage = nas.NewGmmMessage()
+	m.GmmHeader.SetMessageType(nas.MsgTypeULNASTransport)
+
+	ulNasTransport := nasMessage.NewULNASTransport(0)
+	ulNasTransport.SpareHalfOctetAndSecurityHeaderType.SetSecurityHeaderType(nas.SecurityHeaderTypePlainNas)
+	ulNasTransport.SetMessageType(nas.MsgTypeULNASTransport)
+	ulNasTransport.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
+	ulNasTransport.PduSessionID2Value = new(nasType.PduSessionID2Value)
+	ulNasTransport.PduSessionID2Value.SetIei(nasMessage.ULNASTransportPduSessionID2ValueType)
+	ulNasTransport.PduSessionID2Value.SetPduSessionID2Value(pduSessionId)
+	
+	ulNasTransport.SpareHalfOctetAndPayloadContainerType.SetPayloadContainerType(nasMessage.PayloadContainerTypeN1SMInfo)
+	ulNasTransport.PayloadContainer.SetLen(uint16(len(pduSessionModificationRequest)))
+	ulNasTransport.PayloadContainer.SetPayloadContainerContents(pduSessionModificationRequest)
+
+	m.GmmMessage.ULNASTransport = ulNasTransport
+
+	data := new(bytes.Buffer)
+	err := m.GmmMessageEncode(data)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	nasPdu = data.Bytes()
+	return
+}
+
+// UlNasTransportModificationComplete builds and signs a PDU Session Modification Complete inside a UL NAS Transport message
+func UlNasTransportModificationComplete(ue *context.UEContext, pduSessionId uint8) ([]byte, error) {
+	pdu := getUlNasTransport_PduSessionModificationComplete(pduSessionId)
+	if pdu == nil {
+		return nil, fmt.Errorf("Error encoding PduSession Modification Complete Msg")
+	}
+	pdu, err := nas_control.EncodeNasPduWithSecurity(ue, pdu, nas.SecurityHeaderTypeIntegrityProtectedAndCiphered, true, false)
+	if err != nil {
+		return nil, fmt.Errorf("Error encoding PduSession Modification Complete Msg: %w", err)
+	}
+	return pdu, nil
+}
+
+func getUlNasTransport_PduSessionModificationComplete(pduSessionId uint8) (nasPdu []byte) {
+	pduSessionModificationComplete := sm_5gs.GetPduSessionModificationComplete(pduSessionId)
+
+	m := nas.NewMessage()
+	m.GmmMessage = nas.NewGmmMessage()
+	m.GmmHeader.SetMessageType(nas.MsgTypeULNASTransport)
+
+	ulNasTransport := nasMessage.NewULNASTransport(0)
+	ulNasTransport.SpareHalfOctetAndSecurityHeaderType.SetSecurityHeaderType(nas.SecurityHeaderTypePlainNas)
+	ulNasTransport.SetMessageType(nas.MsgTypeULNASTransport)
+	ulNasTransport.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
+	ulNasTransport.PduSessionID2Value = new(nasType.PduSessionID2Value)
+	ulNasTransport.PduSessionID2Value.SetIei(nasMessage.ULNASTransportPduSessionID2ValueType)
+	ulNasTransport.PduSessionID2Value.SetPduSessionID2Value(pduSessionId)
+	
+	ulNasTransport.SpareHalfOctetAndPayloadContainerType.SetPayloadContainerType(nasMessage.PayloadContainerTypeN1SMInfo)
+	ulNasTransport.PayloadContainer.SetLen(uint16(len(pduSessionModificationComplete)))
+	ulNasTransport.PayloadContainer.SetPayloadContainerContents(pduSessionModificationComplete)
+
+	m.GmmMessage.ULNASTransport = ulNasTransport
+
+	data := new(bytes.Buffer)
+	err := m.GmmMessageEncode(data)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	nasPdu = data.Bytes()
+	return
+}

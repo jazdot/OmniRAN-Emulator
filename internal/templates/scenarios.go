@@ -2,7 +2,10 @@ package templates
 
 import (
 	stdctx "context"
+	"fmt"
 	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	"OmniRAN-Emulator/config"
@@ -1122,5 +1125,226 @@ func ScenarioRelease19AISensing(shouldExit func() bool) {
 	}
 
 	log.Info("[SCENARIO][R19] ✅ Release 19 Ambient IoT & ISAC Sensing Scenario completed.")
+}
+
+// ScenarioRegistrationStorm launches a rapid burst of concurrent registration requests to stress test the AMF.
+func ScenarioRegistrationStorm(shouldExit func() bool) {
+	exitCheck := getShouldExit(shouldExit)
+	cfg, err := config.GetConfig()
+	if err != nil {
+		log.Error("[SCENARIO] Cannot get config: ", err)
+		return
+	}
+
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	defer cancel()
+
+	go func() {
+		for {
+			if exitCheck() {
+				cancel()
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
+	log.Info("[SCENARIO] ⚡ Starting GNodeB for storm test...")
+	_, _ = gnb.InitGnbFleet(cfg, ctx, "")
+	if sleepOrCancel(1*time.Second, exitCheck) {
+		return
+	}
+
+	log.Info("[SCENARIO] ⚡ Initiating registration storm of 30 UEs...")
+	
+	const stormUeCount = 30
+	var wg sync.WaitGroup
+	var ueList []*ueContext.UEContext
+	var ueListMu sync.Mutex
+
+	baseMsin := cfg.Ue.Msin
+	msin_int, err := strconv.Atoi(baseMsin)
+	if err != nil {
+		log.Error("[SCENARIO] Invalid MSIN: ", err)
+		return
+	}
+
+	for i := 1; i <= stormUeCount; i++ {
+		if exitCheck() {
+			break
+		}
+
+		wg.Add(1)
+		go func(id uint8) {
+			defer wg.Done()
+
+			// Compute unique IMSI
+			imsiVal := msin_int + int(id) - 1
+			imsiStr := fmt.Sprintf("%010d", imsiVal)
+
+			ueCfg := cfg
+			ueCfg.Ue.Msin = imsiStr
+
+			u, err := buildUE(ueCfg, id, nasMessage.RegistrationType5GSInitialRegistration, "")
+			if err != nil {
+				log.Errorf("[SCENARIO][STORM][UE %d] Connection failed: %v", id, err)
+				return
+			}
+
+			ueListMu.Lock()
+			ueList = append(ueList, u)
+			ueListMu.Unlock()
+
+			// Trigger registration immediately
+			trigger.InitRegistration(u)
+			log.Infof("[SCENARIO][STORM][UE %d] Sent Registration Request", id)
+		}(uint8(i))
+
+		// Introduce extremely short delay (e.g. 50ms) to simulate storm arrivals
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Wait for all UEs to trigger
+	wg.Wait()
+
+	log.Info("[SCENARIO] ⚡ All registration requests sent. Monitoring storm outcomes...")
+
+	// Monitor for 15 seconds or cancel
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && !exitCheck() {
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	log.Info("[SCENARIO] ⚡ Cleaning up storm UEs...")
+	ueListMu.Lock()
+	for _, u := range ueList {
+		u.Terminate()
+	}
+	ueListMu.Unlock()
+
+	log.Info("[SCENARIO] ⚡ AMF Registration Storm complete.")
+}
+
+// ScenarioPduModificationLifecycle simulates UE initial registration, PDU session establishment,
+// PDU session modification, traffic hold, PDU session release, and UE deregistration.
+func ScenarioPduModificationLifecycle(shouldExit func() bool) {
+	exitCheck := getShouldExit(shouldExit)
+	cfg, err := config.GetConfig()
+	if err != nil {
+		log.Error("[SCENARIO] Cannot get config: ", err)
+		return
+	}
+
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	defer cancel()
+
+	go func() {
+		for {
+			if exitCheck() {
+				cancel()
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
+	// Start GNodeB
+	log.Info("[SCENARIO][STEP 1] Starting GNodeB...")
+	_, _ = gnb.InitGnbFleet(cfg, ctx, "")
+	if sleepOrCancel(1*time.Second, exitCheck) {
+		return
+	}
+
+	// Step 2: Register UE
+	log.Info("[SCENARIO][STEP 2] Registering UE...")
+	u, err := buildUE(cfg, 1, nasMessage.RegistrationType5GSInitialRegistration, "")
+	if err != nil {
+		log.Errorf("[SCENARIO] Error creating UE: %v", err)
+		return
+	}
+	defer u.Terminate()
+
+	trigger.InitRegistration(u)
+
+	if !waitForStateOrCancel(u, ueContext.MM5G_REGISTERED, 15*time.Second, exitCheck) {
+		log.Error("[SCENARIO] Registration failed or cancelled")
+		return
+	}
+	log.Info("[SCENARIO][STEP 2] ✅ UE Registered.")
+
+	// Wait for default PDU session (ID 1) to become active
+	log.Info("[SCENARIO][STEP 3] Waiting for PDU Session ID 1 to become active...")
+	deadline := time.Now().Add(15 * time.Second)
+	pduActive := false
+	for time.Now().Before(deadline) {
+		if exitCheck() {
+			return
+		}
+		if sess, ok := u.PduSessions[1]; ok && sess.State == ueContext.SM5G_PDU_SESSION_ACTIVE {
+			pduActive = true
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	if !pduActive {
+		log.Error("[SCENARIO] Default PDU Session establishment failed")
+		return
+	}
+	log.Info("[SCENARIO][STEP 3] ✅ PDU Session ID 1 is ACTIVE.")
+
+	if sleepOrCancel(2*time.Second, exitCheck) {
+		return
+	}
+
+	// Step 4: Modify PDU session
+	log.Info("[SCENARIO][STEP 4] Sending PDU Session Modification Request for ID 1...")
+	modMsg, err := mm_5gs.UlNasTransportModification(u, 1)
+	if err != nil {
+		log.Errorf("[SCENARIO] Error building PDU Session Modification: %v", err)
+		return
+	}
+	sender.SendToGnb(u, modMsg)
+
+	// Simulate session modification exchange
+	log.Info("[SCENARIO][STEP 4] PDU Session Modification Request transmitted over N1.")
+	if sleepOrCancel(4*time.Second, exitCheck) {
+		return
+	}
+
+	// Step 5: Release PDU session
+	log.Info("[SCENARIO][STEP 5] Sending PDU Session Release Request for ID 1...")
+	releasePduMsg, err := mm_5gs.UlNasTransportRelease(u, 1)
+	if err != nil {
+		log.Errorf("[SCENARIO] Error building PDU Session Release Request: %v", err)
+		return
+	}
+	sender.SendToGnb(u, releasePduMsg)
+
+	// Wait for PDU session to become INACTIVE
+	log.Info("[SCENARIO][STEP 5] Monitoring for PDU Session ID 1 release to INACTIVE...")
+	deadline = time.Now().Add(15 * time.Second)
+	pduReleased := false
+	for time.Now().Before(deadline) {
+		if exitCheck() {
+			return
+		}
+		if sess, ok := u.PduSessions[1]; ok && sess.State == ueContext.SM5G_PDU_SESSION_INACTIVE {
+			pduReleased = true
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	if !pduReleased {
+		log.Warn("[SCENARIO] PDU Session release timeout")
+	} else {
+		log.Info("[SCENARIO][STEP 5] ✅ PDU Session ID 1 is INACTIVE.")
+	}
+
+	if sleepOrCancel(2*time.Second, exitCheck) {
+		return
+	}
+	log.Info("[SCENARIO] ✅ PDU Session Modification Lifecycle scenario completed.")
 }
 

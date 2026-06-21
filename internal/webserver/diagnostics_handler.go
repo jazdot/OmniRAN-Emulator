@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 	ueContext "OmniRAN-Emulator/internal/control_test_engine/ue/context"
 	"OmniRAN-Emulator/lib/ngap"
@@ -48,11 +49,130 @@ var (
 	capturesDir   = "log/captures"
 	logFileMutex  sync.Mutex
 	logFilePath   = "log/emulator.log"
+
+	gnbPortHistoryMu sync.RWMutex
+	gnbPortHistory   = make(map[uint16]string)
+	ueIpHistoryMu   sync.RWMutex
+	ueIpHistory     = make(map[string]string)
 )
 
 func init() {
 	_ = os.MkdirAll(capturesDir, 0755)
 	_ = os.MkdirAll("log", 0755)
+
+	config.PcapHook = WriteSimulatedPacket
+
+	// Start background mapping updates
+	go func() {
+		for {
+			time.Sleep(500 * time.Millisecond)
+			updateLifelineHistory()
+		}
+	}()
+}
+
+// WriteSimulatedPacket builds an Ethernet/IP/UDP (or TCP/SCTP) header and writes it directly to the active PCAP file, if capture is enabled.
+func WriteSimulatedPacket(srcIp, dstIp string, srcPort, dstPort uint16, proto uint8, payload []byte) {
+	pcapMgr.mu.Lock()
+	defer pcapMgr.mu.Unlock()
+
+	if !pcapMgr.isCapturing || pcapMgr.file == nil {
+		return
+	}
+
+	// 1. Build IP header
+	ipHeader := make([]byte, 20)
+	ipHeader[0] = 0x45 // Version 4, IHL 5
+	ipHeader[1] = 0x00 // TOS
+	binary.BigEndian.PutUint16(ipHeader[2:4], uint16(20+8+len(payload))) // Total length
+	ipHeader[8] = 64 // TTL
+	ipHeader[9] = proto // Protocol
+	
+	src := net.ParseIP(srcIp).To4()
+	if src == nil { src = []byte{127,0,0,1} }
+	dst := net.ParseIP(dstIp).To4()
+	if dst == nil { dst = []byte{127,0,0,1} }
+	copy(ipHeader[12:16], src)
+	copy(ipHeader[16:20], dst)
+
+	// 2. Build Transport header
+	var transportHeader []byte
+	if proto == 17 { // UDP
+		transportHeader = make([]byte, 8)
+		binary.BigEndian.PutUint16(transportHeader[0:2], srcPort)
+		binary.BigEndian.PutUint16(transportHeader[2:4], dstPort)
+		binary.BigEndian.PutUint16(transportHeader[4:6], uint16(8+len(payload)))
+	} else if proto == 6 { // TCP
+		transportHeader = make([]byte, 20)
+		binary.BigEndian.PutUint16(transportHeader[0:2], srcPort)
+		binary.BigEndian.PutUint16(transportHeader[2:4], dstPort)
+		transportHeader[12] = 0x50 // Data offset 5
+	} else if proto == 132 { // SCTP DATA Chunk
+		// SCTP common header (12 bytes) + DATA chunk header (16 bytes)
+		transportHeader = make([]byte, 28)
+		binary.BigEndian.PutUint16(transportHeader[0:2], srcPort)
+		binary.BigEndian.PutUint16(transportHeader[2:4], dstPort)
+		// chunk type = 0 (DATA), chunk flags = 0x07 (BEU), chunk length = 16 + len(payload)
+		transportHeader[12] = 0
+		transportHeader[13] = 0x07
+		binary.BigEndian.PutUint16(transportHeader[14:16], uint16(16+len(payload)))
+		// PPID = 60 (NGAP)
+		binary.BigEndian.PutUint32(transportHeader[24:28], 60)
+	}
+
+	packetData := append(ipHeader, transportHeader...)
+	packetData = append(packetData, payload...)
+
+	ethData := wrapInEthernet(packetData, 0x0800)
+
+	writeErr := writePcapPacketHeader(pcapMgr.file, len(ethData), time.Now())
+	if writeErr == nil {
+		_, _ = pcapMgr.file.Write(ethData)
+		pcapMgr.packetCount++
+		pcapMgr.bytesCount += int64(len(ethData))
+	}
+}
+
+func updateLifelineHistory() {
+	// 1. Update GNB Port History
+	context.ActiveGNBsMu.RLock()
+	for _, g := range context.ActiveGNBs {
+		n2 := g.GetN2()
+		if n2 != nil {
+			localAddr := n2.LocalAddr()
+			if localAddr != nil {
+				_, portStr, err := net.SplitHostPort(localAddr.String())
+				if err == nil {
+					if pVal, err := strconv.ParseUint(portStr, 10, 16); err == nil {
+						gnbIdStr := g.GetGnbId()
+						var roleStr string
+						if val, err := strconv.ParseInt(gnbIdStr, 16, 64); err == nil {
+							roleStr = fmt.Sprintf("gNB (%d)", val)
+						} else {
+							roleStr = fmt.Sprintf("gNB (%s)", gnbIdStr)
+						}
+						gnbPortHistoryMu.Lock()
+						gnbPortHistory[uint16(pVal)] = roleStr
+						gnbPortHistoryMu.Unlock()
+					}
+				}
+			}
+		}
+	}
+	context.ActiveGNBsMu.RUnlock()
+
+	// 2. Update UE IP History
+	for _, u := range ueContext.GetAllActiveUEs() {
+		for _, sess := range u.PduSessions {
+			ueIp := u.GetIp(sess.Id)
+			if ueIp != "" {
+				roleStr := fmt.Sprintf("UE (%d)", u.GetUeId())
+				ueIpHistoryMu.Lock()
+				ueIpHistory[ueIp] = roleStr
+				ueIpHistoryMu.Unlock()
+			}
+		}
+	}
 }
 
 // ─── PCAP Helper functions ────────────────────────────────────────────────────
@@ -677,6 +797,21 @@ type PcapEvent struct {
 }
 
 func getLifelineRole(ip string, port uint16) string {
+	sbiPorts := map[uint16]string{
+		7777:  "Open5GS-SBI",
+		29502: "AMF-SBI",
+		29518: "UDM-SBI",
+		29509: "AUSF-SBI",
+		29505: "SMF-SBI",
+		29503: "UDR-SBI",
+		29504: "NSSF-SBI",
+		29507: "PCF-SBI",
+		29510: "NRF-SBI",
+	}
+	if svc, ok := sbiPorts[port]; ok {
+		return svc
+	}
+
 	if port == 38412 {
 		return "AMF"
 	}
@@ -704,7 +839,29 @@ func getLifelineRole(ip string, port uint16) string {
 		}
 	}
 
-	// 2. Try IP match as fallback (if the IP is uniquely assigned to a gNB)
+	// 2. Try matching GNB by active SCTP local ephemeral client port
+	for _, g := range context.ActiveGNBs {
+		n2 := g.GetN2()
+		if n2 != nil {
+			localAddr := n2.LocalAddr()
+			if localAddr != nil {
+				host, portStr, err := net.SplitHostPort(localAddr.String())
+				if err == nil {
+					if pVal, err := strconv.ParseUint(portStr, 10, 16); err == nil && uint16(pVal) == port {
+						if host == ip || ip == "127.0.0.1" || host == "0.0.0.0" {
+							gnbIdStr := g.GetGnbId()
+							if val, err := strconv.ParseInt(gnbIdStr, 16, 64); err == nil {
+								return fmt.Sprintf("gNB (%d)", val)
+							}
+							return fmt.Sprintf("gNB (%s)", gnbIdStr)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Try IP match as fallback (if the IP is uniquely assigned to a gNB)
 	var matchedGnb *context.GNBContext
 	matchCount := 0
 	for _, g := range context.ActiveGNBs {
@@ -721,7 +878,7 @@ func getLifelineRole(ip string, port uint16) string {
 		return fmt.Sprintf("gNB (%s)", gnbIdStr)
 	}
 
-	// Check Active UEs by checking dynamic PDU session IP allocation
+	// 4. Check Active UEs by checking dynamic PDU session IP allocation
 	for _, u := range ueContext.GetAllActiveUEs() {
 		for _, sess := range u.PduSessions {
 			if u.GetIp(sess.Id) == ip {
@@ -730,9 +887,35 @@ func getLifelineRole(ip string, port uint16) string {
 		}
 	}
 
-	// Fallback mappings
+	// 5. Look up in historical registries (for post-hoc review of closed entities)
+	gnbPortHistoryMu.RLock()
+	gnbRole, gnbFound := gnbPortHistory[port]
+	gnbPortHistoryMu.RUnlock()
+	if gnbFound {
+		return gnbRole
+	}
+
+	ueIpHistoryMu.RLock()
+	ueRole, ueFound := ueIpHistory[ip]
+	ueIpHistoryMu.RUnlock()
+	if ueFound {
+		return ueRole
+	}
+
+	if strings.HasPrefix(ip, "10.200.200.") {
+		ueIdStr := ip[len("10.200.200."):]
+		return "UE (" + ueIdStr + ")"
+	}
+
+	// Fallback mappings based on Profiles
 	if port == 9487 || port == 9488 || port == 9489 {
 		return "gNB (1)"
+	}
+	if port == 9490 || port == 9491 || port == 9492 {
+		return "gNB (3)"
+	}
+	if port == 9525 || port == 9526 || port == 9527 {
+		return "gNB (4)"
 	}
 	if port == 9497 || port == 9498 || port == 9499 {
 		return "gNB (2)"
@@ -1079,6 +1262,49 @@ func decodeNgapMessage(pdu *ngapType.NGAPPDU) (string, string, map[string]interf
 	return msgName, summary, details
 }
 
+func parseSbiPayload(tcpPayload []byte) (method string, path string, statusCode string, jsonBody map[string]interface{}) {
+	if len(tcpPayload) == 0 {
+		return
+	}
+	payloadStr := string(tcpPayload)
+	headerEnd := strings.Index(payloadStr, "\r\n\r\n")
+	var body string
+	if headerEnd != -1 {
+		body = payloadStr[headerEnd+4:]
+		headersPart := payloadStr[:headerEnd]
+		lines := strings.Split(headersPart, "\r\n")
+		if len(lines) > 0 {
+			reqLine := lines[0]
+			parts := strings.Split(reqLine, " ")
+			if len(parts) >= 3 {
+				if strings.HasPrefix(parts[2], "HTTP/") {
+					method = parts[0]
+					path = parts[1]
+				}
+			} else if len(parts) >= 2 && strings.HasPrefix(parts[0], "HTTP/") {
+				statusCode = parts[1]
+				if len(parts) > 2 {
+					statusCode += " " + strings.Join(parts[2:], " ")
+				}
+			}
+		}
+	} else {
+		body = payloadStr
+	}
+
+	// Attempt to extract JSON from body
+	startIdx := strings.Index(body, "{")
+	endIdx := strings.LastIndex(body, "}")
+	if startIdx != -1 && endIdx != -1 && endIdx > startIdx {
+		jsonStr := body[startIdx : endIdx+1]
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(jsonStr), &parsed); err == nil {
+			jsonBody = parsed
+		}
+	}
+	return
+}
+
 func parsePcapEvents(r io.Reader) ([]PcapEvent, error) {
 	globalHeader := make([]byte, 24)
 	if _, err := io.ReadFull(r, globalHeader); err != nil {
@@ -1228,6 +1454,27 @@ func parsePcapEvents(r io.Reader) ([]PcapEvent, error) {
 						summary = fmt.Sprintf("SBI inbound on port %d", dstPort)
 					}
 				}
+
+				// Extract HTTP/SBI payloads
+				if protocolName == "HTTP" && len(transportPayload) >= 13 {
+					tcpHeaderLen := int((transportPayload[12] >> 4) & 0x0f) * 4
+					if len(transportPayload) >= tcpHeaderLen {
+						tcpPayload := transportPayload[tcpHeaderLen:]
+						method, path, statusCode, jsonBody := parseSbiPayload(tcpPayload)
+						if method != "" {
+							details["method"] = method
+							details["path"] = path
+							messageName = fmt.Sprintf("%s %s", method, path)
+						}
+						if statusCode != "" {
+							details["statusCode"] = statusCode
+							messageName = fmt.Sprintf("HTTP %s", statusCode)
+						}
+						if jsonBody != nil {
+							details["payload"] = jsonBody
+						}
+					}
+				}
 			}
 			if protocolName == "TCP" {
 				messageName = "TCP Packet"
@@ -1263,6 +1510,38 @@ func parsePcapEvents(r io.Reader) ([]PcapEvent, error) {
 						if len(udpPayload) >= 11 {
 							details["AMFUENGAPID"] = int64(binary.BigEndian.Uint64(udpPayload[3:11]))
 						}
+					case 0x04:
+						messageName = "XN SN STATUS TRANSFER"
+						summary = "Source gNB transfers sequence numbers"
+					}
+				} else if len(udpPayload) >= 4 && udpPayload[0] == 0x52 && udpPayload[1] == 0x52 && udpPayload[2] == 0x43 {
+					protocolName = "RRC"
+					rrcType := udpPayload[3]
+					switch rrcType {
+					case 0x01:
+						messageName = "RRCSetupRequest"
+						summary = "UE requests RRC connection setup"
+					case 0x02:
+						messageName = "RRCSetup"
+						summary = "gNB sends RRC Setup"
+					case 0x03:
+						messageName = "RRCSetupComplete"
+						summary = "UE RRC connection setup complete"
+					case 0x05:
+						messageName = "RRCReconfiguration"
+						summary = "gNB RRC reconfiguration (PDU session establishment)"
+					case 0x06:
+						messageName = "RRCReconfigurationComplete"
+						summary = "UE RRC reconfiguration complete"
+					case 0x07:
+						messageName = "MeasurementReport"
+						summary = "UE sends radio link measurements to source gNB"
+					case 0x08:
+						messageName = "RRCReconfiguration (Handover Command)"
+						summary = "Source gNB commands handover"
+					case 0x09:
+						messageName = "RRCReconfigurationComplete (Handover)"
+						summary = "UE arrives at target gNB cell"
 					}
 				}
 			}
@@ -1583,6 +1862,26 @@ func parseLogEvents(r io.Reader) []PcapEvent {
 			proto = "XnAP"
 			msgName = "XN UE CONTEXT RELEASE"
 			srcRole = "gNB-Target"
+			dstRole = "gNB-Source"
+		} else if strings.Contains(msg, "UE Context Release Command received") {
+			proto = "NGAP"
+			msgName = "UEContextReleaseCommand"
+			srcRole = "AMF"
+			dstRole = "gNB-Source"
+		} else if strings.Contains(msg, "UE Context Release Complete sent") {
+			proto = "NGAP"
+			msgName = "UEContextReleaseComplete"
+			srcRole = "gNB-Source"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "Handover Command trigger sent to UE") {
+			proto = "RRC"
+			msgName = "RRCReconfiguration (Handover)"
+			srcRole = "gNB-Source"
+			dstRole = "UE"
+		} else if strings.Contains(msg, "Processing N2 Handover Trigger") {
+			proto = "RRC"
+			msgName = "HandoverTrigger"
+			srcRole = "UE"
 			dstRole = "gNB-Source"
 		} else if strings.Contains(msg, "Ping") || strings.Contains(msg, "ping") {
 			proto = "ICMP"

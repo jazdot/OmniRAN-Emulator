@@ -666,6 +666,31 @@ func (ue *UEContext) Terminate() {
 	log.Info("[UE] UE Terminated")
 }
 
+func (ue *UEContext) ReleaseConnection() {
+	// clean all context of tun interface
+	for _, sess := range ue.PduSessions {
+		if sess.tun != nil {
+			_ = netlink.LinkSetDown(sess.tun)
+			_ = netlink.LinkDel(sess.tun)
+			sess.tun = nil
+		}
+
+		for _, route := range sess.routeTun {
+			r := route
+			_ = netlink.RouteDel(&r)
+		}
+		sess.routeTun = nil
+
+		for _, rule := range sess.ruleTun {
+			ru := rule
+			_ = netlink.RuleDel(&ru)
+		}
+		sess.ruleTun = nil
+		sess.State = SM5G_PDU_SESSION_INACTIVE
+	}
+	log.Info("[UE] Connection released (CM-IDLE), virtual tun interfaces cleaned up")
+}
+
 func reverse(s string) string {
 	// reverse string.
 	var aux string

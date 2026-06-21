@@ -2,9 +2,12 @@ package service
 
 import (
 	"fmt"
+	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/context"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/state"
 	"net"
+	"strconv"
+	"time"
 )
 
 func CloseConn(ue *context.UEContext) {
@@ -40,6 +43,22 @@ func InitConn(ue *context.UEContext) error {
 	// store unix socket connection in the UE.
 	ue.SetUnixConn(conn)
 	ue.OnRedirection = UeListen
+
+	// Inject RRC Setup messages into PCAP
+	if config.PcapHook != nil {
+		ueIp := "10.200.200." + strconv.Itoa(int(ue.GetUeId()))
+		gnbIp := ue.GetGnbControlIp()
+		gnbPort := uint16(ue.GetGnbLinkPort())
+		
+		// RRCSetupRequest (0x01)
+		config.PcapHook(ueIp, gnbIp, 9999, gnbPort, 17, []byte{0x52, 0x52, 0x43, 0x01})
+		time.Sleep(5 * time.Millisecond)
+		// RRCSetup (0x02)
+		config.PcapHook(gnbIp, ueIp, gnbPort, 9999, 17, []byte{0x52, 0x52, 0x43, 0x02})
+		time.Sleep(5 * time.Millisecond)
+		// RRCSetupComplete (0x03)
+		config.PcapHook(ueIp, gnbIp, 9999, gnbPort, 17, []byte{0x52, 0x52, 0x43, 0x03})
+	}
 
 	// listen NAS.
 	go UeListen(ue)

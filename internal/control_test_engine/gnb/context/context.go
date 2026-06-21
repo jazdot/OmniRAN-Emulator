@@ -290,6 +290,14 @@ func (gnb *GNBContext) selectAmFByActive() *GNBAmf {
 	return amfSelect
 }
 
+func (gnb *GNBContext) GetActiveAmfIp() string {
+	amf := gnb.selectAmFByActive()
+	if amf != nil {
+		return amf.GetAmfIp()
+	}
+	return "127.0.0.1"
+}
+
 func (gnb *GNBContext) getGnbAmf(amfId int64) (*GNBAmf, error) {
 	amf, err := gnb.amfPool.Load(amfId)
 	if !err {
@@ -589,4 +597,13 @@ func (gnb *GNBContext) GetXnConn() *net.UDPConn {
 
 func (gnb *GNBContext) SetXnConn(conn *net.UDPConn) {
 	gnb.controlInfo.xnConn = conn
+}
+
+func (gnb *GNBContext) GetActiveAmf() *GNBAmf {
+	var activeAmf *GNBAmf
+	gnb.amfPool.Range(func(key, value interface{}) bool {
+		activeAmf = value.(*GNBAmf)
+		return false
+	})
+	return activeAmf
 }

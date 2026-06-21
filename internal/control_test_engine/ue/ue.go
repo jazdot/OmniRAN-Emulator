@@ -162,6 +162,15 @@ func RegistrationUeMonitor(conf config.Config,
 func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort int, targetGnbLinkType string, targetGnbSocketPath string, isXn bool, targetGnbId string, targetGnbName string) error {
 	log.Infof("[UE] Initiating Handover to Target GNodeB: %s:%d (LinkType: %s, SocketPath: %s, isXn: %t, targetGnbId: %s, targetGnbName: %s)", targetGnbIp, targetGnbPort, targetGnbLinkType, targetGnbSocketPath, isXn, targetGnbId, targetGnbName)
 
+	// Inject MeasurementReport (0x07) into PCAP
+	if config.PcapHook != nil {
+		ueIp := "10.200.200." + strconv.Itoa(int(ue.GetUeId()))
+		gnbIp := ue.GetGnbControlIp()
+		gnbPort := uint16(ue.GetGnbLinkPort())
+		config.PcapHook(ueIp, gnbIp, 9999, gnbPort, 17, []byte{0x52, 0x52, 0x43, 0x07})
+		time.Sleep(5 * time.Millisecond)
+	}
+
 	if !isXn {
 		// N2 Handover Flow: Keep source connection open, set target params, send trigger to Source GNodeB
 		oldConn := ue.GetUnixConn()
