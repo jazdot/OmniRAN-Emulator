@@ -2,6 +2,7 @@ package webserver
 
 import (
 	"encoding/binary"
+	"strings"
 	"testing"
 )
 
@@ -99,5 +100,72 @@ func TestWrapInEthernet(t *testing.T) {
 	}
 	if wrapped[6] != 0x00 || wrapped[11] != 0x01 {
 		t.Errorf("Expected Src MAC to end with 0x01; got src MAC %v", wrapped[6:12])
+	}
+}
+
+func TestPcapLogParsers(t *testing.T) {
+	// Test getLifelineRole
+	if role := getLifelineRole("127.0.0.1", 38412); role != "AMF" {
+		t.Errorf("Expected role 'AMF'; got '%s'", role)
+	}
+	if role := getLifelineRole("127.0.0.1", 5005); role != "UPF" {
+		t.Errorf("Expected role 'UPF'; got '%s'", role)
+	}
+	if role := getLifelineRole("127.0.0.1", 5004); role != "UE" {
+		t.Errorf("Expected role 'UE'; got '%s'", role)
+	}
+	if role := getLifelineRole("127.0.0.1", 9487); role != "gNB-Source" {
+		t.Errorf("Expected role 'gNB-Source'; got '%s'", role)
+	}
+	if role := getLifelineRole("127.0.0.1", 9497); role != "gNB-Target" {
+		t.Errorf("Expected role 'gNB-Target'; got '%s'", role)
+	}
+	if role := getLifelineRole("1.2.3.4", 12345); role != "External" {
+		t.Errorf("Expected role 'External'; got '%s'", role)
+	}
+
+	// Test parseNasHeader
+	// Plain Registration Request (5GMM) -> epd = 0x7e, msgType = 0x41
+	nasReq := []byte{0x7e, 0x00, 0x41, 0x01, 0x02}
+	name, _ := parseNasHeader(nasReq)
+	if name != "Registration Request" {
+		t.Errorf("Expected 'Registration Request'; got '%s'", name)
+	}
+
+	// Plain PDU Session Est. Request (5GSM) -> epd = 0x2e, msgType = 0xc1
+	nasPduReq := []byte{0x2e, 0x00, 0xc1, 0x01, 0x02}
+	name, _ = parseNasHeader(nasPduReq)
+	if name != "PDU Session Est. Request" {
+		t.Errorf("Expected 'PDU Session Est. Request'; got '%s'", name)
+	}
+
+	// Test decodeNgapMessage with nil input
+	name, summary, _ := decodeNgapMessage(nil)
+	if name != "NGAP Message" || summary != "Nil PDU" {
+		t.Errorf("Expected decode of nil PDU to return 'Nil PDU' summary; got name='%s', summary='%s'", name, summary)
+	}
+
+	// Test parseLogEvents
+	logData := `time="2026-06-21T11:00:00Z" level=info msg="Send NG Setup Request to AMF"
+time="2026-06-21T11:00:01Z" level=info msg="Received Handover Command from Source GNodeB"
+time="2026-06-21T11:00:02Z" level=info msg="Cell switch completed"
+time="2026-06-21T11:00:03Z" level=info msg="Ping response received"`
+
+	events := parseLogEvents(strings.NewReader(logData))
+	if len(events) != 4 {
+		t.Fatalf("Expected 4 events from log parsing; got %d", len(events))
+	}
+
+	if events[0].MessageName != "NGSetupRequest" || events[0].SrcRole != "gNB-Source" || events[0].DstRole != "AMF" {
+		t.Errorf("Event 0 parsed incorrectly: %+v", events[0])
+	}
+	if events[1].MessageName != "RRCReconfiguration (Handover)" || events[1].SrcRole != "gNB-Source" || events[1].DstRole != "UE" {
+		t.Errorf("Event 1 parsed incorrectly: %+v", events[1])
+	}
+	if events[2].MessageName != "RRCReconfigurationComplete" || events[2].SrcRole != "UE" || events[2].DstRole != "gNB-Target" {
+		t.Errorf("Event 2 parsed incorrectly: %+v", events[2])
+	}
+	if events[3].MessageName != "Ping" || events[3].SrcRole != "UE" || events[3].DstRole != "UPF" {
+		t.Errorf("Event 3 parsed incorrectly: %+v", events[3])
 	}
 }

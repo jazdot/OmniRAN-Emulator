@@ -20,7 +20,10 @@ import {
   Tv,
   Download,
   Search,
-  FileText
+  FileText,
+  X,
+  Eye,
+  GitCommit
 } from 'lucide-react';
 
 // API base path (works with relative path when served by Go, or proxied in dev)
@@ -109,6 +112,21 @@ interface RunningUE {
   gnbProfileName?: string;
   amfUeNgapId?: number;
   pduSessions: { id: number; ueIp: string; dnn: string; stateDesc: string }[];
+}
+
+interface PcapEvent {
+  timestamp: string;
+  protocol: string;
+  srcIp: string;
+  srcPort: number;
+  dstIp: string;
+  dstPort: number;
+  srcRole: string;
+  dstRole: string;
+  messageName: string;
+  summary: string;
+  details: Record<string, any>;
+  rawHex?: string;
 }
 
 interface Scenario {
@@ -550,6 +568,29 @@ const formatHexDump = (hex: string): string => {
   return result;
 };
 
+const getRoleX = (role: string): number => {
+  switch (role) {
+    case 'UE': return 100;
+    case 'gNB-Source': return 280;
+    case 'gNB-Target': return 460;
+    case 'AMF': return 640;
+    case 'UPF': return 820;
+    default: return 1000; // External
+  }
+};
+
+const getProtocolColor = (proto: string): string => {
+  switch (proto) {
+    case 'NGAP': return '#c084fc'; // Purple
+    case 'NAS': return '#60a5fa';  // Blue
+    case 'XnAP': return '#2dd4bf'; // Teal
+    case 'RRC': return '#fb923c';  // Orange
+    case 'RTP': return '#4ade80';  // Green
+    case 'ICMP': return '#f87171'; // Red
+    default: return '#94a3b8';     // Slate/Gray
+  }
+};
+
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const saved = localStorage.getItem('theme');
@@ -610,6 +651,90 @@ export default function App() {
   const [isRefreshingPcaps, setIsRefreshingPcaps] = useState(false);
   const [isClearingLogs, setIsClearingLogs] = useState(false);
   const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
+
+  // Call Flow Visualization States
+  const [callFlowOpen, setCallFlowOpen] = useState(false);
+  const [callFlowEvents, setCallFlowEvents] = useState<PcapEvent[]>([]);
+  const [callFlowLoading, setCallFlowLoading] = useState(false);
+  const [callFlowTitle, setCallFlowTitle] = useState('');
+  const [selectedEvent, setSelectedEvent] = useState<PcapEvent | null>(null);
+  const [isLogFlow, setIsLogFlow] = useState(false);
+
+  const openCallFlow = async (fileName?: string) => {
+    setCallFlowLoading(true);
+    setCallFlowOpen(true);
+    setSelectedEvent(null);
+    if (fileName) {
+      setIsLogFlow(false);
+      setCallFlowTitle(`PCAP Call Flow: ${fileName}`);
+      try {
+        const res = await fetch(`${API_BASE}/diagnostics/pcap/parse?file=${encodeURIComponent(fileName)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setCallFlowEvents(data || []);
+        } else {
+          const errText = await res.text();
+          alert(`Failed to parse PCAP call flow: ${errText}`);
+          setCallFlowOpen(false);
+        }
+      } catch (err) {
+        console.error("Error parsing PCAP flow:", err);
+        alert(`Failed to fetch PCAP call flow data.`);
+        setCallFlowOpen(false);
+      } finally {
+        setCallFlowLoading(false);
+      }
+    } else {
+      setIsLogFlow(true);
+      setCallFlowTitle("Server System Logs Call Flow");
+      try {
+        const res = await fetch(`${API_BASE}/diagnostics/logs/parse`);
+        if (res.ok) {
+          const data = await res.json();
+          setCallFlowEvents(data || []);
+        } else {
+          const errText = await res.text();
+          alert(`Failed to parse Logs call flow: ${errText}`);
+          setCallFlowOpen(false);
+        }
+      } catch (err) {
+        console.error("Error parsing Logs flow:", err);
+        alert(`Failed to fetch Logs call flow data.`);
+        setCallFlowOpen(false);
+      } finally {
+        setCallFlowLoading(false);
+      }
+    }
+  };
+
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (dialogRef.current) {
+      if (callFlowOpen) {
+        dialogRef.current.showModal();
+        const dialog = dialogRef.current;
+        const clickHandler = (event: MouseEvent) => {
+          if (event.target !== dialog) return;
+          const rect = dialog.getBoundingClientRect();
+          const isClickInside = (
+            rect.top <= event.clientY &&
+            event.clientY <= rect.top + rect.height &&
+            rect.left <= event.clientX &&
+            event.clientX <= rect.left + rect.width
+          );
+          if (!isClickInside) {
+            setCallFlowOpen(false);
+          }
+        };
+        dialog.addEventListener('click', clickHandler);
+        return () => {
+          dialog.removeEventListener('click', clickHandler);
+        };
+      } else {
+        dialogRef.current.close();
+      }
+    }
+  }, [callFlowOpen]);
 
   const [showBanners, setShowBanners] = useState(true);
   const [bannerFade, setBannerFade] = useState(false);
@@ -4629,6 +4754,15 @@ export default function App() {
                             <td style={{ padding: '8px', textAlign: 'right', verticalAlign: 'middle' }}>
                               <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
                                 <button
+                                  className="btn btn-xs btn-primary"
+                                  onClick={() => openCallFlow(file.name)}
+                                  style={{ padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', border: 'none', background: '#3b82f6', color: '#fff', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                  title="View Call Flow Diagram"
+                                >
+                                  <GitCommit size={11} />
+                                  Call Flow
+                                </button>
+                                <button
                                   className="btn btn-xs btn-success"
                                   onClick={() => window.location.href = `${API_BASE}/diagnostics/pcap/download?file=${encodeURIComponent(file.name)}`}
                                   style={{ padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', border: 'none', background: '#10b981', color: '#fff', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
@@ -4816,6 +4950,15 @@ export default function App() {
 
                   {/* Action buttons side-by-side, compact and small */}
                   <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => openCallFlow()}
+                      style={{ padding: '4px 6px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: '#a855f7', border: 'none', color: '#fff', borderRadius: '4px', width: '28px', height: '28px' }}
+                      title="Visualize logs as a sequence call flow"
+                    >
+                      <Eye size={12} />
+                    </button>
+
                     <button
                       className="btn btn-ghost btn-sm"
                       onClick={fetchDiagnosticsLogs}
@@ -5170,6 +5313,452 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Call Flow Sequence Diagram Modal */}
+      {callFlowOpen && (
+        <dialog
+          ref={dialogRef}
+          className="flow-dialog"
+          closedby="any"
+          style={{
+            position: 'fixed',
+            top: '5%',
+            left: '5%',
+            width: '90%',
+            height: '90%',
+            margin: 0,
+            padding: 0,
+            background: theme === 'dark' ? '#0f172a' : '#ffffff',
+            color: theme === 'dark' ? '#f1f5f9' : '#0f172a',
+            border: '1px solid var(--border-color)',
+            borderRadius: '12px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}
+        >
+          {/* CSS styles */}
+          <style>{`
+            .flow-dialog::backdrop {
+              background-color: rgba(0, 0, 0, 0.7);
+              backdrop-filter: blur(8px);
+            }
+            .flow-row {
+              display: flex;
+              align-items: center;
+              border-bottom: 1px solid var(--border-color);
+              transition: background 0.15s;
+            }
+            .flow-row:hover {
+              background: ${theme === 'dark' ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)'};
+            }
+            .flow-row.selected {
+              background: ${theme === 'dark' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(59, 130, 246, 0.08)'};
+            }
+            .flow-arrow-line {
+              transition: stroke-width 0.2s;
+            }
+            .flow-row:hover .flow-arrow-line, .flow-row.selected .flow-arrow-line {
+              stroke-width: 3.5;
+            }
+            .hex-dump-pre {
+              font-family: 'Courier New', Courier, monospace;
+              font-size: 11px;
+              line-height: 1.4;
+              background: ${theme === 'dark' ? '#020617' : '#f8fafc'};
+              color: ${theme === 'dark' ? '#38bdf8' : '#0284c7'};
+              padding: 12px;
+              border-radius: 6px;
+              overflow-x: auto;
+              border: 1px solid var(--border-color);
+              white-space: pre;
+            }
+          `}</style>
+
+          {/* Header */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '16px 24px',
+            borderBottom: '1px solid var(--border-color)',
+            background: theme === 'dark' ? '#1e293b' : '#f1f5f9'
+          }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Activity size={20} className="text-blue" />
+                {callFlowTitle}
+                <span style={{
+                  fontSize: '10px',
+                  fontWeight: 'bold',
+                  textTransform: 'uppercase',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  background: isLogFlow ? 'rgba(168, 85, 247, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                  color: isLogFlow ? '#c084fc' : '#60a5fa',
+                  border: `1px solid ${isLogFlow ? '#c084fc' : '#60a5fa'}30`
+                }}>
+                  {isLogFlow ? 'Logs' : 'PCAP'}
+                </span>
+              </h2>
+              <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                Interactive 3GPP sequence visualizer. Click any message to inspect frame parameters.
+              </p>
+            </div>
+            <button
+              onClick={() => setCallFlowOpen(false)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                padding: '4px',
+                borderRadius: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* Content body */}
+          <div style={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
+            
+            {/* Left side: Sequence diagram canvas */}
+            <div style={{
+              flexGrow: 1,
+              overflow: 'auto',
+              padding: '20px',
+              borderRight: '1px solid var(--border-color)',
+              background: theme === 'dark' ? '#0f172a' : '#fafafa'
+            }}>
+              {callFlowLoading ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '12px' }}>
+                  <RefreshCw className="animate-spin text-blue" size={32} />
+                  <span style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>Parsing flow events...</span>
+                </div>
+              ) : callFlowEvents.length === 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '12px' }}>
+                  <Terminal size={32} style={{ color: 'var(--text-muted)' }} />
+                  <span style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>No call flow events found in this file.</span>
+                </div>
+              ) : (
+                <div style={{ minWidth: '1200px', position: 'relative' }}>
+                  
+                  {/* Lifeline titles */}
+                  <div style={{
+                    display: 'flex',
+                    height: '50px',
+                    borderBottom: '2px solid var(--border-color)',
+                    position: 'sticky',
+                    top: 0,
+                    background: theme === 'dark' ? '#0f172a' : '#fafafa',
+                    zIndex: 5,
+                    alignItems: 'center'
+                  }}>
+                    <div style={{ width: '80px' }} /> {/* space for time */}
+                    <div style={{ position: 'relative', width: '1100px', height: '100%' }}>
+                      {['UE', 'gNB-Source', 'gNB-Target', 'AMF', 'UPF', 'External'].map((name) => {
+                        const x = getRoleX(name);
+                        return (
+                          <div key={name} style={{ position: 'absolute', left: `${x}px`, transform: 'translateX(-50%)', top: '10px', textAlign: 'center' }}>
+                            <span style={{
+                              fontSize: '11px',
+                              fontWeight: 'bold',
+                              background: name === 'UE' ? 'rgba(59, 130, 246, 0.15)' : name === 'AMF' ? 'rgba(168, 85, 247, 0.15)' : 'rgba(148, 163, 184, 0.1)',
+                              color: name === 'UE' ? '#60a5fa' : name === 'AMF' ? '#c084fc' : 'var(--text-secondary)',
+                              padding: '6px 12px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-color)',
+                              letterSpacing: '0.05em'
+                            }}>
+                              {name}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Sequence Rows */}
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {callFlowEvents.map((event, idx) => {
+                      const srcX = getRoleX(event.srcRole);
+                      const dstX = getRoleX(event.dstRole);
+                      const isSelf = srcX === dstX;
+                      const color = getProtocolColor(event.protocol);
+                      
+                      // HH:MM:SS.mmm format from timestamp
+                      const timeStr = event.timestamp ? (event.timestamp.includes('T') ? event.timestamp.split('T')[1].substring(0, 12) : event.timestamp) : '';
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`flow-row ${selectedEvent === event ? 'selected' : ''}`}
+                          onClick={() => setSelectedEvent(event)}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          {/* Timestamp column */}
+                          <div style={{
+                            width: '80px',
+                            fontSize: '11px',
+                            color: 'var(--text-secondary)',
+                            fontFamily: 'monospace',
+                            paddingLeft: '8px',
+                            userSelect: 'none'
+                          }}>
+                            {timeStr}
+                          </div>
+
+                          {/* SVG column */}
+                          <svg width="1100" height="65" style={{ display: 'block' }}>
+                            <defs>
+                              <marker
+                                id={`arrow-${idx}`}
+                                viewBox="0 0 10 10"
+                                refX="8"
+                                refY="5"
+                                markerWidth="6"
+                                markerHeight="6"
+                                orient="auto-start-reverse"
+                              >
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill={color} />
+                              </marker>
+                            </defs>
+
+                            {/* Lifeline vertical lines */}
+                            {['UE', 'gNB-Source', 'gNB-Target', 'AMF', 'UPF', 'External'].map((lane) => {
+                              const lx = getRoleX(lane);
+                              return (
+                                <line
+                                  key={lane}
+                                  x1={lx}
+                                  y1="0"
+                                  x2={lx}
+                                  y2="65"
+                                  stroke="var(--border-color)"
+                                  strokeDasharray="4 4"
+                                  opacity="0.35"
+                                />
+                              );
+                            })}
+
+                            {/* Message Arrow / Loop */}
+                            {isSelf ? (
+                              <>
+                                <path
+                                  d={`M ${srcX} 15 C ${srcX + 60} 15, ${srcX + 60} 45, ${srcX} 45`}
+                                  fill="none"
+                                  stroke={color}
+                                  strokeWidth="2"
+                                  className="flow-arrow-line"
+                                  markerEnd={`url(#arrow-${idx})`}
+                                />
+                                <text
+                                  x={srcX + 8}
+                                  y="12"
+                                  fill={color}
+                                  style={{
+                                    fontSize: '10px',
+                                    fontWeight: 'bold',
+                                    fontFamily: 'monospace',
+                                    background: 'var(--card-bg)'
+                                  }}
+                                >
+                                  {event.messageName}
+                                </text>
+                              </>
+                            ) : (
+                              <>
+                                <line
+                                  x1={srcX}
+                                  y1="30"
+                                  x2={dstX}
+                                  y2="30"
+                                  stroke={color}
+                                  strokeWidth="2"
+                                  className="flow-arrow-line"
+                                  markerEnd={`url(#arrow-${idx})`}
+                                />
+                                {/* Message Label */}
+                                <g transform={`translate(${(srcX + dstX) / 2}, 22)`}>
+                                  <rect
+                                    x={-event.messageName.length * 3.5 - 6}
+                                    y="-12"
+                                    width={event.messageName.length * 7 + 12}
+                                    height="16"
+                                    rx="4"
+                                    fill={theme === 'dark' ? '#1e293b' : '#f1f5f9'}
+                                    stroke={color}
+                                    strokeWidth="1"
+                                    opacity="0.9"
+                                  />
+                                  <text
+                                    textAnchor="middle"
+                                    fill={color}
+                                    y="0"
+                                    style={{
+                                      fontSize: '10px',
+                                      fontWeight: 'bold',
+                                      fontFamily: 'monospace'
+                                    }}
+                                  >
+                                    {event.messageName}
+                                  </text>
+                                </g>
+                              </>
+                            )}
+
+                            {/* Protocol badge on the side of the arrow */}
+                            {!isSelf && (
+                              <g transform={`translate(${srcX < dstX ? srcX + 15 : srcX - 15}, 45)`}>
+                                <text
+                                  textAnchor={srcX < dstX ? "start" : "end"}
+                                  fill="var(--text-secondary)"
+                                  style={{ fontSize: '9px', fontFamily: 'monospace', opacity: 0.7 }}
+                                >
+                                  {event.protocol}
+                                </text>
+                              </g>
+                            )}
+                          </svg>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Right side: Detailed Frame Inspector */}
+            <div style={{
+              width: '420px',
+              minWidth: '420px',
+              background: theme === 'dark' ? '#1e293b' : '#f8fafc',
+              padding: '24px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px',
+              overflowY: 'auto'
+            }}>
+              {selectedEvent ? (
+                <>
+                  <div>
+                    <span style={{
+                      fontSize: '10px',
+                      fontWeight: 'bold',
+                      textTransform: 'uppercase',
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      background: getProtocolColor(selectedEvent.protocol) + '20',
+                      color: getProtocolColor(selectedEvent.protocol),
+                      border: `1px solid ${getProtocolColor(selectedEvent.protocol)}30`
+                    }}>
+                      {selectedEvent.protocol}
+                    </span>
+                    <h3 style={{ margin: '10px 0 4px 0', fontSize: '18px', fontWeight: 'bold' }}>
+                      {selectedEvent.messageName}
+                    </h3>
+                    <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      {selectedEvent.summary}
+                    </p>
+                  </div>
+
+                  <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Metadata Headers
+                    </h4>
+                    <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
+                      <tbody>
+                        <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                          <td style={{ padding: '6px 0', color: 'var(--text-secondary)' }}>Timestamp</td>
+                          <td style={{ padding: '6px 0', textAlign: 'right', fontFamily: 'monospace' }}>
+                            {selectedEvent.timestamp}
+                          </td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                          <td style={{ padding: '6px 0', color: 'var(--text-secondary)' }}>Source</td>
+                          <td style={{ padding: '6px 0', textAlign: 'right', fontFamily: 'monospace' }}>
+                            {selectedEvent.srcIp !== 'Logs' ? `${selectedEvent.srcIp}:${selectedEvent.srcPort}` : 'Logs'} ({selectedEvent.srcRole})
+                          </td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                          <td style={{ padding: '6px 0', color: 'var(--text-secondary)' }}>Destination</td>
+                          <td style={{ padding: '6px 0', textAlign: 'right', fontFamily: 'monospace' }}>
+                            {selectedEvent.dstIp !== 'Logs' ? `${selectedEvent.dstIp}:${selectedEvent.dstPort}` : 'Logs'} ({selectedEvent.dstRole})
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Decoded Parameters
+                    </h4>
+                    {Object.keys(selectedEvent.details).length === 0 ? (
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                        No structured parameters decoded.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {Object.entries(selectedEvent.details).map(([key, val]) => (
+                          <div
+                            key={key}
+                            style={{
+                              background: theme === 'dark' ? '#0f172a' : '#f1f5f9',
+                              padding: '10px 14px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-color)'
+                            }}
+                          >
+                            <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                              {key}
+                            </div>
+                            <div style={{
+                              fontSize: '12px',
+                              fontFamily: 'monospace',
+                              marginTop: '4px',
+                              wordBreak: 'break-all',
+                              color: theme === 'dark' ? '#38bdf8' : '#0369a1'
+                            }}>
+                              {typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {selectedEvent.rawHex && (
+                    <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px', flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                      <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Raw Packet Hex Dump
+                      </h4>
+                      <pre className="hex-dump-pre" style={{ flexGrow: 1, margin: 0 }}>
+                        {formatHexDump(selectedEvent.rawHex)}
+                      </pre>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)', gap: '12px', textAlign: 'center' }}>
+                  <Activity size={32} style={{ opacity: 0.3 }} />
+                  <span style={{ fontSize: '13px' }}>
+                    Select a message from the sequence diagram to view decoded details, 3GPP parameters, and raw hex bytes.
+                  </span>
+                </div>
+              )}
+            </div>
+
+          </div>
+        </dialog>
+      )}
+
       </main>
     </div>
   );

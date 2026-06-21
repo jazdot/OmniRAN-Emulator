@@ -1,7 +1,9 @@
 package webserver
 
 import (
+	"bufio"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +17,9 @@ import (
 	"syscall"
 	"time"
 
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	"OmniRAN-Emulator/lib/ngap"
+	"OmniRAN-Emulator/lib/ngap/ngapType"
 	"github.com/sirupsen/logrus"
 )
 
@@ -601,7 +606,7 @@ func handleGetLogsHistory(w http.ResponseWriter, r *http.Request) {
 
 	var lines []string
 	// Scan log history as plain text
-	scanner := bufioNewScanner(file)
+	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}
@@ -612,66 +617,6 @@ func handleGetLogsHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = json.NewEncoder(w).Encode(LogHistoryResponse{Logs: lines})
-}
-
-// A simple dummy structure because bufio was not imported, let's make sure we import or implement scanner
-type bufioScanner struct {
-	r io.Reader
-	b []byte
-	h int
-	t int
-}
-
-func bufioNewScanner(r io.Reader) *bufioScanner {
-	return &bufioScanner{r: r, b: make([]byte, 4096)}
-}
-
-func (s *bufioScanner) Scan() bool {
-	s.h = s.t
-	for {
-		// Look for new line
-		for i := s.h; i < s.t; i++ {
-			if s.b[i] == '\n' {
-				s.t = i + 1
-				return true
-			}
-		}
-		// Shift buffer
-		if s.h > 0 {
-			copy(s.b, s.b[s.h:s.t])
-			s.t -= s.h
-			s.h = 0
-		}
-		// Read more
-		if s.t == len(s.b) {
-			nb := make([]byte, len(s.b)*2)
-			copy(nb, s.b[:s.t])
-			s.b = nb
-		}
-		n, err := s.r.Read(s.b[s.t:])
-		if n > 0 {
-			s.t += n
-		}
-		if err != nil {
-			if s.t > s.h {
-				// Return last line if not ending with \n
-				s.b = append(s.b[:s.t], '\n')
-				s.t++
-				continue
-			}
-			return false
-		}
-	}
-}
-
-func (s *bufioScanner) Text() string {
-	end := s.t - 1
-	if end > s.h && s.b[end] == '\n' {
-		if end-1 >= s.h && s.b[end-1] == '\r' {
-			end--
-		}
-	}
-	return string(s.b[s.h:end])
 }
 
 // AppendLogToFile writes a single log line to emulator.log
@@ -687,3 +632,735 @@ func AppendLogToFile(msg string) {
 
 	_, _ = f.WriteString(msg)
 }
+
+type PcapEvent struct {
+	Timestamp   string                 `json:"timestamp"`
+	Protocol    string                 `json:"protocol"`
+	SrcIp       string                 `json:"srcIp"`
+	SrcPort     int                    `json:"srcPort"`
+	DstIp       string                 `json:"dstIp"`
+	DstPort     int                    `json:"dstPort"`
+	SrcRole     string                 `json:"srcRole"`
+	DstRole     string                 `json:"dstRole"`
+	MessageName string                 `json:"messageName"`
+	Summary     string                 `json:"summary"`
+	Details     map[string]interface{} `json:"details"`
+	RawHex      string                 `json:"rawHex"`
+}
+
+func getLifelineRole(ip string, port uint16) string {
+	if port == 38412 {
+		return "AMF"
+	}
+	if port == 5005 {
+		return "UPF"
+	}
+	if port == 5004 {
+		return "UE"
+	}
+
+	// Check ActiveGNBs
+	context.ActiveGNBsMu.RLock()
+	defer context.ActiveGNBsMu.RUnlock()
+	for _, g := range context.ActiveGNBs {
+		if g.GetGnbIp() == ip {
+			if uint16(g.GetGnbPort()) == port || uint16(g.GetLinkPort()) == port || uint16(g.GetLinkPort()+1) == port {
+				if g.GetGnbId() == "000002" || strings.Contains(strings.ToLower(g.GetGnbId()), "target") {
+					return "gNB-Target"
+				}
+				return "gNB-Source"
+			}
+		}
+	}
+
+	// Fallback mappings
+	if port == 9487 || port == 9488 {
+		return "gNB-Source"
+	}
+	if port == 9497 || port == 9498 {
+		return "gNB-Target"
+	}
+
+	return "External"
+}
+
+func parseNasHeader(nasBytes []byte) (string, string) {
+	if len(nasBytes) < 3 {
+		return "NAS Message", ""
+	}
+	secHeader := nasBytes[1] & 0x0f
+	var payload []byte
+	if secHeader != 0 {
+		if len(nasBytes) < 7 {
+			return "Secure NAS Message", ""
+		}
+		payload = nasBytes[7:]
+	} else {
+		payload = nasBytes
+	}
+
+	if len(payload) < 3 {
+		return "Plain NAS Message", ""
+	}
+
+	epd := payload[0]
+	msgType := payload[2]
+
+	if epd == 0x7e { // 5GMM
+		switch msgType {
+		case 0x41:
+			return "Registration Request", "Initial Registration"
+		case 0x42:
+			return "Registration Accept", "Slicing & TAI allocated"
+		case 0x43:
+			return "Registration Complete", "UE confirms registration accept"
+		case 0x44:
+			return "Registration Reject", "Registration rejected by AMF"
+		case 0x4b:
+			return "Authentication Request", "RAND & AUTN challenge"
+		case 0x4c:
+			return "Authentication Response", "RES* response token"
+		case 0x5d:
+			return "Security Mode Command", "Integrity & Ciphering active"
+		case 0x5e:
+			return "Security Mode Complete", "Security complete"
+		case 0xae:
+			return "Deregistration Request", "UE detach request"
+		}
+	} else if epd == 0x2e { // 5GSM
+		switch msgType {
+		case 0xc1:
+			return "PDU Session Est. Request", "PDU session setup request"
+		case 0xc2:
+			return "PDU Session Est. Accept", "PDU IP & QoS allocated"
+		case 0xc3:
+			return "PDU Session Est. Reject", "PDU setup failed"
+		}
+	}
+
+	return fmt.Sprintf("NAS Type 0x%02x", msgType), fmt.Sprintf("EPD: 0x%02x", epd)
+}
+
+func decodeNgapMessage(pdu *ngapType.NGAPPDU) (string, string, map[string]interface{}) {
+	details := make(map[string]interface{})
+	var msgName = "NGAP Message"
+	var summary = ""
+
+	if pdu == nil {
+		return msgName, "Nil PDU", details
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			summary = fmt.Sprintf("Decoded partially (recovered from: %v)", r)
+		}
+	}()
+
+	switch pdu.Present {
+	case ngapType.NGAPPDUPresentInitiatingMessage:
+		initVal := pdu.InitiatingMessage
+		if initVal == nil {
+			return "InitiatingMessage", "Empty value", details
+		}
+
+		switch initVal.ProcedureCode.Value {
+		case ngapType.ProcedureCodeNGSetup:
+			msgName = "NGSetupRequest"
+			summary = "GNodeB setup request"
+			if initVal.Value.NGSetupRequest != nil {
+				for _, ie := range initVal.Value.NGSetupRequest.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDGlobalRANNodeID {
+						details["GlobalRANNodeID"] = "Present"
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDRANNodeName {
+						if ie.Value.RANNodeName != nil {
+							details["RANNodeName"] = ie.Value.RANNodeName.Value
+							summary = fmt.Sprintf("gNB Setup Request: %s", ie.Value.RANNodeName.Value)
+						}
+					}
+				}
+			}
+		case ngapType.ProcedureCodeInitialUEMessage:
+			msgName = "InitialUEMessage"
+			summary = "Initial UE connection trigger"
+			if initVal.Value.InitialUEMessage != nil {
+				for _, ie := range initVal.Value.InitialUEMessage.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDRANUENGAPID {
+						details["RANUENGAPID"] = ie.Value.RANUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDUserLocationInformation {
+						details["UserLocationInformation"] = "Present"
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDNASPDU {
+						if ie.Value.NASPDU != nil {
+							nasName, nasSummary := parseNasHeader(ie.Value.NASPDU.Value)
+							details["NASPDU"] = nasName
+							summary = fmt.Sprintf("Initial UE Msg: %s", nasSummary)
+						}
+					}
+				}
+			}
+		case ngapType.ProcedureCodeDownlinkNASTransport:
+			msgName = "DownlinkNASTransport"
+			summary = "Downlink NAS message transfer"
+			if initVal.Value.DownlinkNASTransport != nil {
+				for _, ie := range initVal.Value.DownlinkNASTransport.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDAMFUENGAPID {
+						details["AMFUENGAPID"] = ie.Value.AMFUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDRANUENGAPID {
+						details["RANUENGAPID"] = ie.Value.RANUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDNASPDU {
+						if ie.Value.NASPDU != nil {
+							nasName, nasSummary := parseNasHeader(ie.Value.NASPDU.Value)
+							details["NASPDU"] = nasName
+							summary = fmt.Sprintf("DL NAS: %s (%s)", nasName, nasSummary)
+						}
+					}
+				}
+			}
+		case ngapType.ProcedureCodeUplinkNASTransport:
+			msgName = "UplinkNASTransport"
+			summary = "Uplink NAS message transfer"
+			if initVal.Value.UplinkNASTransport != nil {
+				for _, ie := range initVal.Value.UplinkNASTransport.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDAMFUENGAPID {
+						details["AMFUENGAPID"] = ie.Value.AMFUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDRANUENGAPID {
+						details["RANUENGAPID"] = ie.Value.RANUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDNASPDU {
+						if ie.Value.NASPDU != nil {
+							nasName, nasSummary := parseNasHeader(ie.Value.NASPDU.Value)
+							details["NASPDU"] = nasName
+							summary = fmt.Sprintf("UL NAS: %s (%s)", nasName, nasSummary)
+						}
+					}
+				}
+			}
+		case ngapType.ProcedureCodeInitialContextSetup:
+			msgName = "InitialContextSetupRequest"
+			summary = "Setup UE context"
+			if initVal.Value.InitialContextSetupRequest != nil {
+				for _, ie := range initVal.Value.InitialContextSetupRequest.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDAMFUENGAPID {
+						details["AMFUENGAPID"] = ie.Value.AMFUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDRANUENGAPID {
+						details["RANUENGAPID"] = ie.Value.RANUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDNASPDU {
+						if ie.Value.NASPDU != nil {
+							nasName, nasSummary := parseNasHeader(ie.Value.NASPDU.Value)
+							details["NASPDU"] = nasName
+							summary = fmt.Sprintf("Initial Context Setup: %s", nasSummary)
+						}
+					}
+				}
+			}
+		case ngapType.ProcedureCodePDUSessionResourceSetup:
+			msgName = "PDUSessionResourceSetupRequest"
+			summary = "PDU session setup request"
+		case ngapType.ProcedureCodeHandoverPreparation:
+			msgName = "HandoverRequired"
+			summary = "Source gNB triggers N2 handover"
+			if initVal.Value.HandoverRequired != nil {
+				for _, ie := range initVal.Value.HandoverRequired.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDAMFUENGAPID {
+						details["AMFUENGAPID"] = ie.Value.AMFUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDRANUENGAPID {
+						details["RANUENGAPID"] = ie.Value.RANUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDHandoverType {
+						details["HandoverType"] = "Intra5GS-N2"
+					}
+				}
+			}
+		case ngapType.ProcedureCodeHandoverResourceAllocation:
+			msgName = "HandoverRequest"
+			summary = "AMF requests Target gNB resource allocation"
+			if initVal.Value.HandoverRequest != nil {
+				for _, ie := range initVal.Value.HandoverRequest.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDAMFUENGAPID {
+						details["AMFUENGAPID"] = ie.Value.AMFUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDHandoverType {
+						details["HandoverType"] = "Intra5GS-N2"
+					}
+				}
+			}
+		case ngapType.ProcedureCodeHandoverNotification:
+			msgName = "HandoverNotify"
+			summary = "Target gNB notifies attachment complete"
+			if initVal.Value.HandoverNotify != nil {
+				for _, ie := range initVal.Value.HandoverNotify.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDAMFUENGAPID {
+						details["AMFUENGAPID"] = ie.Value.AMFUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDRANUENGAPID {
+						details["RANUENGAPID"] = ie.Value.RANUENGAPID.Value
+					}
+				}
+			}
+		}
+	case ngapType.NGAPPDUPresentSuccessfulOutcome:
+		succVal := pdu.SuccessfulOutcome
+		if succVal == nil {
+			return "SuccessfulOutcome", "Empty value", details
+		}
+		switch succVal.ProcedureCode.Value {
+		case ngapType.ProcedureCodeNGSetup:
+			msgName = "NGSetupResponse"
+			summary = "AMF setup accept"
+		case ngapType.ProcedureCodeInitialContextSetup:
+			msgName = "InitialContextSetupResponse"
+			summary = "gNB confirms UE context setup"
+		case ngapType.ProcedureCodePDUSessionResourceSetup:
+			msgName = "PDUSessionResourceSetupResponse"
+			summary = "gNB session setup completed"
+		case ngapType.ProcedureCodeHandoverResourceAllocation:
+			msgName = "HandoverRequestAcknowledge"
+			summary = "Target gNB resource allocated"
+			if succVal.Value.HandoverRequestAcknowledge != nil {
+				for _, ie := range succVal.Value.HandoverRequestAcknowledge.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDAMFUENGAPID {
+						details["AMFUENGAPID"] = ie.Value.AMFUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDRANUENGAPID {
+						details["RANUENGAPID"] = ie.Value.RANUENGAPID.Value
+					}
+				}
+			}
+		case ngapType.ProcedureCodeHandoverPreparation:
+			msgName = "HandoverCommand"
+			summary = "AMF commands Source gNB to handover UE"
+			if succVal.Value.HandoverCommand != nil {
+				for _, ie := range succVal.Value.HandoverCommand.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDAMFUENGAPID {
+						details["AMFUENGAPID"] = ie.Value.AMFUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDRANUENGAPID {
+						details["RANUENGAPID"] = ie.Value.RANUENGAPID.Value
+					}
+				}
+			}
+		case ngapType.ProcedureCodePathSwitchRequest:
+			msgName = "PathSwitchRequestAcknowledge"
+			summary = "AMF acknowledges path switch"
+		}
+	case ngapType.NGAPPDUPresentUnsuccessfulOutcome:
+		failVal := pdu.UnsuccessfulOutcome
+		if failVal == nil {
+			return "UnsuccessfulOutcome", "Empty value", details
+		}
+		summary = "Procedure failed"
+		switch failVal.ProcedureCode.Value {
+		case ngapType.ProcedureCodeNGSetup:
+			msgName = "NGSetupFailure"
+			summary = "AMF rejected setup request"
+		}
+	}
+
+	return msgName, summary, details
+}
+
+func parsePcapEvents(r io.Reader) ([]PcapEvent, error) {
+	globalHeader := make([]byte, 24)
+	if _, err := io.ReadFull(r, globalHeader); err != nil {
+		return nil, fmt.Errorf("failed to read global header: %w", err)
+	}
+
+	magic := binary.LittleEndian.Uint32(globalHeader[0:4])
+	var isLittleEndian = true
+	if magic == 0xd4c3b2a1 {
+		isLittleEndian = false
+	} else if magic != 0xa1b2c3d4 {
+		return nil, fmt.Errorf("invalid pcap magic number: 0x%x", magic)
+	}
+
+	var events []PcapEvent
+	headerBuf := make([]byte, 16)
+
+	for {
+		if _, err := io.ReadFull(r, headerBuf); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				break
+			}
+			return nil, err
+		}
+
+		var inclLen uint32
+		var sec uint32
+		var usec uint32
+		if isLittleEndian {
+			sec = binary.LittleEndian.Uint32(headerBuf[0:4])
+			usec = binary.LittleEndian.Uint32(headerBuf[4:8])
+			inclLen = binary.LittleEndian.Uint32(headerBuf[8:12])
+		} else {
+			sec = binary.BigEndian.Uint32(headerBuf[0:4])
+			usec = binary.BigEndian.Uint32(headerBuf[4:8])
+			inclLen = binary.BigEndian.Uint32(headerBuf[8:12])
+		}
+
+		packetData := make([]byte, inclLen)
+		if _, err := io.ReadFull(r, packetData); err != nil {
+			break
+		}
+
+		ipStart, ethType := parsePacket(packetData)
+		if ipStart < 0 {
+			continue
+		}
+
+		ipPayload := packetData[ipStart:]
+
+		var srcIp, dstIp string
+		var proto uint8
+		var transportPayload []byte
+
+		if ethType == 0x0800 && len(ipPayload) >= 20 {
+			proto = ipPayload[9]
+			srcIp = net.IP(ipPayload[12:16]).String()
+			dstIp = net.IP(ipPayload[16:20]).String()
+
+			ipHeaderLen := int(ipPayload[0]&0x0f) * 4
+			if len(ipPayload) >= ipHeaderLen {
+				transportPayload = ipPayload[ipHeaderLen:]
+			}
+		} else if ethType == 0x86dd && len(ipPayload) >= 40 {
+			proto = ipPayload[6]
+			srcIp = net.IP(ipPayload[8:24]).String()
+			dstIp = net.IP(ipPayload[24:40]).String()
+			transportPayload = ipPayload[40:]
+		} else {
+			continue
+		}
+
+		var srcPort, dstPort uint16
+		var protocolName = "IP"
+		var messageName = "Data Packet"
+		var summary = ""
+		var details = make(map[string]interface{})
+
+		switch proto {
+		case 1: // ICMP
+			protocolName = "ICMP"
+			messageName = "Ping"
+			summary = "ICMP Echo Request/Reply"
+		case 6: // TCP
+			protocolName = "TCP"
+			if len(transportPayload) >= 4 {
+				srcPort = binary.BigEndian.Uint16(transportPayload[0:2])
+				dstPort = binary.BigEndian.Uint16(transportPayload[2:4])
+			}
+			messageName = "TCP Packet"
+			summary = fmt.Sprintf("TCP communication: port %d -> %d", srcPort, dstPort)
+		case 17: // UDP
+			protocolName = "UDP"
+			if len(transportPayload) >= 8 {
+				srcPort = binary.BigEndian.Uint16(transportPayload[0:2])
+				dstPort = binary.BigEndian.Uint16(transportPayload[2:4])
+				udpPayload := transportPayload[8:]
+
+				if srcPort == 5004 || dstPort == 5004 || srcPort == 5005 || dstPort == 5005 {
+					protocolName = "RTP"
+					messageName = "VoNR Audio"
+					summary = "Bidirectional voice RTP UDP stream"
+				} else if len(udpPayload) >= 3 && udpPayload[0] == 0x58 && udpPayload[1] == 0x4e {
+					protocolName = "XnAP"
+					xnType := udpPayload[2]
+					switch xnType {
+					case 0x01:
+						messageName = "XN HANDOVER REQUEST"
+						summary = "Source gNB requests handover to Target gNB"
+						if len(udpPayload) >= 11 {
+							details["AMFUENGAPID"] = int64(binary.BigEndian.Uint64(udpPayload[3:11]))
+						}
+					case 0x02:
+						messageName = "XN HANDOVER REQUEST ACKNOWLEDGE"
+						summary = "Target gNB resource allocated"
+					case 0x03:
+						messageName = "XN UE CONTEXT RELEASE"
+						summary = "Target gNB releases context"
+						if len(udpPayload) >= 11 {
+							details["AMFUENGAPID"] = int64(binary.BigEndian.Uint64(udpPayload[3:11]))
+						}
+					}
+				}
+			}
+		case 132: // SCTP
+			protocolName = "SCTP"
+			if len(transportPayload) >= 12 {
+				srcPort = binary.BigEndian.Uint16(transportPayload[0:2])
+				dstPort = binary.BigEndian.Uint16(transportPayload[2:4])
+
+				chunks := transportPayload[12:]
+				for len(chunks) >= 4 {
+					chunkType := chunks[0]
+					chunkLen := binary.BigEndian.Uint16(chunks[2:4])
+					if chunkLen < 4 {
+						break
+					}
+
+					if chunkType == 0 { // DATA Chunk
+						if len(chunks) >= 16 {
+							ppid := binary.BigEndian.Uint32(chunks[8:12])
+							if ppid == 60 { // PPID NGAP
+								protocolName = "NGAP"
+								ngapPayload := chunks[16:chunkLen]
+
+								pdu, err := ngap.Decoder(ngapPayload)
+								if err == nil {
+									messageName, summary, details = decodeNgapMessage(pdu)
+								} else {
+									messageName = "NGAP Decode Error"
+									summary = fmt.Sprintf("Error: %v", err)
+								}
+							}
+						}
+					}
+
+					alignedLen := (chunkLen + 3) &^ 3
+					if int(alignedLen) > len(chunks) {
+						break
+					}
+					chunks = chunks[alignedLen:]
+				}
+			}
+		}
+
+		timestamp := time.Unix(int64(sec), int64(usec)*1000).Format(time.RFC3339Nano)
+		events = append(events, PcapEvent{
+			Timestamp:   timestamp,
+			Protocol:    protocolName,
+			SrcIp:       srcIp,
+			SrcPort:     int(srcPort),
+			DstIp:       dstIp,
+			DstPort:     int(dstPort),
+			SrcRole:     getLifelineRole(srcIp, srcPort),
+			DstRole:     getLifelineRole(dstIp, dstPort),
+			MessageName: messageName,
+			Summary:     summary,
+			Details:     details,
+			RawHex:      hex.EncodeToString(packetData),
+		})
+	}
+
+	return events, nil
+}
+
+func parseLogEvents(r io.Reader) []PcapEvent {
+	var events []PcapEvent
+	scanner := bufio.NewScanner(r)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		timestamp := time.Now().Format(time.RFC3339)
+		if idx := strings.Index(line, "time=\""); idx != -1 {
+			tsPart := line[idx+6:]
+			if endIdx := strings.Index(tsPart, "\""); endIdx != -1 {
+				timestamp = tsPart[:endIdx]
+			}
+		}
+
+		msg := ""
+		if idx := strings.Index(line, "msg=\""); idx != -1 {
+			msgPart := line[idx+5:]
+			if endIdx := strings.Index(msgPart, "\""); endIdx != -1 {
+				msg = msgPart[:endIdx]
+			}
+		} else {
+			msg = line
+		}
+
+		if msg == "" {
+			continue
+		}
+
+		var proto = "Logs"
+		var msgName = ""
+		var srcRole = "External"
+		var dstRole = "External"
+		var details = make(map[string]interface{})
+		details["logLine"] = msg
+
+		if strings.Contains(msg, "NG Setup Request sent") || strings.Contains(msg, "Send NG Setup Request") {
+			proto = "NGAP"
+			msgName = "NGSetupRequest"
+			srcRole = "gNB-Source"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "Receive Ng Setup Response") || strings.Contains(msg, "NG Setup Response") {
+			proto = "NGAP"
+			msgName = "NGSetupResponse"
+			srcRole = "AMF"
+			dstRole = "gNB-Source"
+		} else if strings.Contains(msg, "initial UE message") || strings.Contains(msg, "Initial UE Message") {
+			proto = "NGAP"
+			msgName = "InitialUEMessage"
+			srcRole = "gNB-Source"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "Downlink NAS Transport") || strings.Contains(msg, "DL NAS") {
+			proto = "NGAP"
+			msgName = "DownlinkNASTransport"
+			srcRole = "AMF"
+			dstRole = "gNB-Source"
+		} else if strings.Contains(msg, "Uplink Nas Transport") || strings.Contains(msg, "UL NAS") {
+			proto = "NGAP"
+			msgName = "UplinkNASTransport"
+			srcRole = "gNB-Source"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "Handover Required sent") || strings.Contains(msg, "Error sending Handover Required") {
+			proto = "NGAP"
+			msgName = "HandoverRequired"
+			srcRole = "gNB-Source"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "Received HANDOVER REQUEST from AMF") {
+			proto = "NGAP"
+			msgName = "HandoverRequest"
+			srcRole = "AMF"
+			dstRole = "gNB-Target"
+		} else if strings.Contains(msg, "Handover Request Acknowledge sent") {
+			proto = "NGAP"
+			msgName = "HandoverRequestAcknowledge"
+			srcRole = "gNB-Target"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "Handover Command received") {
+			proto = "NGAP"
+			msgName = "HandoverCommand"
+			srcRole = "AMF"
+			dstRole = "gNB-Source"
+		} else if strings.Contains(msg, "Handover Notify sent") {
+			proto = "NGAP"
+			msgName = "HandoverNotify"
+			srcRole = "gNB-Target"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "Path Switch Request sent") {
+			proto = "NGAP"
+			msgName = "PathSwitchRequest"
+			srcRole = "gNB-Target"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "Receive Path Switch Request Acknowledge") {
+			proto = "NGAP"
+			msgName = "PathSwitchRequestAcknowledge"
+			srcRole = "AMF"
+			dstRole = "gNB-Target"
+		} else if strings.Contains(msg, "Received Handover Command from Source GNodeB") {
+			proto = "RRC"
+			msgName = "RRCReconfiguration (Handover)"
+			srcRole = "gNB-Source"
+			dstRole = "UE"
+		} else if strings.Contains(msg, "Cell switch completed") || strings.Contains(msg, "UE accessing target cell") {
+			proto = "RRC"
+			msgName = "RRCReconfigurationComplete"
+			srcRole = "UE"
+			dstRole = "gNB-Target"
+		} else if strings.Contains(msg, "Initiating Handover to Target GNodeB") {
+			proto = "RRC"
+			msgName = "HandoverTrigger"
+			srcRole = "UE"
+			dstRole = "gNB-Source"
+		} else if strings.Contains(msg, "Received XN HANDOVER REQUEST") {
+			proto = "XnAP"
+			msgName = "XN HANDOVER REQUEST"
+			srcRole = "gNB-Source"
+			dstRole = "gNB-Target"
+		} else if strings.Contains(msg, "Sent XN HANDOVER REQUEST ACKNOWLEDGE") || strings.Contains(msg, "Sending XN HANDOVER REQUEST ACKNOWLEDGE") {
+			proto = "XnAP"
+			msgName = "XN HANDOVER REQUEST ACKNOWLEDGE"
+			srcRole = "gNB-Target"
+			dstRole = "gNB-Source"
+		} else if strings.Contains(msg, "Sending XN UE CONTEXT RELEASE") || strings.Contains(msg, "Received XN UE CONTEXT RELEASE") {
+			proto = "XnAP"
+			msgName = "XN UE CONTEXT RELEASE"
+			srcRole = "gNB-Target"
+			dstRole = "gNB-Source"
+		} else if strings.Contains(msg, "Ping") || strings.Contains(msg, "ping") {
+			proto = "ICMP"
+			msgName = "Ping"
+			srcRole = "UE"
+			dstRole = "UPF"
+		} else if strings.Contains(msg, "Voice Echo") || strings.Contains(msg, "VoNR") {
+			proto = "RTP"
+			msgName = "VoNR Audio"
+			srcRole = "UE"
+			dstRole = "UPF"
+		}
+
+		if msgName != "" {
+			events = append(events, PcapEvent{
+				Timestamp:   timestamp,
+				Protocol:    proto,
+				SrcIp:       "Logs",
+				DstIp:       "Logs",
+				SrcRole:     srcRole,
+				DstRole:     dstRole,
+				MessageName: msgName,
+				Summary:     msg,
+				Details:     details,
+			})
+		}
+	}
+	return events
+}
+
+func handleParsePcap(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	fileName := r.URL.Query().Get("file")
+	if fileName == "" {
+		http.Error(w, "Missing 'file' parameter", http.StatusBadRequest)
+		return
+	}
+
+	fileName = filepath.Base(fileName)
+	filePath := filepath.Join(capturesDir, fileName)
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to open file: %v", err), http.StatusNotFound)
+		return
+	}
+	defer file.Close()
+
+	events, err := parsePcapEvents(file)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse PCAP: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(events)
+}
+
+func handleParseLogs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	logFileMutex.Lock()
+	file, err := os.Open(logFilePath)
+	if err != nil {
+		logFileMutex.Unlock()
+		if os.IsNotExist(err) {
+			_ = json.NewEncoder(w).Encode([]PcapEvent{})
+		} else {
+			http.Error(w, fmt.Sprintf("Failed to open log file: %v", err), http.StatusInternalServerError)
+		}
+		return
+	}
+	defer file.Close()
+	logFileMutex.Unlock()
+
+	events := parseLogEvents(file)
+	_ = json.NewEncoder(w).Encode(events)
+}
+

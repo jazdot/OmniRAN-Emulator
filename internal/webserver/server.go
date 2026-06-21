@@ -137,9 +137,11 @@ func StartServer(host string, port int) error {
 	mux.HandleFunc("/api/diagnostics/pcap/list", handleListPcaps)
 	mux.HandleFunc("/api/diagnostics/pcap/download", handleDownloadPcap)
 	mux.HandleFunc("/api/diagnostics/pcap/delete", handleDeletePcap)
+	mux.HandleFunc("/api/diagnostics/pcap/parse", handleParsePcap)
 	mux.HandleFunc("/api/diagnostics/logs/download", handleDownloadLogs)
 	mux.HandleFunc("/api/diagnostics/logs/clear", handleClearLogs)
 	mux.HandleFunc("/api/diagnostics/logs/history", handleGetLogsHistory)
+	mux.HandleFunc("/api/diagnostics/logs/parse", handleParseLogs)
 
 	// Embedded static React files
 	assetsFS, err := fs.Sub(web.Assets, "dist")
