@@ -153,7 +153,7 @@ func processXnMessage(gnb *context.GNBContext, data []byte, remoteAddr *net.UDPA
 		if targetUe != nil {
 			// 1. RRCReconfiguration (HO Command) (0x08)
 			if config.PcapHook != nil {
-				ueIp := "10.200.200." + strconv.Itoa(int(targetUe.GetRanUeId()))
+				ueIp := "10.200.200." + strconv.Itoa(targetUe.GetUeId())
 				gnbIp := gnb.GetGnbIp()
 				gnbPort := uint16(gnb.GetLinkPort())
 				config.PcapHook(gnbIp, ueIp, gnbPort, 9999, 17, []byte{0x52, 0x52, 0x43, 0x08})

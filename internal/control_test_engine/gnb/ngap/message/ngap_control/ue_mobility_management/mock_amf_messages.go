@@ -231,6 +231,7 @@ func GetPathSwitchRequestAcknowledge(ranUeNgapID int64, amfUeNgapID int64, pduSe
 
 	// Build PathSwitchRequestAcknowledgeTransfer
 	transfer := ngapType.PathSwitchRequestAcknowledgeTransfer{}
+	transfer.ULNGUUPTNLInformation = new(ngapType.UPTransportLayerInformation)
 	transfer.ULNGUUPTNLInformation.Present = ngapType.UPTransportLayerInformationPresentGTPTunnel
 	transfer.ULNGUUPTNLInformation.GTPTunnel = new(ngapType.GTPTunnel)
 	gtp := transfer.ULNGUUPTNLInformation.GTPTunnel

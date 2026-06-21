@@ -210,7 +210,7 @@ func HandlerInitialContextSetupRequest(gnb *context.GNBContext, message *ngapTyp
 
 	// Inject RRC Reconfiguration messages into PCAP
 	if config.PcapHook != nil {
-		ueIp := "10.200.200." + strconv.Itoa(int(ue.GetRanUeId()))
+		ueIp := "10.200.200." + strconv.Itoa(ue.GetUeId())
 		gnbIp := gnb.GetGnbIp()
 		gnbPort := uint16(gnb.GetLinkPort())
 		
@@ -388,7 +388,7 @@ func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *nga
 
 	// Inject RRC Reconfiguration messages into PCAP
 	if config.PcapHook != nil {
-		ueIp := "10.200.200." + strconv.Itoa(int(ue.GetRanUeId()))
+		ueIp := "10.200.200." + strconv.Itoa(ue.GetUeId())
 		gnbIp := gnb.GetGnbIp()
 		gnbPort := uint16(gnb.GetLinkPort())
 		

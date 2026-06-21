@@ -21,7 +21,89 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 	if handleXnHandoverTrigger(ue, message, gnb) {
 		return
 	}
+	if handleN2HandoverTrigger(ue, message, gnb) {
+		return
+	}
+	if handleTargetAccessTrigger(ue, message, gnb) {
+		return
+	}
+	if handlePathSwitchTrigger(ue, message, gnb) {
+		return
+	}
 
+	// encode NAS message in NGAP.
+	ngap, err := nas_transport.SendInitialUeMessage(message, ue, gnb)
+	if err != nil {
+		log.Info("[GNB][NGAP] Error making initial UE message: ", err)
+	}
+
+	// change state of UE.
+	ue.SetStateOngoing()
+
+	// Send Initial UE Message
+	conn := ue.GetSCTP()
+	err = sender.SendToAmF(ngap, conn)
+	if err != nil {
+		log.Info("[GNB][AMF] Error sending initial UE message: ", err)
+	}
+}
+
+func HandlerUeOngoing(ue *context.GNBUe, message []byte, gnb *context.GNBContext) {
+	if handleXnHandoverTrigger(ue, message, gnb) {
+		return
+	}
+	if handleN2HandoverTrigger(ue, message, gnb) {
+		return
+	}
+	if handleTargetAccessTrigger(ue, message, gnb) {
+		return
+	}
+	if handlePathSwitchTrigger(ue, message, gnb) {
+		return
+	}
+
+	ngap, err := nas_transport.SendUplinkNasTransport(message, ue, gnb)
+	if err != nil {
+		log.Info("[GNB][NGAP] Error making Uplink Nas Transport: ", err)
+	}
+
+	// Send Uplink Nas Transport
+	conn := ue.GetSCTP()
+	err = sender.SendToAmF(ngap, conn)
+	if err != nil {
+		log.Info("[GNB][AMF] Error sending Uplink Nas Transport: ", err)
+	}
+}
+
+func HandlerUeReady(ue *context.GNBUe, message []byte, gnb *context.GNBContext) {
+	if handleXnHandoverTrigger(ue, message, gnb) {
+		return
+	}
+	if handleN2HandoverTrigger(ue, message, gnb) {
+		return
+	}
+	if handleTargetAccessTrigger(ue, message, gnb) {
+		return
+	}
+	if handlePathSwitchTrigger(ue, message, gnb) {
+		return
+	}
+
+	// Send Uplink Nas Transport
+	ngap, err := nas_transport.SendUplinkNasTransport(message, ue, gnb)
+	if err != nil {
+		log.Info("[GNB][NGAP] Error making Uplink Nas Transport: ", err)
+		return
+	}
+
+	conn := ue.GetSCTP()
+	err = sender.SendToAmF(ngap, conn)
+	if err != nil {
+		log.Info("[GNB][AMF] Error sending Uplink Nas Transport: ", err)
+	}
+}
+
+func handleN2HandoverTrigger(ue *context.GNBUe, message []byte, gnb *context.GNBContext) bool {
 	// 1. Check if this is N2 Handover Trigger (0x02) from UE to Source GNodeB (size 28)
 	if len(message) == 28 && message[0] == 0x00 && message[1] == 0x02 {
 		amfUeId := int64(binary.BigEndian.Uint64(message[2:10]))
@@ -47,10 +129,14 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 		)
 		if err != nil {
 			log.Errorf("[GNB-Source][NGAP] Error building Handover Required: %v", err)
-			return
+			return true
 		}
 
 		conn := ue.GetSCTP()
+		if config.PcapHook != nil {
+			config.PcapHook(gnb.GetGnbIp(), gnb.GetActiveAmfIp(), uint16(gnb.GetLinkPort()), 38412, 132, handoverRequiredMsg)
+			time.Sleep(5 * time.Millisecond)
+		}
 		err = sender.SendToAmF(handoverRequiredMsg, conn)
 		if err != nil {
 			log.Errorf("[GNB-Source][AMF] Error sending Handover Required: %v", err)
@@ -79,7 +165,7 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 			if err == nil {
 				// Inject into PCAP (AMF -> Target GNodeB N2 SCTP)
 				if config.PcapHook != nil {
-					config.PcapHook(srcGnb.GetGnbIp(), targetGnb.GetGnbIp(), 38412, uint16(targetGnb.GetGnbPort()), 132, hoReqBytes)
+					config.PcapHook(targetGnb.GetActiveAmfIp(), targetGnb.GetGnbIp(), 38412, uint16(targetGnb.GetGnbPort()), 132, hoReqBytes)
 				}
 				time.Sleep(10 * time.Millisecond)
 
@@ -120,7 +206,7 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 				1,
 			)
 			if err == nil && config.PcapHook != nil {
-				config.PcapHook(targetGnb.GetGnbIp(), srcGnb.GetGnbIp(), uint16(targetGnb.GetGnbPort()), 38412, 132, ackMsg)
+				config.PcapHook(targetGnb.GetGnbIp(), targetGnb.GetActiveAmfIp(), uint16(targetGnb.GetGnbPort()), 38412, 132, ackMsg)
 				time.Sleep(10 * time.Millisecond)
 			}
 
@@ -129,7 +215,7 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 			if err == nil {
 				// Inject into PCAP (AMF -> Source GNodeB N2 SCTP)
 				if config.PcapHook != nil {
-					config.PcapHook(srcGnb.GetGnbIp(), srcGnb.GetGnbIp(), 38412, uint16(srcGnb.GetGnbPort()), 132, hoCmdBytes)
+					config.PcapHook(srcGnb.GetActiveAmfIp(), srcGnb.GetGnbIp(), 38412, uint16(srcGnb.GetGnbPort()), 132, hoCmdBytes)
 				}
 				time.Sleep(10 * time.Millisecond)
 
@@ -152,7 +238,7 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 			if err == nil {
 				// Inject into PCAP (AMF -> Source GNodeB N2 SCTP)
 				if config.PcapHook != nil {
-					config.PcapHook(srcGnb.GetGnbIp(), srcGnb.GetGnbIp(), 38412, uint16(srcGnb.GetGnbPort()), 132, relCmdBytes)
+					config.PcapHook(srcGnb.GetActiveAmfIp(), srcGnb.GetGnbIp(), 38412, uint16(srcGnb.GetGnbPort()), 132, relCmdBytes)
 				}
 				time.Sleep(10 * time.Millisecond)
 
@@ -165,9 +251,12 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 			}
 		}(gnb, ue.GetRanUeId(), amfUeId, targetGnbIdVal, pduSessionId)
 
-		return
+		return true
 	}
+	return false
+}
 
+func handleTargetAccessTrigger(ue *context.GNBUe, message []byte, gnb *context.GNBContext) bool {
 	// 2. Check if this is Target Access Trigger (0x04) from UE to Target GNodeB (size 10)
 	if len(message) == 10 && message[0] == 0x00 && message[1] == 0x04 {
 		amfUeId := int64(binary.BigEndian.Uint64(message[2:10]))
@@ -185,12 +274,12 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 
 		if realUe == nil {
 			log.Errorf("[GNB-Target] Pre-created UE context not found for AMF UE ID: %d", amfUeId)
-			return
+			return true
 		}
 
 		// Inject RRCReconfigurationComplete (Handover Complete) (0x09) into PCAP
 		if config.PcapHook != nil {
-			ueIp := "10.200.200." + strconv.Itoa(int(realUe.GetRanUeId()))
+			ueIp := "10.200.200." + strconv.Itoa(realUe.GetUeId())
 			gnbIp := gnb.GetGnbIp()
 			gnbPort := uint16(gnb.GetLinkPort())
 			config.PcapHook(ueIp, gnbIp, 9999, gnbPort, 17, []byte{0x52, 0x52, 0x43, 0x09})
@@ -213,19 +302,26 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 		)
 		if err != nil {
 			log.Errorf("[GNB-Target][NGAP] Error building Handover Notify: %v", err)
-			return
+			return true
 		}
 
 		conn := realUe.GetSCTP()
+		if config.PcapHook != nil {
+			config.PcapHook(gnb.GetGnbIp(), gnb.GetActiveAmfIp(), uint16(gnb.GetLinkPort()), 38412, 132, notifyMsg)
+			time.Sleep(5 * time.Millisecond)
+		}
 		err = sender.SendToAmF(notifyMsg, conn)
 		if err != nil {
 			log.Errorf("[GNB-Target][AMF] Error sending Handover Notify: %v", err)
 		} else {
 			log.Info("[GNB-Target][AMF] Handover Notify sent successfully to AMF")
 		}
-		return
+		return true
 	}
+	return false
+}
 
+func handlePathSwitchTrigger(ue *context.GNBUe, message []byte, gnb *context.GNBContext) bool {
 	// 3. Check if this is Xn Handover Trigger (0x03) or legacy/direct Path Switch (size 11)
 	if len(message) == 11 && message[0] == 0x00 && message[1] == 0x03 {
 		amfUeId := int64(binary.BigEndian.Uint64(message[2:10]))
@@ -262,7 +358,7 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 		)
 		if err != nil {
 			log.Errorf("[GNB][NGAP] Error building Path Switch Request: %v", err)
-			return
+			return true
 		}
 
 		conn := ue.GetSCTP()
@@ -299,62 +395,9 @@ func HandlerUeInitialized(ue *context.GNBUe, message []byte, gnb *context.GNBCon
 			}
 		}(gnb, ue.GetRanUeId(), amfUeId, pduSessionId)
 
-		return
+		return true
 	}
-
-	// encode NAS message in NGAP.
-	ngap, err := nas_transport.SendInitialUeMessage(message, ue, gnb)
-	if err != nil {
-		log.Info("[GNB][NGAP] Error making initial UE message: ", err)
-	}
-
-	// change state of UE.
-	ue.SetStateOngoing()
-
-	// Send Initial UE Message
-	conn := ue.GetSCTP()
-	err = sender.SendToAmF(ngap, conn)
-	if err != nil {
-		log.Info("[GNB][AMF] Error sending initial UE message: ", err)
-	}
-}
-
-func HandlerUeOngoing(ue *context.GNBUe, message []byte, gnb *context.GNBContext) {
-	if handleXnHandoverTrigger(ue, message, gnb) {
-		return
-	}
-
-	ngap, err := nas_transport.SendUplinkNasTransport(message, ue, gnb)
-	if err != nil {
-		log.Info("[GNB][NGAP] Error making Uplink Nas Transport: ", err)
-	}
-
-	// Send Uplink Nas Transport
-	conn := ue.GetSCTP()
-	err = sender.SendToAmF(ngap, conn)
-	if err != nil {
-		log.Info("[GNB][AMF] Error sending Uplink Nas Transport: ", err)
-	}
-}
-
-func HandlerUeReady(ue *context.GNBUe, message []byte, gnb *context.GNBContext) {
-	if handleXnHandoverTrigger(ue, message, gnb) {
-		return
-	}
-
-	// Send Uplink Nas Transport
-	ngap, err := nas_transport.SendUplinkNasTransport(message, ue, gnb)
-	if err != nil {
-		log.Info("[GNB][NGAP] Error making Uplink Nas Transport: ", err)
-		return
-	}
-
-	conn := ue.GetSCTP()
-	err = sender.SendToAmF(ngap, conn)
-	if err != nil {
-		log.Info("[GNB][AMF] Error sending Uplink Nas Transport: ", err)
-	}
-
+	return false
 }
 
 func handleXnHandoverTrigger(ue *context.GNBUe, message []byte, gnb *context.GNBContext) bool {

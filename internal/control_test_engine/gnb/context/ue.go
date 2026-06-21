@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"github.com/ishidawataru/sctp"
 	"net"
+	"strconv"
+	"strings"
 )
 
 // UE main states in the GNB Context.
@@ -382,4 +384,22 @@ func (p *PDUSession) GetDownlinkTeid() uint32 {
 
 func (p *PDUSession) GetPduSessionId() int64 {
 	return p.pduSessionId
+}
+
+func (ue *GNBUe) GetUeId() int {
+	conn := ue.unixSocketConnection
+	if conn != nil {
+		addr := conn.RemoteAddr()
+		if addr != nil {
+			addrStr := addr.String()
+			// Check for UNIX socket name format e.g. "@ue_101"
+			if idx := strings.Index(addrStr, "@ue_"); idx != -1 {
+				idStr := addrStr[idx+4:]
+				if id, err := strconv.Atoi(idStr); err == nil {
+					return id
+				}
+			}
+		}
+	}
+	return int(ue.ranUeNgapId)
 }

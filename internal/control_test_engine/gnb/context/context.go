@@ -147,6 +147,13 @@ func (gnb *GNBContext) NewGnBUe(conn net.Conn) *GNBUe {
 	// select AMF with Capacity is more than 0.
 	amf := gnb.selectAmFByActive()
 	if amf == nil {
+		// Fallback: select any AMF from the pool (e.g. if setup is in progress or state changes are slow)
+		gnb.amfPool.Range(func(key, value interface{}) bool {
+			amf = value.(*GNBAmf)
+			return false // select the first available AMF
+		})
+	}
+	if amf == nil {
 		log.Info("No AMF available for this UE")
 		return nil
 	}
