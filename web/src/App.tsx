@@ -5434,12 +5434,12 @@ export default function App() {
         {/* ─── Diagnostics Tab ───────────────────────────────────────────── */}
         {activeTab === 'diagnostics' && (
           <div className="view-body fade-in">
-            <div className="fleet-toast info" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', padding: '12px', borderRadius: '8px' }}>
+            {/* <div className="fleet-toast info" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', padding: '12px', borderRadius: '8px' }}>
               <AlertTriangle size={16} style={{ flexShrink: 0, color: '#eab308' }} />
               <div style={{ fontSize: '13px' }}>
                 <strong>Root Access Requirement:</strong> Raw socket binding requires the backend to be run with root permissions (e.g. <code>sudo ./app web</code>). Capturing on virtual tunnel interfaces (<code>uetun*</code>) automatically encapsulates raw IP packets into Ethernet frames for standard Wireshark compatibility.
               </div>
-            </div>
+            </div> */}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '24px', marginBottom: '24px' }}>
               {/* Left Column: Capture Control & Live Status */}
@@ -6209,12 +6209,12 @@ export default function App() {
               </div>
 
               {/* Alert explaining capabilities */}
-              <div className="fleet-toast info" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.15)', padding: '8px 12px', borderRadius: '6px', margin: 0 }}>
+              {/* <div className="fleet-toast info" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.15)', padding: '8px 12px', borderRadius: '6px', margin: 0 }}>
                 <Activity size={14} style={{ color: '#10b981', flexShrink: 0 }} />
                 <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                   <strong>APER Decode View:</strong> Real-time APER decoded representation. Highlighted green items represent 3GPP Release capabilities enabled on the simulated control plane.
                 </div>
-              </div>
+              </div> */}
 
               <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr', gap: '20px' }}>
                 {/* Left panel: Message select list */}
