@@ -147,9 +147,9 @@ func TestPcapLogParsers(t *testing.T) {
 
 	// Test parseLogEvents
 	logData := `time="2026-06-21T11:00:00Z" level=info msg="Send NG Setup Request to AMF"
-time="2026-06-21T11:00:01Z" level=info msg="Received Handover Command from Source GNodeB"
-time="2026-06-21T11:00:02Z" level=info msg="Cell switch completed"
-time="2026-06-21T11:00:03Z" level=info msg="Ping response received"`
+time="2026-06-21T11:00:01Z" level=info msg="Registration Request"
+time="2026-06-21T11:00:02Z" level=info msg="Registration Accept"
+time="2026-06-21T11:00:03Z" level=info msg="PDU Session Establishment Request"`
 
 	events := parseLogEvents(strings.NewReader(logData))
 	if len(events) != 4 {
@@ -159,13 +159,13 @@ time="2026-06-21T11:00:03Z" level=info msg="Ping response received"`
 	if events[0].MessageName != "NGSetupRequest" || events[0].SrcRole != "gNB-Source" || events[0].DstRole != "AMF" {
 		t.Errorf("Event 0 parsed incorrectly: %+v", events[0])
 	}
-	if events[1].MessageName != "RRCReconfiguration (Handover)" || events[1].SrcRole != "gNB-Source" || events[1].DstRole != "UE" {
+	if events[1].MessageName != "InitialUEMessage (Registration Request)" || events[1].SrcRole != "gNB-Source" || events[1].DstRole != "AMF" {
 		t.Errorf("Event 1 parsed incorrectly: %+v", events[1])
 	}
-	if events[2].MessageName != "RRCReconfigurationComplete" || events[2].SrcRole != "UE" || events[2].DstRole != "gNB-Target" {
+	if events[2].MessageName != "InitialContextSetupRequest (Registration Accept)" || events[2].SrcRole != "AMF" || events[2].DstRole != "gNB-Source" {
 		t.Errorf("Event 2 parsed incorrectly: %+v", events[2])
 	}
-	if events[3].MessageName != "Ping" || events[3].SrcRole != "UE" || events[3].DstRole != "UPF" {
+	if events[3].MessageName != "UplinkNASTransport (PDU Session Est. Request)" || events[3].SrcRole != "gNB-Source" || events[3].DstRole != "AMF" {
 		t.Errorf("Event 3 parsed incorrectly: %+v", events[3])
 	}
 }

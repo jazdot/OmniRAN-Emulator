@@ -796,6 +796,7 @@ func decodeNgapMessage(pdu *ngapType.NGAPPDU) (string, string, map[string]interf
 							nasName, nasSummary := parseNasHeader(ie.Value.NASPDU.Value)
 							details["NASPDU"] = nasName
 							summary = fmt.Sprintf("Initial UE Msg: %s", nasSummary)
+							msgName = fmt.Sprintf("InitialUEMessage (%s)", nasName)
 						}
 					}
 				}
@@ -816,6 +817,7 @@ func decodeNgapMessage(pdu *ngapType.NGAPPDU) (string, string, map[string]interf
 							nasName, nasSummary := parseNasHeader(ie.Value.NASPDU.Value)
 							details["NASPDU"] = nasName
 							summary = fmt.Sprintf("DL NAS: %s (%s)", nasName, nasSummary)
+							msgName = fmt.Sprintf("DownlinkNASTransport (%s)", nasName)
 						}
 					}
 				}
@@ -836,6 +838,7 @@ func decodeNgapMessage(pdu *ngapType.NGAPPDU) (string, string, map[string]interf
 							nasName, nasSummary := parseNasHeader(ie.Value.NASPDU.Value)
 							details["NASPDU"] = nasName
 							summary = fmt.Sprintf("UL NAS: %s (%s)", nasName, nasSummary)
+							msgName = fmt.Sprintf("UplinkNASTransport (%s)", nasName)
 						}
 					}
 				}
@@ -856,6 +859,7 @@ func decodeNgapMessage(pdu *ngapType.NGAPPDU) (string, string, map[string]interf
 							nasName, nasSummary := parseNasHeader(ie.Value.NASPDU.Value)
 							details["NASPDU"] = nasName
 							summary = fmt.Sprintf("Initial Context Setup: %s", nasSummary)
+							msgName = fmt.Sprintf("InitialContextSetupRequest (%s)", nasName)
 						}
 					}
 				}
@@ -863,6 +867,24 @@ func decodeNgapMessage(pdu *ngapType.NGAPPDU) (string, string, map[string]interf
 		case ngapType.ProcedureCodePDUSessionResourceSetup:
 			msgName = "PDUSessionResourceSetupRequest"
 			summary = "PDU session setup request"
+			if initVal.Value.PDUSessionResourceSetupRequest != nil {
+				for _, ie := range initVal.Value.PDUSessionResourceSetupRequest.ProtocolIEs.List {
+					if ie.Id.Value == ngapType.ProtocolIEIDAMFUENGAPID {
+						details["AMFUENGAPID"] = ie.Value.AMFUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDRANUENGAPID {
+						details["RANUENGAPID"] = ie.Value.RANUENGAPID.Value
+					}
+					if ie.Id.Value == ngapType.ProtocolIEIDNASPDU {
+						if ie.Value.NASPDU != nil {
+							nasName, nasSummary := parseNasHeader(ie.Value.NASPDU.Value)
+							details["NASPDU"] = nasName
+							summary = fmt.Sprintf("PDU Session Setup: %s", nasSummary)
+							msgName = fmt.Sprintf("PDUSessionResourceSetupRequest (%s)", nasName)
+						}
+					}
+				}
+			}
 		case ngapType.ProcedureCodeHandoverPreparation:
 			msgName = "HandoverRequired"
 			summary = "Source gNB triggers N2 handover"
@@ -1055,9 +1077,72 @@ func parsePcapEvents(r io.Reader) ([]PcapEvent, error) {
 			if len(transportPayload) >= 4 {
 				srcPort = binary.BigEndian.Uint16(transportPayload[0:2])
 				dstPort = binary.BigEndian.Uint16(transportPayload[2:4])
+				
+				// Calculate TCP header length to find payload start
+				if len(transportPayload) >= 13 {
+					tcpHeaderLen := int((transportPayload[12] >> 4) & 0x0f) * 4
+					if len(transportPayload) >= tcpHeaderLen {
+						tcpPayload := transportPayload[tcpHeaderLen:]
+						if len(tcpPayload) > 0 {
+							payloadStr := string(tcpPayload)
+							// Check for HTTP/1.x signatures
+							if strings.HasPrefix(payloadStr, "GET ") ||
+								strings.HasPrefix(payloadStr, "POST ") ||
+								strings.HasPrefix(payloadStr, "PUT ") ||
+								strings.HasPrefix(payloadStr, "DELETE ") ||
+								strings.HasPrefix(payloadStr, "PATCH ") {
+								protocolName = "HTTP"
+								firstLine := payloadStr
+								if idx := strings.Index(payloadStr, "\r\n"); idx != -1 {
+									firstLine = payloadStr[:idx]
+								}
+								messageName = firstLine
+								summary = "HTTP SBI Request"
+							} else if strings.HasPrefix(payloadStr, "HTTP/1.") {
+								protocolName = "HTTP"
+								firstLine := payloadStr
+								if idx := strings.Index(payloadStr, "\r\n"); idx != -1 {
+									firstLine = payloadStr[:idx]
+								}
+								messageName = firstLine
+								summary = "HTTP SBI Response"
+							} else if strings.HasPrefix(payloadStr, "PRI * HTTP/2.0") {
+								protocolName = "HTTP"
+								messageName = "HTTP/2 Connection Preface"
+								summary = "HTTP/2 SBI connection init"
+							}
+						}
+					}
+				}
+				
+				// Fallback to port checking for 5G SBI control plane
+				if protocolName == "TCP" {
+					sbiPorts := map[uint16]string{
+						7777:  "Open5GS SBI",
+						29502: "AMF SBI",
+						29518: "UDM SBI",
+						29509: "AUSF SBI",
+						29505: "SMF SBI",
+						29503: "UDR SBI",
+						29504: "NSSF SBI",
+						29507: "PCF SBI",
+						29510: "NRF SBI",
+					}
+					if svc, ok := sbiPorts[srcPort]; ok {
+						protocolName = "HTTP"
+						messageName = fmt.Sprintf("SBI Message (%s)", svc)
+						summary = fmt.Sprintf("SBI outbound on port %d", srcPort)
+					} else if svc, ok := sbiPorts[dstPort]; ok {
+						protocolName = "HTTP"
+						messageName = fmt.Sprintf("SBI Message (%s)", svc)
+						summary = fmt.Sprintf("SBI inbound on port %d", dstPort)
+					}
+				}
 			}
-			messageName = "TCP Packet"
-			summary = fmt.Sprintf("TCP communication: port %d -> %d", srcPort, dstPort)
+			if protocolName == "TCP" {
+				messageName = "TCP Packet"
+				summary = fmt.Sprintf("TCP communication: port %d -> %d", srcPort, dstPort)
+			}
 		case 17: // UDP
 			protocolName = "UDP"
 			if len(transportPayload) >= 8 {
@@ -1149,7 +1234,13 @@ func parsePcapEvents(r io.Reader) ([]PcapEvent, error) {
 		})
 	}
 
-	return events, nil
+	var filtered []PcapEvent
+	for _, ev := range events {
+		if ev.Protocol == "NGAP" || ev.Protocol == "HTTP" {
+			filtered = append(filtered, ev)
+		}
+	}
+	return filtered, nil
 }
 
 func parseLogEvents(r io.Reader) []PcapEvent {
@@ -1196,6 +1287,51 @@ func parseLogEvents(r io.Reader) []PcapEvent {
 		} else if strings.Contains(msg, "Receive Ng Setup Response") || strings.Contains(msg, "NG Setup Response") {
 			proto = "NGAP"
 			msgName = "NGSetupResponse"
+			srcRole = "AMF"
+			dstRole = "gNB-Source"
+		} else if strings.Contains(msg, "Registration Request") {
+			proto = "NGAP"
+			msgName = "InitialUEMessage (Registration Request)"
+			srcRole = "gNB-Source"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "Registration Accept") {
+			proto = "NGAP"
+			msgName = "InitialContextSetupRequest (Registration Accept)"
+			srcRole = "AMF"
+			dstRole = "gNB-Source"
+		} else if strings.Contains(msg, "Registration Complete") {
+			proto = "NGAP"
+			msgName = "UplinkNASTransport (Registration Complete)"
+			srcRole = "gNB-Source"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "Authentication Request") {
+			proto = "NGAP"
+			msgName = "DownlinkNASTransport (Authentication Request)"
+			srcRole = "AMF"
+			dstRole = "gNB-Source"
+		} else if strings.Contains(msg, "Authentication Response") {
+			proto = "NGAP"
+			msgName = "UplinkNASTransport (Authentication Response)"
+			srcRole = "gNB-Source"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "Security Mode Command") {
+			proto = "NGAP"
+			msgName = "DownlinkNASTransport (Security Mode Command)"
+			srcRole = "AMF"
+			dstRole = "gNB-Source"
+		} else if strings.Contains(msg, "Security Mode Complete") {
+			proto = "NGAP"
+			msgName = "UplinkNASTransport (Security Mode Complete)"
+			srcRole = "gNB-Source"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "PDU Session Establishment Request") || strings.Contains(msg, "PDU Session Est. Request") {
+			proto = "NGAP"
+			msgName = "UplinkNASTransport (PDU Session Est. Request)"
+			srcRole = "gNB-Source"
+			dstRole = "AMF"
+		} else if strings.Contains(msg, "PDU Session Establishment Accept") || strings.Contains(msg, "PDU Session Est. Accept") {
+			proto = "NGAP"
+			msgName = "PDUSessionResourceSetupRequest (PDU Session Est. Accept)"
 			srcRole = "AMF"
 			dstRole = "gNB-Source"
 		} else if strings.Contains(msg, "initial UE message") || strings.Contains(msg, "Initial UE Message") {
@@ -1304,7 +1440,14 @@ func parseLogEvents(r io.Reader) []PcapEvent {
 			})
 		}
 	}
-	return events
+
+	var filtered []PcapEvent
+	for _, ev := range events {
+		if ev.Protocol == "NGAP" || ev.Protocol == "HTTP" {
+			filtered = append(filtered, ev)
+		}
+	}
+	return filtered
 }
 
 func handleParsePcap(w http.ResponseWriter, r *http.Request) {

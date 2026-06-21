@@ -5431,12 +5431,171 @@ export default function App() {
             {/* Left side: Sequence diagram canvas */}
             <div style={{
               flexGrow: 1,
-              overflow: 'auto',
-              padding: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
               borderRight: '1px solid var(--border-color)',
               background: theme === 'dark' ? '#0f172a' : '#fafafa'
             }}>
-              {callFlowLoading ? (
+              {/* KPI Dashboard Panel */}
+              {!callFlowLoading && callFlowEvents.length > 0 && (
+                <div style={{
+                  display: 'flex',
+                  gap: '12px',
+                  padding: '16px 20px',
+                  background: theme === 'dark' ? '#1e293b' : '#f1f5f9',
+                  borderBottom: '1px solid var(--border-color)',
+                  flexWrap: 'wrap'
+                }}>
+                  {/* KPI 1: Registration Delay */}
+                  {(() => {
+                    const req = callFlowEvents.find(e => 
+                      e.messageName.toLowerCase().includes("registration request") || 
+                      e.messageName.includes("InitialUEMessage")
+                    );
+                    const resp = callFlowEvents.find(e => 
+                      e.messageName.toLowerCase().includes("registration accept") || 
+                      e.messageName.toLowerCase().includes("registration complete") ||
+                      e.messageName.includes("InitialContextSetupRequest")
+                    );
+                    let delayStr = 'N/A';
+                    if (req && resp) {
+                      const t1 = new Date(req.timestamp).getTime();
+                      const t2 = new Date(resp.timestamp).getTime();
+                      if (!isNaN(t1) && !isNaN(t2) && t2 > t1) {
+                        delayStr = `${t2 - t1} ms`;
+                      }
+                    }
+                    return (
+                      <div style={{
+                        flex: '1 1 180px',
+                        background: theme === 'dark' ? '#0f172a' : '#ffffff',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '10px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                      }}>
+                        <span style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          5G Registration Delay
+                        </span>
+                        <span style={{ fontSize: '18px', fontWeight: 'bold', color: delayStr !== 'N/A' ? '#4ade80' : 'var(--text-muted)' }}>
+                          {delayStr}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* KPI 2: PDU Session Setup Delay */}
+                  {(() => {
+                    const req = callFlowEvents.find(e => 
+                      e.messageName.toLowerCase().includes("pdu session est. request") || 
+                      e.messageName.includes("PDUSessionResourceSetupRequest")
+                    );
+                    const resp = callFlowEvents.find(e => 
+                      e.messageName.toLowerCase().includes("pdu session est. accept") || 
+                      e.messageName.includes("PDUSessionResourceSetupResponse")
+                    );
+                    let delayStr = 'N/A';
+                    if (req && resp) {
+                      const t1 = new Date(req.timestamp).getTime();
+                      const t2 = new Date(resp.timestamp).getTime();
+                      if (!isNaN(t1) && !isNaN(t2) && t2 > t1) {
+                        delayStr = `${t2 - t1} ms`;
+                      }
+                    }
+                    return (
+                      <div style={{
+                        flex: '1 1 180px',
+                        background: theme === 'dark' ? '#0f172a' : '#ffffff',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '10px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                      }}>
+                        <span style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          PDU Session Setup Delay
+                        </span>
+                        <span style={{ fontSize: '18px', fontWeight: 'bold', color: delayStr !== 'N/A' ? '#60a5fa' : 'var(--text-muted)' }}>
+                          {delayStr}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* KPI 3: Handover Latency */}
+                  {(() => {
+                    const req = callFlowEvents.find(e => 
+                      e.messageName.includes("HandoverRequired") || 
+                      e.messageName.includes("HandoverRequest") ||
+                      e.messageName.includes("XN HANDOVER REQUEST")
+                    );
+                    const resp = callFlowEvents.find(e => 
+                      e.messageName.includes("HandoverNotify") || 
+                      e.messageName.includes("PathSwitchRequest") ||
+                      e.messageName.includes("XN UE CONTEXT RELEASE")
+                    );
+                    let delayStr = 'N/A';
+                    if (req && resp) {
+                      const t1 = new Date(req.timestamp).getTime();
+                      const t2 = new Date(resp.timestamp).getTime();
+                      if (!isNaN(t1) && !isNaN(t2) && t2 > t1) {
+                        delayStr = `${t2 - t1} ms`;
+                      }
+                    }
+                    return (
+                      <div style={{
+                        flex: '1 1 180px',
+                        background: theme === 'dark' ? '#0f172a' : '#ffffff',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '10px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                      }}>
+                        <span style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          Handover Interruption
+                        </span>
+                        <span style={{ fontSize: '18px', fontWeight: 'bold', color: delayStr !== 'N/A' ? '#fb923c' : 'var(--text-muted)' }}>
+                          {delayStr}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* KPI 4: Control Plane Signaling */}
+                  <div style={{
+                    flex: '1 1 180px',
+                    background: theme === 'dark' ? '#0f172a' : '#ffffff',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    padding: '10px 14px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px'
+                  }}>
+                    <span style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Signaling Statistics
+                    </span>
+                    <span style={{ fontSize: '13px', fontWeight: 'bold', display: 'flex', gap: '8px', marginTop: '3px' }}>
+                      <span style={{ color: '#c084fc' }}>{callFlowEvents.filter(e => e.protocol === 'NGAP').length} NGAP</span>
+                      <span style={{ color: '#60a5fa' }}>{callFlowEvents.filter(e => e.protocol === 'HTTP').length} HTTP</span>
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Scrollable Diagram Canvas */}
+              <div style={{
+                flexGrow: 1,
+                overflow: 'auto',
+                padding: '20px'
+              }}>
+                {callFlowLoading ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '12px' }}>
                   <RefreshCw className="animate-spin text-blue" size={32} />
                   <span style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>Parsing flow events...</span>
@@ -5632,6 +5791,7 @@ export default function App() {
                   </div>
                 </div>
               )}
+              </div>
             </div>
 
             {/* Right side: Detailed Frame Inspector */}
