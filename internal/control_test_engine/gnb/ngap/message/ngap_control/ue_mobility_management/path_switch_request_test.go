@@ -18,7 +18,8 @@ func TestBuildPathSwitchRequest(t *testing.T) {
 	gnbIp := []byte{10, 0, 0, 1}
 	dlTeid := []byte{0x00, 0x00, 0x00, 0x01}
 
-	pdu := BuildPathSwitchRequest(ranUeNgapID, amfUeNgapID, plmn, tac, pduSessionId, gnbIp, dlTeid)
+	gnbId := []byte{0x00, 0x00, 0x02} // Dummy target gNB ID (2)
+	pdu := BuildPathSwitchRequest(ranUeNgapID, amfUeNgapID, plmn, tac, pduSessionId, gnbIp, dlTeid, gnbId)
 
 	// Verify PDU type
 	if pdu.Present != ngapType.NGAPPDUPresentInitiatingMessage {
@@ -100,7 +101,8 @@ func TestGetPathSwitchRequest(t *testing.T) {
 	gnbIp := []byte{192, 168, 0, 1}
 	dlTeid := []byte{0x00, 0x00, 0x00, 0x42}
 
-	encoded, err := GetPathSwitchRequest(1, 200, plmn, tac, 1, gnbIp, dlTeid)
+	gnbId := []byte{0x00, 0x00, 0x02}
+	encoded, err := GetPathSwitchRequest(1, 200, plmn, tac, 1, gnbIp, dlTeid, gnbId)
 	if err != nil {
 		t.Fatalf("GetPathSwitchRequest encoding failed: %v", err)
 	}

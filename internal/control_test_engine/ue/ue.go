@@ -225,9 +225,10 @@ func TriggerHandover(ue *context.UEContext, targetGnbIp string, targetGnbPort in
 				val = v
 			}
 		}
-		triggerMsg[17] = byte((val >> 16) & 0xff)
-		triggerMsg[18] = byte((val >> 8) & 0xff)
-		triggerMsg[19] = byte(val & 0xff)
+		// Default TAC is 1 in OmniRAN-Emulator unless specifically known
+		triggerMsg[17] = 0x00
+		triggerMsg[18] = 0x00
+		triggerMsg[19] = 0x01
 
 		binary.BigEndian.PutUint64(triggerMsg[20:28], uint64(val))
 

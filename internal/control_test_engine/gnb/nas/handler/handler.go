@@ -355,6 +355,7 @@ func handlePathSwitchTrigger(ue *context.GNBUe, message []byte, gnb *context.GNB
 			pduSessionId,
 			gnbIpBytes,
 			dlTeid,
+			gnb.GetGnbIdInBytes(),
 		)
 		if err != nil {
 			log.Errorf("[GNB][NGAP] Error building Path Switch Request: %v", err)

@@ -6,12 +6,12 @@ import (
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
 
-func GetPathSwitchRequest(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, tac []byte, pduSessionId uint8, gnbIp []byte, dlTeid []byte) ([]byte, error) {
-	message := BuildPathSwitchRequest(ranUeNgapID, amfUeNgapID, plmn, tac, pduSessionId, gnbIp, dlTeid)
+func GetPathSwitchRequest(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, tac []byte, pduSessionId uint8, gnbIp []byte, dlTeid []byte, gnbId []byte) ([]byte, error) {
+	message := BuildPathSwitchRequest(ranUeNgapID, amfUeNgapID, plmn, tac, pduSessionId, gnbIp, dlTeid, gnbId)
 	return ngap.Encoder(message)
 }
 
-func BuildPathSwitchRequest(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, tac []byte, pduSessionId uint8, gnbIp []byte, dlTeid []byte) (pdu ngapType.NGAPPDU) {
+func BuildPathSwitchRequest(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, tac []byte, pduSessionId uint8, gnbIp []byte, dlTeid []byte, gnbId []byte) (pdu ngapType.NGAPPDU) {
 	pdu.Present = ngapType.NGAPPDUPresentInitiatingMessage
 	pdu.InitiatingMessage = new(ngapType.InitiatingMessage)
 
@@ -54,8 +54,17 @@ func BuildPathSwitchRequest(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, t
 	userLoc.UserLocationInformationNR = new(ngapType.UserLocationInformationNR)
 	userLocNR := userLoc.UserLocationInformationNR
 	userLocNR.NRCGI.PLMNIdentity.Value = plmn
+	// NRCellIdentity is 36 bits. We construct it by using the gnbId (24 bits = 3 bytes)
+	// and padding it with cell ID bits. (gnbId + 0x00 + 0x10)
+	cellIdBytes := make([]byte, 5)
+	if len(gnbId) >= 3 {
+		copy(cellIdBytes[0:3], gnbId[0:3])
+	}
+	cellIdBytes[3] = 0x00
+	cellIdBytes[4] = 0x10 // Cell ID 1 (36-bit: 24 bits gnb + 12 bits cell id)
+
 	userLocNR.NRCGI.NRCellIdentity.Value = aper.BitString{
-		Bytes:     []byte{0x00, 0x00, 0x00, 0x00, 0x10},
+		Bytes:     cellIdBytes,
 		BitLength: 36,
 	}
 	userLocNR.TAI.PLMNIdentity.Value = plmn

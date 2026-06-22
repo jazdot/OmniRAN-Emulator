@@ -1,9 +1,10 @@
 package ue_mobility_management
 
 import (
-	"encoding/hex"
 	"OmniRAN-Emulator/lib/aper"
 	"OmniRAN-Emulator/lib/ngap"
+	importModels "OmniRAN-Emulator/lib/openapi/models"
+	"OmniRAN-Emulator/lib/ngap/ngapConvert"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
 
@@ -79,8 +80,11 @@ func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targ
 	targetRANNodeID.GlobalRANNodeID.GlobalGNBID = new(ngapType.GlobalGNBID)
 	globalGNBID := targetRANNodeID.GlobalRANNodeID.GlobalGNBID
 
-	plmnBytes := getPlmnBytes(targetMcc, targetMnc)
-	globalGNBID.PLMNIdentity.Value = plmnBytes
+	plmnID := ngapConvert.PlmnIdToNgap(importModels.PlmnId{
+		Mcc: targetMcc,
+		Mnc: targetMnc,
+	})
+	globalGNBID.PLMNIdentity.Value = plmnID.Value
 	globalGNBID.GNBID.Present = ngapType.GNBIDPresentGNBID
 	globalGNBID.GNBID.GNBID = new(aper.BitString)
 	*globalGNBID.GNBID.GNBID = aper.BitString{
@@ -88,7 +92,7 @@ func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targ
 		BitLength: 24,
 	}
 
-	targetRANNodeID.SelectedTAI.PLMNIdentity.Value = plmnBytes
+	targetRANNodeID.SelectedTAI.PLMNIdentity.Value = plmnID.Value
 	targetRANNodeID.SelectedTAI.TAC.Value = targetTacVal
 
 	handoverRequiredIEs.List = append(handoverRequiredIEs.List, ie)
@@ -117,45 +121,14 @@ func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targ
 	ie.Criticality.Value = ngapType.CriticalityPresentReject
 	ie.Value.Present = ngapType.HandoverRequiredIEsPresentSourceToTargetTransparentContainer
 	ie.Value.SourceToTargetTransparentContainer = new(ngapType.SourceToTargetTransparentContainer)
-	// Add 4 dummy bytes RRC container to avoid being empty
-	ie.Value.SourceToTargetTransparentContainer.Value = []byte{0x00, 0x01, 0x02, 0x03}
+	// Use an empty byte slice or a properly formatted empty OCTET STRING
+	ie.Value.SourceToTargetTransparentContainer.Value = []byte{}
 	handoverRequiredIEs.List = append(handoverRequiredIEs.List, ie)
 
 	return
 }
 
-func getPlmnBytes(mccStr, mncStr string) []byte {
-	mcc := reverse(mccStr)
-	mnc := reverse(mncStr)
 
-	oct5 := mcc[0:2]
-	if len(mcc) >= 3 {
-		oct5 = mcc[1:3]
-	}
-	var oct6 string
-	var oct7 string
-	if len(mncStr) == 2 {
-		oct6 = "f" + string(mcc[0])
-		oct7 = mnc
-	} else {
-		oct6 = string(mnc[0]) + string(mcc[0])
-		oct7 = mnc[1:3]
-	}
-	res, _ := hex.DecodeString(oct5 + oct6 + oct7)
-	if len(res) < 3 {
-		// Fallback safe PLMN
-		return []byte{0x02, 0xf8, 0x39}
-	}
-	return res
-}
-
-func reverse(s string) string {
-	runes := []rune(s)
-	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
-		runes[i], runes[j] = runes[j], runes[i]
-	}
-	return string(runes)
-}
 
 func intTo3Bytes(val int64) []byte {
 	return []byte{
