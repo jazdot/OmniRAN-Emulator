@@ -28,10 +28,11 @@ func SendPduSessionResourceSetupResponse(ue *context.GNBUe, gnb *context.GNBCont
 	}
 }
 
-func SendInitialContextSetupResponse(ue *context.GNBUe) {
+func SendInitialContextSetupResponse(ue *context.GNBUe, gnb *context.GNBContext) {
 
 	// send Initial Context Setup Response.
-	ngapMsg, err := ue_context_management.InitialContextSetupResponse(ue)
+	gnbIp := gnb.GetGnbIpByData()
+	ngapMsg, err := ue_context_management.InitialContextSetupResponse(ue, gnbIp)
 	if err != nil {
 		log.Fatal("[GNB][NGAP] Error sending Initial Context Setup Response")
 	}
@@ -75,4 +76,19 @@ func SendPduSessionResourceReleaseResponse(ue *context.GNBUe, gnb *context.GNBCo
 		log.Warn("[GNB][AMF] Error sending PDU Session Resource Release Response: ", err)
 	}
 	log.Info("[GNB][NGAP][AMF] Sent PDU Session Resource Release Response.")
+}
+
+func SendPDUSessionResourceModifyResponse(ue *context.GNBUe, modifiedPduSessionIds []int64) {
+	ngapMsg, err := pdu_session_management.PDUSessionResourceModifyResponse(ue, modifiedPduSessionIds)
+	if err != nil {
+		log.Warn("[GNB][NGAP] Error building PDU Session Resource Modify Response: ", err)
+		return
+	}
+
+	conn := ue.GetSCTP()
+	err = sender.SendToAmF(ngapMsg, conn)
+	if err != nil {
+		log.Warn("[GNB][AMF] Error sending PDU Session Resource Modify Response: ", err)
+	}
+	log.Info("[GNB][NGAP][AMF] Sent PDU Session Resource Modify Response.")
 }

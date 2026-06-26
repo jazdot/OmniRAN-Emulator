@@ -6,12 +6,12 @@ import (
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
 
-func GetHandoverNotify(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, tac []byte) ([]byte, error) {
-	message := BuildHandoverNotify(ranUeNgapID, amfUeNgapID, plmn, tac)
+func GetHandoverNotify(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, tac []byte, gnbId []byte) ([]byte, error) {
+	message := BuildHandoverNotify(ranUeNgapID, amfUeNgapID, plmn, tac, gnbId)
 	return ngap.Encoder(message)
 }
 
-func BuildHandoverNotify(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, tac []byte) (pdu ngapType.NGAPPDU) {
+func BuildHandoverNotify(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, tac []byte, gnbId []byte) (pdu ngapType.NGAPPDU) {
 	pdu.Present = ngapType.NGAPPDUPresentInitiatingMessage
 	pdu.InitiatingMessage = new(ngapType.InitiatingMessage)
 
@@ -54,8 +54,15 @@ func BuildHandoverNotify(ranUeNgapID int64, amfUeNgapID int64, plmn []byte, tac 
 	userLoc.UserLocationInformationNR = new(ngapType.UserLocationInformationNR)
 	userLocNR := userLoc.UserLocationInformationNR
 	userLocNR.NRCGI.PLMNIdentity.Value = plmn
+	cellIdBytes := make([]byte, 5)
+	if len(gnbId) >= 3 {
+		copy(cellIdBytes[0:3], gnbId[0:3])
+	}
+	cellIdBytes[3] = 0x00
+	cellIdBytes[4] = 0x10 // Cell ID 1 (36-bit: 24 bits gnb + 12 bits cell id)
+
 	userLocNR.NRCGI.NRCellIdentity.Value = aper.BitString{
-		Bytes:     []byte{0x00, 0x00, 0x00, 0x00, 0x10},
+		Bytes:     cellIdBytes,
 		BitLength: 36,
 	}
 	userLocNR.TAI.PLMNIdentity.Value = plmn

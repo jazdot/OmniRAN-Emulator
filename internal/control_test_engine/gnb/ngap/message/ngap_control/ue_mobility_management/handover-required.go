@@ -116,13 +116,40 @@ func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targ
 	handoverRequiredIEs.List = append(handoverRequiredIEs.List, ie)
 
 	// SourceToTargetTransparentContainer
+	var container ngapType.SourceNGRANNodeToTargetNGRANNodeTransparentContainer
+	container.RRCContainer.Value = []byte{0x05, 0x06} // mock RRC bytes
+
+	container.TargetCellID.Present = ngapType.NGRANCGIPresentNRCGI
+	container.TargetCellID.NRCGI = new(ngapType.NRCGI)
+	container.TargetCellID.NRCGI.PLMNIdentity.Value = plmnID.Value
+	container.TargetCellID.NRCGI.NRCellIdentity.Value = aper.BitString{
+		Bytes:     []byte{0x00, 0x00, 0x00, 0x00, 0x10},
+		BitLength: 36,
+	}
+
+	container.UEHistoryInformation.List = make([]ngapType.LastVisitedCellItem, 1)
+	container.UEHistoryInformation.List[0].LastVisitedCellInformation.Present = ngapType.LastVisitedCellInformationPresentNGRANCell
+	container.UEHistoryInformation.List[0].LastVisitedCellInformation.NGRANCell = new(ngapType.LastVisitedNGRANCellInformation)
+	
+	ngranCell := container.UEHistoryInformation.List[0].LastVisitedCellInformation.NGRANCell
+	ngranCell.GlobalCellID.Present = ngapType.NGRANCGIPresentNRCGI
+	ngranCell.GlobalCellID.NRCGI = new(ngapType.NRCGI)
+	ngranCell.GlobalCellID.NRCGI.PLMNIdentity.Value = plmnID.Value
+	ngranCell.GlobalCellID.NRCGI.NRCellIdentity.Value = aper.BitString{
+		Bytes:     []byte{0x00, 0x00, 0x00, 0x00, 0x10},
+		BitLength: 36,
+	}
+	ngranCell.CellType.CellSize.Value = ngapType.CellSizePresentVerysmall
+	ngranCell.TimeUEStayedInCell.Value = 10
+
+	containerBytes, _ := aper.MarshalWithParams(container, "valueExt")
+
 	ie = ngapType.HandoverRequiredIEs{}
 	ie.Id.Value = ngapType.ProtocolIEIDSourceToTargetTransparentContainer
 	ie.Criticality.Value = ngapType.CriticalityPresentReject
 	ie.Value.Present = ngapType.HandoverRequiredIEsPresentSourceToTargetTransparentContainer
 	ie.Value.SourceToTargetTransparentContainer = new(ngapType.SourceToTargetTransparentContainer)
-	// Use an empty byte slice or a properly formatted empty OCTET STRING
-	ie.Value.SourceToTargetTransparentContainer.Value = []byte{}
+	ie.Value.SourceToTargetTransparentContainer.Value = containerBytes
 	handoverRequiredIEs.List = append(handoverRequiredIEs.List, ie)
 
 	return

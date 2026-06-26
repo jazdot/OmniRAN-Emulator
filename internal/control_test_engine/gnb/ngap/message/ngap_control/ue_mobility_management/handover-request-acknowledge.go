@@ -76,13 +76,16 @@ func BuildHandoverRequestAcknowledge(ranUeNgapID int64, amfUeNgapID int64, pduSe
 	handoverRequestAckIEs.List = append(handoverRequestAckIEs.List, ie)
 
 	// TargetToSourceTransparentContainer
+	var container ngapType.TargetNGRANNodeToSourceNGRANNodeTransparentContainer
+	container.RRCContainer.Value = []byte{0x00, 0x01, 0x02, 0x03}
+	containerBytes, _ := aper.MarshalWithParams(container, "valueExt")
+
 	ie = ngapType.HandoverRequestAcknowledgeIEs{}
 	ie.Id.Value = ngapType.ProtocolIEIDTargetToSourceTransparentContainer
 	ie.Criticality.Value = ngapType.CriticalityPresentIgnore
 	ie.Value.Present = ngapType.HandoverRequestAcknowledgeIEsPresentTargetToSourceTransparentContainer
 	ie.Value.TargetToSourceTransparentContainer = new(ngapType.TargetToSourceTransparentContainer)
-	// Add 4 dummy bytes RRC container to avoid being empty
-	ie.Value.TargetToSourceTransparentContainer.Value = []byte{0x00, 0x01, 0x02, 0x03}
+	ie.Value.TargetToSourceTransparentContainer.Value = containerBytes
 	handoverRequestAckIEs.List = append(handoverRequestAckIEs.List, ie)
 
 	return

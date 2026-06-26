@@ -299,6 +299,7 @@ func handleTargetAccessTrigger(ue *context.GNBUe, message []byte, gnb *context.G
 			amfUeId,
 			gnb.GetMccAndMncInOctets(),
 			gnb.GetTacInBytes(),
+			gnb.GetGnbIdInBytes(),
 		)
 		if err != nil {
 			log.Errorf("[GNB-Target][NGAP] Error building Handover Notify: %v", err)

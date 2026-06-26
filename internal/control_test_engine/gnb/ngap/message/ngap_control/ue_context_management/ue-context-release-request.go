@@ -5,12 +5,12 @@ import (
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
 
-func GetUEContextReleaseRequest(ranUeNgapID int64, amfUeNgapID int64) ([]byte, error) {
-	message := BuildUEContextReleaseRequest(ranUeNgapID, amfUeNgapID)
+func GetUEContextReleaseRequest(ranUeNgapID int64, amfUeNgapID int64, cause *ngapType.Cause) ([]byte, error) {
+	message := BuildUEContextReleaseRequest(ranUeNgapID, amfUeNgapID, cause)
 	return ngap.Encoder(message)
 }
 
-func BuildUEContextReleaseRequest(ranUeNgapID int64, amfUeNgapID int64) (pdu ngapType.NGAPPDU) {
+func BuildUEContextReleaseRequest(ranUeNgapID int64, amfUeNgapID int64, cause *ngapType.Cause) (pdu ngapType.NGAPPDU) {
 	pdu.Present = ngapType.NGAPPDUPresentInitiatingMessage
 	pdu.InitiatingMessage = new(ngapType.InitiatingMessage)
 
@@ -46,10 +46,14 @@ func BuildUEContextReleaseRequest(ranUeNgapID int64, amfUeNgapID int64) (pdu nga
 	ie.Id.Value = ngapType.ProtocolIEIDCause
 	ie.Criticality.Value = ngapType.CriticalityPresentIgnore
 	ie.Value.Present = ngapType.UEContextReleaseRequestIEsPresentCause
-	ie.Value.Cause = new(ngapType.Cause)
-	ie.Value.Cause.Present = ngapType.CausePresentRadioNetwork
-	ie.Value.Cause.RadioNetwork = new(ngapType.CauseRadioNetwork)
-	ie.Value.Cause.RadioNetwork.Value = ngapType.CauseRadioNetworkPresentUserInactivity
+	if cause != nil {
+		ie.Value.Cause = cause
+	} else {
+		ie.Value.Cause = new(ngapType.Cause)
+		ie.Value.Cause.Present = ngapType.CausePresentRadioNetwork
+		ie.Value.Cause.RadioNetwork = new(ngapType.CauseRadioNetwork)
+		ie.Value.Cause.RadioNetwork.Value = ngapType.CauseRadioNetworkPresentUserInactivity
+	}
 	releaseRequestIEs.List = append(releaseRequestIEs.List, ie)
 
 	return

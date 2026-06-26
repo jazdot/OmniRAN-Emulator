@@ -262,6 +262,71 @@ NGAP_SPEC_DB = {
             {"ie": "NewAMF-UE-NGAP-ID", "id": 40, "criticality": "ignore", "type": "INTEGER (0..1099511627775)"},
         ],
     },
+    "PDUSessionResourceModifyRequest": {
+        "reference": "TS 38.413 Section 9.2.1.6",
+        "procedure_code": 26,
+        "mandatory_ies": [
+            {"ie": "AMF-UE-NGAP-ID", "id": 10, "criticality": "reject", "type": "INTEGER"},
+            {"ie": "RAN-UE-NGAP-ID", "id": 85, "criticality": "reject", "type": "INTEGER"},
+            {"ie": "PDUSessionResourceModifyListModReq", "id": 64, "criticality": "reject", "type": "SEQUENCE OF"},
+        ],
+        "optional_ies": [],
+    },
+    "PDUSessionResourceModifyResponse": {
+        "reference": "TS 38.413 Section 9.2.1.7",
+        "procedure_code": 26,
+        "mandatory_ies": [
+            {"ie": "AMF-UE-NGAP-ID", "id": 10, "criticality": "ignore", "type": "INTEGER"},
+            {"ie": "RAN-UE-NGAP-ID", "id": 85, "criticality": "ignore", "type": "INTEGER"},
+        ],
+        "optional_ies": [
+            {"ie": "PDUSessionResourceModifyListModRes", "id": 65, "criticality": "ignore", "type": "SEQUENCE OF"},
+        ],
+    },
+    "HandoverRequest": {
+        "reference": "TS 38.413 Section 9.2.3.2",
+        "procedure_code": 23,
+        "mandatory_ies": [
+            {"ie": "AMF-UE-NGAP-ID", "id": 10, "criticality": "reject", "type": "INTEGER"},
+            {"ie": "HandoverType", "id": 29, "criticality": "reject", "type": "ENUMERATED"},
+            {"ie": "Cause", "id": 15, "criticality": "ignore", "type": "CHOICE"},
+            {"ie": "UESecurityCapabilities", "id": 119, "criticality": "reject", "type": "SEQUENCE"},
+            {"ie": "SecurityContext", "id": 93, "criticality": "reject", "type": "SEQUENCE"},
+            {"ie": "SourceToTarget-TransparentContainer", "id": 101, "criticality": "reject", "type": "OCTET STRING"},
+        ],
+        "optional_ies": [],
+    },
+    "HandoverRequestAcknowledge": {
+        "reference": "TS 38.413 Section 9.2.3.3",
+        "procedure_code": 23,
+        "mandatory_ies": [
+            {"ie": "AMF-UE-NGAP-ID", "id": 10, "criticality": "ignore", "type": "INTEGER"},
+            {"ie": "RAN-UE-NGAP-ID", "id": 85, "criticality": "ignore", "type": "INTEGER"},
+            {"ie": "TargetToSource-TransparentContainer", "id": 106, "criticality": "reject", "type": "OCTET STRING"},
+        ],
+        "optional_ies": [],
+    },
+    "HandoverCommand": {
+        "reference": "TS 38.413 Section 9.2.3.4",
+        "procedure_code": 0,
+        "mandatory_ies": [
+            {"ie": "AMF-UE-NGAP-ID", "id": 10, "criticality": "ignore", "type": "INTEGER"},
+            {"ie": "RAN-UE-NGAP-ID", "id": 85, "criticality": "ignore", "type": "INTEGER"},
+            {"ie": "HandoverType", "id": 29, "criticality": "reject", "type": "ENUMERATED"},
+            {"ie": "TargetToSource-TransparentContainer", "id": 106, "criticality": "reject", "type": "OCTET STRING"},
+        ],
+        "optional_ies": [],
+    },
+    "HandoverNotify": {
+        "reference": "TS 38.413 Section 9.2.3.7",
+        "procedure_code": 11,
+        "mandatory_ies": [
+            {"ie": "AMF-UE-NGAP-ID", "id": 10, "criticality": "ignore", "type": "INTEGER"},
+            {"ie": "RAN-UE-NGAP-ID", "id": 85, "criticality": "ignore", "type": "INTEGER"},
+            {"ie": "UserLocationInformation", "id": 121, "criticality": "ignore", "type": "CHOICE"},
+        ],
+        "optional_ies": [],
+    },
 }
 
 NAS_MESSAGE_DB = {
@@ -341,6 +406,54 @@ NAS_MESSAGE_DB = {
             {"ie": "SSCMode", "iei": "0x0A", "type": "TV"},
             {"ie": "ExtendedProtocolConfigurationOptions", "iei": "0x7B", "type": "TLV-E"},
         ],
+    },
+    "ConfigurationUpdateCommand": {
+        "reference": "TS 24.501 Section 8.2.19",
+        "message_type": "0x54",
+        "mandatory_ies": [],
+        "optional_ies": [
+            {"ie": "GUTI5G", "iei": "0x77", "type": "TLV-E"},
+            {"ie": "TAIList", "iei": "0x54", "type": "TLV"},
+            {"ie": "AllowedNSSAI", "iei": "0x15", "type": "TLV"},
+        ]
+    },
+    "ConfigurationUpdateComplete": {
+        "reference": "TS 24.501 Section 8.2.20",
+        "message_type": "0x55",
+        "mandatory_ies": [],
+        "optional_ies": []
+    },
+    "RegistrationReject": {
+        "reference": "TS 24.501 Section 8.2.7",
+        "message_type": "0x44",
+        "mandatory_ies": [
+            {"ie": "5GMMCause", "type": "UINT8", "description": "GMM cause value"}
+        ],
+        "optional_ies": []
+    },
+    "ServiceReject": {
+        "reference": "TS 24.501 Section 8.2.18",
+        "message_type": "0x4d",
+        "mandatory_ies": [
+            {"ie": "5GMMCause", "type": "UINT8", "description": "GMM cause value"}
+        ],
+        "optional_ies": []
+    },
+    "ServiceAccept": {
+        "reference": "TS 24.501 Section 8.2.17",
+        "message_type": "0x4e",
+        "mandatory_ies": [],
+        "optional_ies": [
+            {"ie": "PDUSessionStatus", "iei": "0x50", "type": "TLV"}
+        ]
+    },
+    "Status5GMM": {
+        "reference": "TS 24.501 Section 8.2.29",
+        "message_type": "0x64",
+        "mandatory_ies": [
+            {"ie": "5GMMCause", "type": "UINT8", "description": "GMM cause value"}
+        ],
+        "optional_ies": []
     },
 }
 

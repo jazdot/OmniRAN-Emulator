@@ -1051,7 +1051,7 @@ func handleUEAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		releaseMsg, err := ueContextMgmt.GetUEContextReleaseRequest(targetGnBUe.GetRanUeId(), targetGnBUe.GetAmfUeId())
+		releaseMsg, err := ueContextMgmt.GetUEContextReleaseRequest(targetGnBUe.GetRanUeId(), targetGnBUe.GetAmfUeId(), nil)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to build UE Context Release Request: %v", err), http.StatusInternalServerError)
 			return

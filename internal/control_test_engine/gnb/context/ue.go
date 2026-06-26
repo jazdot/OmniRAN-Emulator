@@ -386,6 +386,10 @@ func (p *PDUSession) GetPduSessionId() int64 {
 	return p.pduSessionId
 }
 
+func (p *PDUSession) GetQosId() int64 {
+	return p.qosId
+}
+
 func (ue *GNBUe) GetUeId() int {
 	conn := ue.unixSocketConnection
 	if conn != nil {

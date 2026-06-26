@@ -236,3 +236,40 @@ func HandlerIdentityRequest(ue *context.UEContext, message *nas.Message) {
 	sender.SendToGnb(ue, identityResponse)
 	log.Info("[UE][NAS] Identity Response sent")
 }
+
+func HandlerConfigurationUpdateCommand(ue *context.UEContext, message *nas.Message) {
+	log.Info("[UE][NAS] Handling Configuration Update Command")
+
+	configUpdateComplete, err := mm_5gs.ConfigurationUpdateComplete(ue)
+	if err != nil {
+		log.Errorf("[UE][NAS] Error encoding Configuration Update Complete: %v", err)
+		return
+	}
+
+	sender.SendToGnb(ue, configUpdateComplete)
+	log.Info("[UE][NAS] Configuration Update Complete sent back to network")
+}
+
+func HandlerRegistrationReject(ue *context.UEContext, message *nas.Message) {
+	cause := message.RegistrationReject.Cause5GMM.GetCauseValue()
+	log.Warnf("[UE][NAS] Registration Reject received, GMM Cause: %d", cause)
+	ue.SetStateMM_DEREGISTERED()
+	ue.SetStateSM_PDU_SESSION_INACTIVE()
+}
+
+func HandlerServiceAccept(ue *context.UEContext, message *nas.Message) {
+	log.Info("[UE][NAS] Service Accept received")
+	ue.SetStateMM_REGISTERED()
+}
+
+func HandlerServiceReject(ue *context.UEContext, message *nas.Message) {
+	cause := message.ServiceReject.Cause5GMM.GetCauseValue()
+	log.Warnf("[UE][NAS] Service Reject received, GMM Cause: %d", cause)
+	ue.SetStateMM_DEREGISTERED()
+	ue.SetStateSM_PDU_SESSION_INACTIVE()
+}
+
+func HandlerStatus5GMM(ue *context.UEContext, message *nas.Message) {
+	cause := message.Status5GMM.Cause5GMM.GetCauseValue()
+	log.Warnf("[UE][NAS] 5GMM Status message received. Cause: %d", cause)
+}

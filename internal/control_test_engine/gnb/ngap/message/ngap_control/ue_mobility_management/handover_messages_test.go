@@ -59,8 +59,9 @@ func TestHandoverNotify(t *testing.T) {
 	amfUeNgapID := int64(105)
 	plmn := []byte{0x02, 0xf8, 0x39}
 	tac := []byte{0x00, 0x00, 0x02}
+	gnbId := []byte{0x00, 0x00, 0x01}
 
-	encoded, err := GetHandoverNotify(ranUeNgapID, amfUeNgapID, plmn, tac)
+	encoded, err := GetHandoverNotify(ranUeNgapID, amfUeNgapID, plmn, tac, gnbId)
 	if err != nil {
 		t.Fatalf("Failed to encode HandoverNotify: %v", err)
 	}

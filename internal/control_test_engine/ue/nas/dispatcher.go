@@ -148,7 +148,7 @@ func DispatchNas(ue *context.UEContext, message []byte) {
 
 	case nas.MsgTypeConfigurationUpdateCommand:
 		log.Info("[UE][NAS] Receive Configuration Update Command")
-		// handler Configuration Update Command.
+		handler.HandlerConfigurationUpdateCommand(ue, m)
 
 	case nas.MsgTypeDLNASTransport:
 		// handler DL NAS Transport.
@@ -156,8 +156,20 @@ func DispatchNas(ue *context.UEContext, message []byte) {
 		handler.HandlerDlNasTransportPduaccept(ue, m)
 
 	case nas.MsgTypeRegistrationReject:
-		// handler registration reject
 		log.Info("[UE][NAS] Receive Registration Reject")
+		handler.HandlerRegistrationReject(ue, m)
+
+	case nas.MsgTypeServiceAccept:
+		log.Info("[UE][NAS] Receive Service Accept")
+		handler.HandlerServiceAccept(ue, m)
+
+	case nas.MsgTypeServiceReject:
+		log.Info("[UE][NAS] Receive Service Reject")
+		handler.HandlerServiceReject(ue, m)
+
+	case nas.MsgTypeStatus5GMM:
+		log.Info("[UE][NAS] Receive 5GMM Status")
+		handler.HandlerStatus5GMM(ue, m)
 
 	case nas.MsgTypeDeregistrationRequestUETerminatedDeregistration:
 		log.Info("[UE][NAS] Receive Deregistration Request (Network Terminated)")

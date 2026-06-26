@@ -85,6 +85,7 @@ func HandlerInitialContextSetupRequest(gnb *context.GNBContext, message *ngapTyp
 	var mobilityRestrict = "not informed"
 	var maskedImeisv string
 	// var securityKey []byte
+	var pduSessionListIE *ngapType.PDUSessionResourceSetupListCxtReq
 
 	valueMessage := message.InitiatingMessage.Value.InitialContextSetupRequest
 
@@ -92,6 +93,11 @@ func HandlerInitialContextSetupRequest(gnb *context.GNBContext, message *ngapTyp
 
 		// TODO MORE FIELDS TO CHECK HERE
 		switch ies.Id.Value {
+		case ngapType.ProtocolIEIDPDUSessionResourceSetupListCxtReq:
+			if ies.Value.PDUSessionResourceSetupListCxtReq == nil {
+				log.Fatal("[GNB][NGAP] PDU Session Resource Setup List Cxt Req is missing")
+			}
+			pduSessionListIE = ies.Value.PDUSessionResourceSetupListCxtReq
 
 		case ngapType.ProtocolIEIDAMFUENGAPID:
 			if ies.Value.AMFUENGAPID == nil {
@@ -196,6 +202,75 @@ func HandlerInitialContextSetupRequest(gnb *context.GNBContext, message *ngapTyp
 	// create UE context.
 	ue.CreateUeContext(mobilityRestrict, maskedImeisv, sst, sd)
 
+	// Process piggybacked PDU sessions if present
+	if pduSessionListIE != nil {
+		for _, item := range pduSessionListIE.List {
+			pduSessionId := item.PDUSessionID.Value
+			var sstVal string
+			var sdVal string
+			if item.SNSSAI.SD != nil {
+				sdVal = fmt.Sprintf("%x", item.SNSSAI.SD.Value)
+			} else {
+				sdVal = "not informed"
+			}
+			if item.SNSSAI.SST.Value != nil {
+				sstVal = fmt.Sprintf("%x", item.SNSSAI.SST.Value)
+			} else {
+				sstVal = "not informed"
+			}
+
+			var ulTeid uint32
+			var upfAddress []byte
+			var qosId int64
+			var fiveQi int64
+			var priArp int64
+			var pduSType uint64
+
+			if item.PDUSessionResourceSetupRequestTransfer != nil {
+				pdu := &ngapType.PDUSessionResourceSetupRequestTransfer{}
+				err := aper.UnmarshalWithParams(item.PDUSessionResourceSetupRequestTransfer, pdu, "valueExt")
+				if err == nil {
+					for _, transferIes := range pdu.ProtocolIEs.List {
+						switch transferIes.Id.Value {
+						case ngapType.ProtocolIEIDULNGUUPTNLInformation:
+							ulTeid = binary.BigEndian.Uint32(transferIes.Value.ULNGUUPTNLInformation.GTPTunnel.GTPTEID.Value)
+							upfAddress = transferIes.Value.ULNGUUPTNLInformation.GTPTunnel.TransportLayerAddress.Value.Bytes
+						case ngapType.ProtocolIEIDQosFlowSetupRequestList:
+							for _, itemsQos := range transferIes.Value.QosFlowSetupRequestList.List {
+								qosId = itemsQos.QosFlowIdentifier.Value
+								fiveQi = itemsQos.QosFlowLevelQosParameters.QosCharacteristics.NonDynamic5QI.FiveQI.Value
+								priArp = itemsQos.QosFlowLevelQosParameters.AllocationAndRetentionPriority.PriorityLevelARP.Value
+							}
+						case ngapType.ProtocolIEIDPDUSessionType:
+							pduSType = uint64(transferIes.Value.PDUSessionType.Value)
+						}
+					}
+				} else {
+					log.Info("[GNB][NGAP] Error in decode Pdu Session Resource Setup Request Transfer in CxtReq")
+				}
+			}
+
+			// allocate downlink TEID and IP for this PDU Session
+			teidDown := gnb.GetUeTeid()
+			gnb.StoreTeid(teidDown, ue)
+
+			ueGnbIpVal := gnb.GetRanUeIp()
+			ueGnbIp := net.IPv4(127, 0, 0, ueGnbIpVal)
+			gnb.StoreUeIp(ueGnbIp.String(), ue)
+
+			if ue.CreatePduSession(pduSessionId, sstVal, sdVal, pduSType, qosId, priArp, fiveQi, ulTeid, ueGnbIp, teidDown) != "" {
+				log.Info("[GNB][NGAP] Error in Pdu Session Setup in CxtReq: Slice not found")
+			} else {
+				log.Info("[GNB][NGAP][UE] PDU Session ", pduSessionId, " created successfully in Initial Context Setup")
+			}
+
+			if gnb.GetUpfIp() == "" && len(upfAddress) >= 4 {
+				upfIp := fmt.Sprintf("%d.%d.%d.%d", upfAddress[0], upfAddress[1], upfAddress[2], upfAddress[3])
+				gnb.SetUpfIp(upfIp)
+			}
+		}
+	}
+
 	// show UE context.
 	log.Info("[GNB][UE] UE Context was created with successful")
 	log.Info("[GNB][UE] UE RAN ID ", ue.GetRanUeId())
@@ -228,7 +303,7 @@ func HandlerInitialContextSetupRequest(gnb *context.GNBContext, message *ngapTyp
 
 	// send Initial Context Setup Response.
 	log.Info("[GNB][NGAP][AMF] Send Initial Context Setup Response.")
-	trigger.SendInitialContextSetupResponse(ue)
+	trigger.SendInitialContextSetupResponse(ue, gnb)
 }
 
 func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *ngapType.NGAPPDU) {
@@ -987,6 +1062,58 @@ func HandlerUeContextReleaseCommand(gnb *context.GNBContext, message *ngapType.N
 	} else {
 		log.Infof("[GNB-Source][AMF] UE Context Release Complete sent successfully")
 	}
+}
+
+func HandlerPDUSessionResourceModifyRequest(gnb *context.GNBContext, message *ngapType.NGAPPDU) {
+	var ranUeId int64
+	var amfUeId int64
+	var messageNas []byte
+	var pduSessionIds []int64
+
+	valueMessage := message.InitiatingMessage.Value.PDUSessionResourceModifyRequest
+	if valueMessage == nil {
+		log.Warn("[GNB][NGAP] PDU Session Resource Modify Request value is nil")
+		return
+	}
+
+	for _, ies := range valueMessage.ProtocolIEs.List {
+		switch ies.Id.Value {
+		case ngapType.ProtocolIEIDAMFUENGAPID:
+			if ies.Value.AMFUENGAPID != nil {
+				amfUeId = ies.Value.AMFUENGAPID.Value
+			}
+		case ngapType.ProtocolIEIDRANUENGAPID:
+			if ies.Value.RANUENGAPID != nil {
+				ranUeId = ies.Value.RANUENGAPID.Value
+			}
+		case ngapType.ProtocolIEIDPDUSessionResourceModifyListModReq:
+			if ies.Value.PDUSessionResourceModifyListModReq != nil {
+				for _, item := range ies.Value.PDUSessionResourceModifyListModReq.List {
+					pduSessionIds = append(pduSessionIds, item.PDUSessionID.Value)
+					if item.NASPDU != nil {
+						messageNas = item.NASPDU.Value
+					}
+				}
+			}
+		}
+	}
+
+	ue, err := gnb.GetGnbUe(ranUeId)
+	if err != nil || ue == nil {
+		log.Warn("[GNB][NGAP] PDU Session Resource Modify Request: RAN UE NGAP ID not found, ranUeId=", ranUeId)
+		return
+	}
+
+	_ = amfUeId
+
+	// Forward NAS PDU Session Modification Command to the UE
+	if messageNas != nil {
+		log.Info("[GNB][NGAP][UE] Forwarding PDU Session Modification NAS to UE")
+		sender.SendToUe(ue, messageNas)
+	}
+
+	// Send PDU Session Resource Modify Response back to AMF
+	trigger.SendPDUSessionResourceModifyResponse(ue, pduSessionIds)
 }
 
 
