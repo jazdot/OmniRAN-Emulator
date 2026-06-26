@@ -139,7 +139,7 @@ func BuildInitialUEMessage(ranUeNgapID int64, nasPdu []byte, fiveGSTmsi string, 
 }
 
 func SendInitialUeMessage(registrationRequest []byte, ue *context.GNBUe, gnb *context.GNBContext) ([]byte, error) {
-	sendMsg, err := GetInitialUEMessage(ue.GetRanUeId(), registrationRequest, "", gnb.GetMccAndMncInOctets(), gnb.GetTacInBytes(), ngapType.RRCEstablishmentCausePresentMoSignalling)
+	sendMsg, err := GetInitialUEMessage(ue.GetRanUeId(), registrationRequest, "", gnb.GetMccAndMncInOctets(), gnb.GetTacInBytes(), int(ngapType.RRCEstablishmentCausePresentMoSignalling))
 	if err != nil {
 		return nil, fmt.Errorf("Error in %d ue initial message", ue.GetRanUeId())
 	}
