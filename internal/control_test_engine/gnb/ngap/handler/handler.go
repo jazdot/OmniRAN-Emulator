@@ -428,6 +428,7 @@ func HandlerPduSessionResourceReleaseCommand(gnb *context.GNBContext, message *n
 	var ranUeId int64
 	var amfUeId int64
 	var messageNas []byte
+	var pduSessionIds []int64
 
 	valueMessage := message.InitiatingMessage.Value.PDUSessionResourceReleaseCommand
 
@@ -444,6 +445,12 @@ func HandlerPduSessionResourceReleaseCommand(gnb *context.GNBContext, message *n
 		case ngapType.ProtocolIEIDNASPDU:
 			if ies.Value.NASPDU != nil {
 				messageNas = ies.Value.NASPDU.Value
+			}
+		case ngapType.ProtocolIEIDPDUSessionResourceToReleaseListRelCmd:
+			if ies.Value.PDUSessionResourceToReleaseListRelCmd != nil {
+				for _, item := range ies.Value.PDUSessionResourceToReleaseListRelCmd.List {
+					pduSessionIds = append(pduSessionIds, item.PDUSessionID.Value)
+				}
 			}
 		}
 	}
@@ -464,7 +471,7 @@ func HandlerPduSessionResourceReleaseCommand(gnb *context.GNBContext, message *n
 	}
 
 	// Send NGAP PDU Session Resource Release Response back to AMF
-	trigger.SendPduSessionResourceReleaseResponse(ue, gnb)
+	trigger.SendPduSessionResourceReleaseResponse(ue, gnb, pduSessionIds)
 }
 
 func HandlerNgSetupResponse(amf *context.GNBAmf, gnb *context.GNBContext, message *ngapType.NGAPPDU) {

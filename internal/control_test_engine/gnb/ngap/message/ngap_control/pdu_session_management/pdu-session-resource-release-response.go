@@ -2,6 +2,7 @@ package pdu_session_management
 
 import (
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	"OmniRAN-Emulator/lib/aper"
 	"OmniRAN-Emulator/lib/ngap"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 	"fmt"
@@ -9,8 +10,9 @@ import (
 
 // PDUSessionResourceReleaseResponse builds the NGAP PDU Session Resource Release Response
 // sent by the gNB to the AMF after receiving and processing a PDU Session Resource Release Command.
-func PDUSessionResourceReleaseResponse(ue *context.GNBUe) ([]byte, error) {
-	pdu := buildPDUSessionResourceReleaseResponse(ue.GetAmfUeId(), ue.GetRanUeId())
+// Per TS 38.413, the response MUST include the PDUSessionResourceReleasedListRelRes IE.
+func PDUSessionResourceReleaseResponse(ue *context.GNBUe, pduSessionIds []int64) ([]byte, error) {
+	pdu := buildPDUSessionResourceReleaseResponse(ue.GetAmfUeId(), ue.GetRanUeId(), pduSessionIds)
 	encoded, err := ngap.Encoder(pdu)
 	if err != nil {
 		return nil, fmt.Errorf("error encoding PDU Session Resource Release Response: %w", err)
@@ -18,7 +20,7 @@ func PDUSessionResourceReleaseResponse(ue *context.GNBUe) ([]byte, error) {
 	return encoded, nil
 }
 
-func buildPDUSessionResourceReleaseResponse(amfUeNgapID, ranUeNgapID int64) (pdu ngapType.NGAPPDU) {
+func buildPDUSessionResourceReleaseResponse(amfUeNgapID, ranUeNgapID int64, pduSessionIds []int64) (pdu ngapType.NGAPPDU) {
 	pdu.Present = ngapType.NGAPPDUPresentSuccessfulOutcome
 	pdu.SuccessfulOutcome = new(ngapType.SuccessfulOutcome)
 	successfulOutcome := pdu.SuccessfulOutcome
@@ -53,5 +55,34 @@ func buildPDUSessionResourceReleaseResponse(amfUeNgapID, ranUeNgapID int64) (pdu
 		respIEs.List = append(respIEs.List, ie)
 	}
 
+	// PDU Session Resource Released List (Mandatory per TS 38.413 §9.2.3.6)
+	{
+		ie := ngapType.PDUSessionResourceReleaseResponseIEs{}
+		ie.Id.Value = ngapType.ProtocolIEIDPDUSessionResourceReleasedListRelRes
+		ie.Criticality.Value = ngapType.CriticalityPresentIgnore
+		ie.Value.Present = ngapType.PDUSessionResourceReleaseResponseIEsPresentPDUSessionResourceReleasedListRelRes
+		ie.Value.PDUSessionResourceReleasedListRelRes = new(ngapType.PDUSessionResourceReleasedListRelRes)
+
+		releasedList := ie.Value.PDUSessionResourceReleasedListRelRes
+
+		for _, sessionId := range pduSessionIds {
+			// Build an empty PDUSessionResourceReleaseResponseTransfer and APER-encode it
+			transfer := ngapType.PDUSessionResourceReleaseResponseTransfer{}
+			transferBytes, err := aper.MarshalWithParams(transfer, "valueExt")
+			if err != nil {
+				// Fallback: use a minimal valid APER encoding (single zero byte)
+				transferBytes = []byte{0x00}
+			}
+
+			item := ngapType.PDUSessionResourceReleasedItemRelRes{}
+			item.PDUSessionID.Value = sessionId
+			item.PDUSessionResourceReleaseResponseTransfer = transferBytes
+			releasedList.List = append(releasedList.List, item)
+		}
+
+		respIEs.List = append(respIEs.List, ie)
+	}
+
 	return pdu
 }
+

@@ -61,9 +61,9 @@ func SendNgSetupRequest(gnb *context.GNBContext, amf *context.GNBAmf) {
 
 }
 
-func SendPduSessionResourceReleaseResponse(ue *context.GNBUe, gnb *context.GNBContext) {
+func SendPduSessionResourceReleaseResponse(ue *context.GNBUe, gnb *context.GNBContext, pduSessionIds []int64) {
 	_ = gnb // reserved for future per-gnb routing
-	ngapMsg, err := pdu_session_management.PDUSessionResourceReleaseResponse(ue)
+	ngapMsg, err := pdu_session_management.PDUSessionResourceReleaseResponse(ue, pduSessionIds)
 	if err != nil {
 		log.Warn("[GNB][NGAP] Error building PDU Session Resource Release Response: ", err)
 		return

@@ -3,6 +3,8 @@ package sender
 import (
 	"fmt"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 	"github.com/ishidawataru/sctp"
 	"OmniRAN-Emulator/internal/chaos"
 	gnbContext "OmniRAN-Emulator/internal/control_test_engine/gnb/context"
@@ -78,7 +80,27 @@ func getNgapMsgType(message []byte) string {
 	return "NGAP-Message"
 }
 
-func SendToAmF(message []byte, conn *sctp.SCTPConn) error {
+// isUeAssociatedMessage returns true if the NGAP message type is UE-associated
+// signalling, which per TS 38.412 §7 must be sent on SCTP stream 1+.
+// Non-UE-associated signalling (NGSetup) uses stream 0.
+func isUeAssociatedMessage(msgType string) bool {
+	switch msgType {
+	case "NGSetupRequest", "NGSetupResponse", "NGSetupFailure":
+		return false
+	case "Unknown", "NGAP-Message":
+		// Conservative: treat unknown messages as non-UE-associated
+		return false
+	default:
+		// All other known messages (InitialUEMessage, UplinkNASTransport,
+		// InitialContextSetupResponse, PDUSessionResourceSetupResponse,
+		// HandoverRequired, PathSwitchRequest, HandoverRequest,
+		// PathSwitchRequestAcknowledge, etc.) are UE-associated.
+		return true
+	}
+}
+
+// sendToAmfOnStream sends an NGAP message on the specified SCTP stream.
+func sendToAmfOnStream(message []byte, conn *sctp.SCTPConn, stream uint16) error {
 	if conn == nil {
 		return fmt.Errorf("SCTPConn is nil")
 	}
@@ -97,7 +119,7 @@ func SendToAmF(message []byte, conn *sctp.SCTPConn) error {
 	}
 
 	info := &sctp.SndRcvInfo{
-		Stream: uint16(0),
+		Stream: stream,
 		PPID:   ngapSctp.NGAP_PPID,
 	}
 
@@ -107,4 +129,25 @@ func SendToAmF(message []byte, conn *sctp.SCTPConn) error {
 	}
 
 	return nil
+}
+
+// SendToAmF sends an NGAP message to the AMF, automatically selecting the
+// correct SCTP stream per TS 38.412: stream 0 for non-UE-associated signalling
+// (NGSetup), stream 1 for UE-associated signalling (all other messages).
+func SendToAmF(message []byte, conn *sctp.SCTPConn) error {
+	msgType := getNgapMsgType(message)
+	stream := uint16(0)
+	if isUeAssociatedMessage(msgType) {
+		stream = uint16(1)
+		log.Debugf("[GNB][SCTP] Sending %s on UE-associated stream %d", msgType, stream)
+	} else {
+		log.Debugf("[GNB][SCTP] Sending %s on non-UE-associated stream %d", msgType, stream)
+	}
+	return sendToAmfOnStream(message, conn, stream)
+}
+
+// SendToAmfUeAssociated sends a UE-associated NGAP message on SCTP stream 1.
+// Use this when the caller explicitly knows the message is UE-associated.
+func SendToAmfUeAssociated(message []byte, conn *sctp.SCTPConn) error {
+	return sendToAmfOnStream(message, conn, uint16(1))
 }

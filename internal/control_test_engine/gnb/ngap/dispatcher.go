@@ -61,6 +61,24 @@ func Dispatch(amf *context.GNBAmf, gnb *context.GNBContext, message []byte) {
 		case ngapType.ProcedureCodeUEContextRelease:
 			log.Info("[GNB][NGAP] Receive UE Context Release Command")
 			handler.HandlerUeContextReleaseCommand(gnb, ngapMsg)
+
+		case ngapType.ProcedureCodeAMFConfigurationUpdate:
+			log.Info("[GNB][NGAP] Receive AMF Configuration Update (acknowledged)")
+			// TODO: Process updated AMF configuration and send AMFConfigurationUpdateAcknowledge
+
+		case ngapType.ProcedureCodeNGReset:
+			log.Info("[GNB][NGAP] Receive NG Reset")
+			// TODO: Process reset and send NGResetAcknowledge
+
+		case ngapType.ProcedureCodeErrorIndication:
+			log.Warn("[GNB][NGAP] Receive Error Indication from AMF")
+			// Log and continue — no response needed for Error Indication
+
+		case ngapType.ProcedureCodeOverloadStart:
+			log.Warn("[GNB][NGAP] Receive Overload Start from AMF")
+
+		case ngapType.ProcedureCodeOverloadStop:
+			log.Info("[GNB][NGAP] Receive Overload Stop from AMF")
 		}
 
 	case ngapType.NGAPPDUPresentSuccessfulOutcome:

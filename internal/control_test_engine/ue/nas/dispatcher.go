@@ -133,8 +133,8 @@ func DispatchNas(ue *context.UEContext, message []byte) {
 		handler.HandlerAuthenticationReject(ue, m)
 
 	case nas.MsgTypeIdentityRequest:
-		log.Info("[UE][NAS] Receive Identify Request")
-		// handler identity request.
+		log.Info("[UE][NAS] Receive Identity Request")
+		handler.HandlerIdentityRequest(ue, m)
 
 	case nas.MsgTypeSecurityModeCommand:
 		// handler security mode command.

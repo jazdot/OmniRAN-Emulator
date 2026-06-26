@@ -226,3 +226,13 @@ func HandlerDeregistrationRequestUETerminatedDeregistration(ue *context.UEContex
 
 	log.Warn("[UE][NAS] Deregistration completed. UE state set to DEREGISTERED")
 }
+
+func HandlerIdentityRequest(ue *context.UEContext, message *nas.Message) {
+	identityType := message.IdentityRequest.SpareHalfOctetAndIdentityType.GetTypeOfIdentity()
+	log.Infof("[UE][NAS] Identity Request received for type: %d", identityType)
+
+	identityResponse := mm_5gs.IdentityResponse(ue, identityType)
+
+	sender.SendToGnb(ue, identityResponse)
+	log.Info("[UE][NAS] Identity Response sent")
+}
