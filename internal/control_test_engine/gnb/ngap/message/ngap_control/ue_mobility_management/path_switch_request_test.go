@@ -3,6 +3,7 @@ package ue_mobility_management
 import (
 	"testing"
 
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control"
 	"OmniRAN-Emulator/lib/ngap"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
@@ -20,6 +21,10 @@ func TestBuildPathSwitchRequest(t *testing.T) {
 
 	gnbId := []byte{0x00, 0x00, 0x02} // Dummy target gNB ID (2)
 	pdu := BuildPathSwitchRequest(ranUeNgapID, amfUeNgapID, plmn, tac, pduSessionId, gnbIp, dlTeid, gnbId)
+
+	if err := ngap_control.ValidateNGAPMessage(&pdu); err != nil {
+		t.Errorf("BuildPathSwitchRequest failed 3GPP schema validation: %v", err)
+	}
 
 	// Verify PDU type
 	if pdu.Present != ngapType.NGAPPDUPresentInitiatingMessage {
@@ -114,6 +119,9 @@ func TestGetPathSwitchRequest(t *testing.T) {
 	pdu, err := ngap.Decoder(encoded)
 	if err != nil {
 		t.Fatalf("ngap.Decoder failed on encoded message: %v", err)
+	}
+	if err := ngap_control.ValidateNGAPMessage(pdu); err != nil {
+		t.Errorf("GetPathSwitchRequest failed 3GPP schema validation: %v", err)
 	}
 	if pdu.Present != ngapType.NGAPPDUPresentInitiatingMessage {
 		t.Errorf("decoded PDU present mismatch: got %d", pdu.Present)

@@ -3,6 +3,7 @@ package ue_mobility_management
 import (
 	"testing"
 
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control"
 	"OmniRAN-Emulator/lib/ngap"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
@@ -25,6 +26,10 @@ func TestHandoverRequired(t *testing.T) {
 	pdu, err := ngap.Decoder(encoded)
 	if err != nil {
 		t.Fatalf("Failed to decode HandoverRequired: %v", err)
+	}
+
+	if err := ngap_control.ValidateNGAPMessage(pdu); err != nil {
+		t.Errorf("HandoverRequired failed 3GPP schema validation: %v", err)
 	}
 
 	if pdu.Present != ngapType.NGAPPDUPresentInitiatingMessage {
@@ -50,6 +55,10 @@ func TestHandoverRequestAcknowledge(t *testing.T) {
 		t.Fatalf("Failed to decode HandoverRequestAcknowledge: %v", err)
 	}
 
+	if err := ngap_control.ValidateNGAPMessage(pdu); err != nil {
+		t.Errorf("HandoverRequestAcknowledge failed 3GPP schema validation: %v", err)
+	}
+
 	if pdu.Present != ngapType.NGAPPDUPresentSuccessfulOutcome {
 		t.Errorf("Expected SuccessfulOutcome, got %v", pdu.Present)
 	}
@@ -70,6 +79,10 @@ func TestHandoverNotify(t *testing.T) {
 	pdu, err := ngap.Decoder(encoded)
 	if err != nil {
 		t.Fatalf("Failed to decode HandoverNotify: %v", err)
+	}
+
+	if err := ngap_control.ValidateNGAPMessage(pdu); err != nil {
+		t.Errorf("HandoverNotify failed 3GPP schema validation: %v", err)
 	}
 
 	if pdu.Present != ngapType.NGAPPDUPresentInitiatingMessage {
