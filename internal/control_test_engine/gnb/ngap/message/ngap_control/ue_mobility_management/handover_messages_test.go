@@ -15,8 +15,9 @@ func TestHandoverRequired(t *testing.T) {
 	targetGnbIdVal := int64(2)
 	targetTacVal := []byte{0x00, 0x00, 0x02}
 	pduSessionId := uint8(1)
+	sourceGnbId := []byte{0x00, 0x00, 0x01}
 
-	encoded, err := GetHandoverRequired(ranUeNgapID, amfUeNgapID, targetMcc, targetMnc, targetGnbIdVal, targetTacVal, pduSessionId)
+	encoded, err := GetHandoverRequired(ranUeNgapID, amfUeNgapID, targetMcc, targetMnc, targetGnbIdVal, targetTacVal, pduSessionId, sourceGnbId)
 	if err != nil {
 		t.Fatalf("Failed to encode HandoverRequired: %v", err)
 	}

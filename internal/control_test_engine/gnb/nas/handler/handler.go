@@ -126,6 +126,7 @@ func handleN2HandoverTrigger(ue *context.GNBUe, message []byte, gnb *context.GNB
 			targetGnbIdVal,
 			targetTacVal,
 			pduSessionId,
+			gnb.GetGnbIdInBytes(),
 		)
 		if err != nil {
 			log.Errorf("[GNB-Source][NGAP] Error building Handover Required: %v", err)

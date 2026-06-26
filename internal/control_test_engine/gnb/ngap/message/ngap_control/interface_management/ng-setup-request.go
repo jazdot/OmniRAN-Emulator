@@ -45,7 +45,7 @@ func BuildNGSetupRequest(gnb *context.GNBContext) (pdu ngapType.NGAPPDU) {
 	gNBID := globalGNBID.GNBID.GNBID
 
 	*gNBID = aper.BitString{
-		Bytes:     []byte{0x45, 0x46, 0x47},
+		Bytes:     gnb.GetGnbIdInBytes(),
 		BitLength: 24,
 	}
 	nGSetupRequestIEs.List = append(nGSetupRequestIEs.List, ie)

@@ -8,12 +8,12 @@ import (
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
 
-func GetHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targetMnc string, targetGnbIdVal int64, targetTacVal []byte, pduSessionId uint8) ([]byte, error) {
-	message := BuildHandoverRequired(ranUeNgapID, amfUeNgapID, targetMcc, targetMnc, targetGnbIdVal, targetTacVal, pduSessionId)
+func GetHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targetMnc string, targetGnbIdVal int64, targetTacVal []byte, pduSessionId uint8, sourceGnbId []byte) ([]byte, error) {
+	message := BuildHandoverRequired(ranUeNgapID, amfUeNgapID, targetMcc, targetMnc, targetGnbIdVal, targetTacVal, pduSessionId, sourceGnbId)
 	return ngap.Encoder(message)
 }
 
-func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targetMnc string, targetGnbIdVal int64, targetTacVal []byte, pduSessionId uint8) (pdu ngapType.NGAPPDU) {
+func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targetMnc string, targetGnbIdVal int64, targetTacVal []byte, pduSessionId uint8, sourceGnbId []byte) (pdu ngapType.NGAPPDU) {
 	pdu.Present = ngapType.NGAPPDUPresentInitiatingMessage
 	pdu.InitiatingMessage = new(ngapType.InitiatingMessage)
 
@@ -122,8 +122,14 @@ func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targ
 	container.TargetCellID.Present = ngapType.NGRANCGIPresentNRCGI
 	container.TargetCellID.NRCGI = new(ngapType.NRCGI)
 	container.TargetCellID.NRCGI.PLMNIdentity.Value = plmnID.Value
+	targetCellBytes := make([]byte, 5)
+	targetGnbBytes := intTo3Bytes(targetGnbIdVal)
+	copy(targetCellBytes[0:3], targetGnbBytes[0:3])
+	targetCellBytes[3] = 0x00
+	targetCellBytes[4] = 0x10 // Cell ID 1 (36-bit: 24 bits gnb + 12 bits cell id)
+
 	container.TargetCellID.NRCGI.NRCellIdentity.Value = aper.BitString{
-		Bytes:     []byte{0x00, 0x00, 0x00, 0x00, 0x10},
+		Bytes:     targetCellBytes,
 		BitLength: 36,
 	}
 
@@ -135,8 +141,15 @@ func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targ
 	ngranCell.GlobalCellID.Present = ngapType.NGRANCGIPresentNRCGI
 	ngranCell.GlobalCellID.NRCGI = new(ngapType.NRCGI)
 	ngranCell.GlobalCellID.NRCGI.PLMNIdentity.Value = plmnID.Value
+	sourceCellBytes := make([]byte, 5)
+	if len(sourceGnbId) >= 3 {
+		copy(sourceCellBytes[0:3], sourceGnbId[0:3])
+	}
+	sourceCellBytes[3] = 0x00
+	sourceCellBytes[4] = 0x10 // Cell ID 1 (36-bit: 24 bits gnb + 12 bits cell id)
+
 	ngranCell.GlobalCellID.NRCGI.NRCellIdentity.Value = aper.BitString{
-		Bytes:     []byte{0x00, 0x00, 0x00, 0x00, 0x10},
+		Bytes:     sourceCellBytes,
 		BitLength: 36,
 	}
 	ngranCell.CellType.CellSize.Value = ngapType.CellSizePresentVerysmall

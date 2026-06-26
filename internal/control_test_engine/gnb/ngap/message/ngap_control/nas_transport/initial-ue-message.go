@@ -146,12 +146,22 @@ func BuildInitialUEMessage(ranUeNgapID int64, nasPdu []byte, fiveGSTmsi string, 
 }
 
 func SendInitialUeMessage(registrationRequest []byte, ue *context.GNBUe, gnb *context.GNBContext) ([]byte, error) {
-	sendMsg, err := GetInitialUEMessage(ue.GetRanUeId(), registrationRequest, "", gnb.GetMccAndMncInOctets(), gnb.GetTacInBytes(), int(ngapType.RRCEstablishmentCausePresentMoSignalling), gnb.GetGnbIdInBytes())
+	activeRel := config.GetActiveRelease()
+	rrcCause := int(ngapType.RRCEstablishmentCausePresentMoSignalling)
+	switch activeRel {
+	case "17":
+		rrcCause = int(ngapType.RRCEstablishmentCausePresentMtAccess)
+	case "18":
+		rrcCause = int(ngapType.RRCEstablishmentCausePresentHighPriorityAccess)
+	case "19":
+		rrcCause = int(ngapType.RRCEstablishmentCausePresentMoVoiceCall)
+	}
+
+	sendMsg, err := GetInitialUEMessage(ue.GetRanUeId(), registrationRequest, "", gnb.GetMccAndMncInOctets(), gnb.GetTacInBytes(), rrcCause, gnb.GetGnbIdInBytes())
 	if err != nil {
 		return nil, fmt.Errorf("Error in %d ue initial message", ue.GetRanUeId())
 	}
 
-	activeRel := config.GetActiveRelease()
 	log.WithFields(log.Fields{
 		"protocol":    "NGAP",
 		"release":     "3GPP Release " + activeRel,
