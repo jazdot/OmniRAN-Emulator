@@ -4,6 +4,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/handler"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control"
 	"OmniRAN-Emulator/lib/ngap"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
@@ -19,6 +20,8 @@ func Dispatch(amf *context.GNBAmf, gnb *context.GNBContext, message []byte) {
 	ngapMsg, err := ngap.Decoder(message)
 	if err != nil {
 		log.Info("[GNB][NGAP] Error decoding NGAP message in ", gnb.GetGnbId(), " GNB")
+	} else {
+		_ = ngap_control.ValidateNGAPMessage(ngapMsg)
 	}
 
 	// check RanUeId and get UE.

@@ -34,6 +34,8 @@ func InitGnb(conf config.Config, wg *sync.WaitGroup) {
 		conf.GNodeB.DataIF.Port)
 	gnb.SetLinkType(conf.GNodeB.LinkType)
 	gnb.SetLinkPort(conf.GNodeB.LinkPort)
+	gnb.SetPagingDRX(conf.GNodeB.PagingDRX)
+	gnb.SetCellId(conf.GNodeB.CellId)
 
 	// start communication with AMF (server SCTP).
 
@@ -95,6 +97,8 @@ func InitGnbForUeLatency(conf config.Config, sigGnb chan bool, synch chan bool) 
 		conf.GNodeB.DataIF.Port)
 	gnb.SetLinkType(conf.GNodeB.LinkType)
 	gnb.SetLinkPort(conf.GNodeB.LinkPort)
+	gnb.SetPagingDRX(conf.GNodeB.PagingDRX)
+	gnb.SetCellId(conf.GNodeB.CellId)
 
 	// start communication with AMF (server SCTP).
 
@@ -157,6 +161,8 @@ func InitGnbForLoadSeconds(conf config.Config, wg *sync.WaitGroup,
 		conf.GNodeB.DataIF.Ip,
 		conf.GNodeB.ControlIF.Port,
 		conf.GNodeB.DataIF.Port)
+	gnb.SetPagingDRX(conf.GNodeB.PagingDRX)
+	gnb.SetCellId(conf.GNodeB.CellId)
 
 	// start communication with AMF (server SCTP).
 
@@ -211,6 +217,8 @@ func InitGnbForAvaibility(conf config.Config,
 		conf.GNodeB.DataIF.Ip,
 		conf.GNodeB.ControlIF.Port,
 		conf.GNodeB.DataIF.Port)
+	gnb.SetPagingDRX(conf.GNodeB.PagingDRX)
+	gnb.SetCellId(conf.GNodeB.CellId)
 
 	// start communication with AMF (server SCTP).
 
@@ -278,6 +286,8 @@ func InitGnbFleet(conf config.Config, ctx stdctx.Context, gnbSocketPath string) 
 			conf.GNodeB.DataIF.Port)
 		g.SetLinkType(conf.GNodeB.LinkType)
 		g.SetLinkPort(conf.GNodeB.LinkPort)
+		g.SetPagingDRX(conf.GNodeB.PagingDRX)
+		g.SetCellId(conf.GNodeB.CellId)
 
 		// Connect to AMF
 		amf := g.NewGnBAmf(conf.AMF.Ip, conf.AMF.Port)

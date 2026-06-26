@@ -158,6 +158,14 @@ func (ue *GNBUe) GetQosIdOfSession(pduSessionId int64) int64 {
 	return 0
 }
 
+func (ue *GNBUe) SetQosIdOfSession(pduSessionId int64, qosId int64) {
+	if ue.pduSessions != nil {
+		if sess, ok := ue.pduSessions[pduSessionId]; ok {
+			sess.qosId = qosId
+		}
+	}
+}
+
 func (ue *GNBUe) GetQosId() int64 {
 	return ue.context.pduSession.qosId
 }

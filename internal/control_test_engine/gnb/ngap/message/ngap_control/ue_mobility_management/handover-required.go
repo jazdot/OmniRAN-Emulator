@@ -8,12 +8,12 @@ import (
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
 
-func GetHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targetMnc string, targetGnbIdVal int64, targetTacVal []byte, pduSessionId uint8, sourceGnbId []byte) ([]byte, error) {
-	message := BuildHandoverRequired(ranUeNgapID, amfUeNgapID, targetMcc, targetMnc, targetGnbIdVal, targetTacVal, pduSessionId, sourceGnbId)
+func GetHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targetMnc string, targetGnbIdVal int64, targetTacVal []byte, pduSessionId uint8, sourceGnbId []byte, cellId ...int64) ([]byte, error) {
+	message := BuildHandoverRequired(ranUeNgapID, amfUeNgapID, targetMcc, targetMnc, targetGnbIdVal, targetTacVal, pduSessionId, sourceGnbId, cellId...)
 	return ngap.Encoder(message)
 }
 
-func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targetMnc string, targetGnbIdVal int64, targetTacVal []byte, pduSessionId uint8, sourceGnbId []byte) (pdu ngapType.NGAPPDU) {
+func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targetMnc string, targetGnbIdVal int64, targetTacVal []byte, pduSessionId uint8, sourceGnbId []byte, cellId ...int64) (pdu ngapType.NGAPPDU) {
 	pdu.Present = ngapType.NGAPPDUPresentInitiatingMessage
 	pdu.InitiatingMessage = new(ngapType.InitiatingMessage)
 
@@ -125,8 +125,17 @@ func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targ
 	targetCellBytes := make([]byte, 5)
 	targetGnbBytes := intTo3Bytes(targetGnbIdVal)
 	copy(targetCellBytes[0:3], targetGnbBytes[0:3])
-	targetCellBytes[3] = 0x00
-	targetCellBytes[4] = 0x10 // Cell ID 1 (36-bit: 24 bits gnb + 12 bits cell id)
+	srcCid := int64(1)
+	tgtCid := int64(1)
+	if len(cellId) > 0 {
+		srcCid = cellId[0]
+		tgtCid = cellId[0]
+	}
+	if len(cellId) > 1 {
+		tgtCid = cellId[1]
+	}
+	targetCellBytes[3] = byte((tgtCid >> 4) & 0xFF)
+	targetCellBytes[4] = byte((tgtCid & 0x0F) << 4)
 
 	container.TargetCellID.NRCGI.NRCellIdentity.Value = aper.BitString{
 		Bytes:     targetCellBytes,
@@ -145,8 +154,8 @@ func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targ
 	if len(sourceGnbId) >= 3 {
 		copy(sourceCellBytes[0:3], sourceGnbId[0:3])
 	}
-	sourceCellBytes[3] = 0x00
-	sourceCellBytes[4] = 0x10 // Cell ID 1 (36-bit: 24 bits gnb + 12 bits cell id)
+	sourceCellBytes[3] = byte((srcCid >> 4) & 0xFF)
+	sourceCellBytes[4] = byte((srcCid & 0x0F) << 4)
 
 	ngranCell.GlobalCellID.NRCGI.NRCellIdentity.Value = aper.BitString{
 		Bytes:     sourceCellBytes,

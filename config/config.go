@@ -57,8 +57,10 @@ type Config struct {
 			Sst string `yaml:"sst"`
 			Sd  string `yaml:"sd"`
 		} `yaml:"slicesupportlist"`
-		LinkType string `yaml:"link_type"`
-		LinkPort int    `yaml:"link_port"`
+		LinkType  string `yaml:"link_type"`
+		LinkPort  int    `yaml:"link_port"`
+		PagingDRX string `yaml:"paging_drx"`
+		CellId    int64  `yaml:"cell_id"`
 	} `yaml:"gnodeb"`
 	Ue struct {
 		Msin  string `yaml:"msin"`

@@ -8,6 +8,7 @@ import (
 	"github.com/ishidawataru/sctp"
 	"OmniRAN-Emulator/internal/chaos"
 	gnbContext "OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control"
 	"OmniRAN-Emulator/lib/ngap"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 	"OmniRAN-Emulator/lib/ngap/ngapSctp"
@@ -136,6 +137,10 @@ func sendToAmfOnStream(message []byte, conn *sctp.SCTPConn, stream uint16) error
 // (NGSetup), stream 1 for UE-associated signalling (all other messages).
 func SendToAmF(message []byte, conn *sctp.SCTPConn) error {
 	msgType := getNgapMsgType(message)
+	pdu, err := ngap.Decoder(message)
+	if err == nil && pdu != nil {
+		_ = ngap_control.ValidateNGAPMessage(pdu)
+	}
 	stream := uint16(0)
 	if isUeAssociatedMessage(msgType) {
 		stream = uint16(1)

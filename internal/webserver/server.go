@@ -137,6 +137,7 @@ func StartServer(host string, port int) error {
 	mux.HandleFunc("/api/ue/traffic/performance", handleUETrafficPerformance)
 	mux.HandleFunc("/api/ue/traffic/packets", handleUETrafficPackets)
 	mux.HandleFunc("/api/slices/sla", handleSlicesSla)
+	mux.HandleFunc("/api/test/performance", handlePerformanceTest)
 
 	// Fleet Manager API Routes
 	mux.HandleFunc("/api/fleet/ue", handleFleetUEProfiles)
@@ -1555,4 +1556,36 @@ func triggerSctpFailover(gnbId string) {
 	// 4. Send NGSetupRequest
 	triggerNgap.SendNgSetupRequest(g, amf)
 	logrus.Infof("[CHAOS] Sent NG Setup Request over new SCTP connection for GNodeB %s", gnbId)
+}
+
+type perfRequest struct {
+	NumUEs      int `json:"numUes"`
+	DurationSec int `json:"duration"`
+}
+
+func handlePerformanceTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req perfRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	if req.NumUEs <= 0 {
+		req.NumUEs = 10
+	}
+	if req.DurationSec <= 0 {
+		req.DurationSec = 5
+	}
+
+	report, err := templates.RunPerformanceSuite(req.NumUEs, req.DurationSec)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error running performance suite: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(report)
 }

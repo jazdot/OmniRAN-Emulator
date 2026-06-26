@@ -111,7 +111,18 @@ func BuildNGSetupRequest(gnb *context.GNBContext) (pdu ngapType.NGAPPDU) {
 	ie.Value.DefaultPagingDRX = new(ngapType.PagingDRX)
 
 	pagingDRX := ie.Value.DefaultPagingDRX
-	pagingDRX.Value = ngapType.PagingDRXPresentV128
+	switch gnb.GetPagingDRX() {
+	case "v32":
+		pagingDRX.Value = ngapType.PagingDRXPresentV32
+	case "v64":
+		pagingDRX.Value = ngapType.PagingDRXPresentV64
+	case "v128":
+		pagingDRX.Value = ngapType.PagingDRXPresentV128
+	case "v256":
+		pagingDRX.Value = ngapType.PagingDRXPresentV256
+	default:
+		pagingDRX.Value = ngapType.PagingDRXPresentV128
+	}
 	nGSetupRequestIEs.List = append(nGSetupRequestIEs.List, ie)
 
 	return

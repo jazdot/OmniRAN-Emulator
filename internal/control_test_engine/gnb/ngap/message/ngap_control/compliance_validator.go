@@ -2,12 +2,43 @@ package ngap_control
 
 import (
 	"fmt"
+	"sync"
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
+
+var (
+	ValidationMutex  sync.Mutex
+	TotalValidated   int64
+	TotalFailed      int64
+	ValidationErrors []string
+)
+
+func ResetValidationStats() {
+	ValidationMutex.Lock()
+	defer ValidationMutex.Unlock()
+	TotalValidated = 0
+	TotalFailed = 0
+	ValidationErrors = nil
+}
 
 // ValidateNGAPMessage checks a decoded NGAP PDU and verifies that all mandatory
 // IEs required by TS 38.413 for that message type are present.
 func ValidateNGAPMessage(pdu *ngapType.NGAPPDU) error {
+	ValidationMutex.Lock()
+	TotalValidated++
+	ValidationMutex.Unlock()
+
+	err := validateMessageInternal(pdu)
+	if err != nil {
+		ValidationMutex.Lock()
+		TotalFailed++
+		ValidationErrors = append(ValidationErrors, err.Error())
+		ValidationMutex.Unlock()
+	}
+	return err
+}
+
+func validateMessageInternal(pdu *ngapType.NGAPPDU) error {
 	if pdu == nil {
 		return fmt.Errorf("PDU is nil")
 	}

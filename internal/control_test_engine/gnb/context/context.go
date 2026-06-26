@@ -80,6 +80,30 @@ type ControlInfo struct {
 	linkPort     int
 	socketPath   string
 	xnConn       *net.UDPConn
+	cellId       int64
+	pagingDRX    string
+}
+
+func (gnb *GNBContext) SetPagingDRX(drx string) {
+	gnb.controlInfo.pagingDRX = drx
+}
+
+func (gnb *GNBContext) GetPagingDRX() string {
+	if gnb.controlInfo.pagingDRX == "" {
+		return "v128"
+	}
+	return gnb.controlInfo.pagingDRX
+}
+
+func (gnb *GNBContext) SetCellId(cellId int64) {
+	gnb.controlInfo.cellId = cellId
+}
+
+func (gnb *GNBContext) GetCellId() int64 {
+	if gnb.controlInfo.cellId == 0 {
+		return 1
+	}
+	return gnb.controlInfo.cellId
 }
 
 func (gnb *GNBContext) NewRanGnbContext(gnbId, mcc, mnc, tac, sst, sd, ip, ipData string, port, portData int) {

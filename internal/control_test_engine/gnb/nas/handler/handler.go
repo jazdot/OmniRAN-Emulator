@@ -127,6 +127,7 @@ func handleN2HandoverTrigger(ue *context.GNBUe, message []byte, gnb *context.GNB
 			targetTacVal,
 			pduSessionId,
 			gnb.GetGnbIdInBytes(),
+			gnb.GetCellId(),
 		)
 		if err != nil {
 			log.Errorf("[GNB-Source][NGAP] Error building Handover Required: %v", err)
@@ -301,6 +302,7 @@ func handleTargetAccessTrigger(ue *context.GNBUe, message []byte, gnb *context.G
 			gnb.GetMccAndMncInOctets(),
 			gnb.GetTacInBytes(),
 			gnb.GetGnbIdInBytes(),
+			gnb.GetCellId(),
 		)
 		if err != nil {
 			log.Errorf("[GNB-Target][NGAP] Error building Handover Notify: %v", err)
@@ -358,6 +360,7 @@ func handlePathSwitchTrigger(ue *context.GNBUe, message []byte, gnb *context.GNB
 			gnbIpBytes,
 			dlTeid,
 			gnb.GetGnbIdInBytes(),
+			gnb.GetCellId(),
 		)
 		if err != nil {
 			log.Errorf("[GNB][NGAP] Error building Path Switch Request: %v", err)

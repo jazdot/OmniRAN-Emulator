@@ -1076,6 +1076,8 @@ func HandlerPDUSessionResourceModifyRequest(gnb *context.GNBContext, message *ng
 		return
 	}
 
+	var qosIds = make(map[int64]int64)
+
 	for _, ies := range valueMessage.ProtocolIEs.List {
 		switch ies.Id.Value {
 		case ngapType.ProtocolIEIDAMFUENGAPID:
@@ -1089,9 +1091,26 @@ func HandlerPDUSessionResourceModifyRequest(gnb *context.GNBContext, message *ng
 		case ngapType.ProtocolIEIDPDUSessionResourceModifyListModReq:
 			if ies.Value.PDUSessionResourceModifyListModReq != nil {
 				for _, item := range ies.Value.PDUSessionResourceModifyListModReq.List {
-					pduSessionIds = append(pduSessionIds, item.PDUSessionID.Value)
+					pduSessionId := item.PDUSessionID.Value
+					pduSessionIds = append(pduSessionIds, pduSessionId)
 					if item.NASPDU != nil {
 						messageNas = item.NASPDU.Value
+					}
+					// Parse QoS Flow ID from transfer object
+					if len(item.PDUSessionResourceModifyRequestTransfer) > 0 {
+						transfer := &ngapType.PDUSessionResourceModifyRequestTransfer{}
+						err := aper.UnmarshalWithParams(item.PDUSessionResourceModifyRequestTransfer, transfer, "valueExt")
+						if err == nil {
+							for _, trIE := range transfer.ProtocolIEs.List {
+								if trIE.Id.Value == ngapType.ProtocolIEIDQosFlowAddOrModifyRequestList {
+									if trIE.Value.QosFlowAddOrModifyRequestList != nil {
+										for _, qosItem := range trIE.Value.QosFlowAddOrModifyRequestList.List {
+											qosIds[pduSessionId] = qosItem.QosFlowIdentifier.Value
+										}
+									}
+								}
+							}
+						}
 					}
 				}
 			}
@@ -1102,6 +1121,11 @@ func HandlerPDUSessionResourceModifyRequest(gnb *context.GNBContext, message *ng
 	if err != nil || ue == nil {
 		log.Warn("[GNB][NGAP] PDU Session Resource Modify Request: RAN UE NGAP ID not found, ranUeId=", ranUeId)
 		return
+	}
+
+	for pduId, qId := range qosIds {
+		ue.SetQosIdOfSession(pduId, qId)
+		log.Infof("[GNB][NGAP][UE] PDU Session %d QoS Flow ID modified to %d", pduId, qId)
 	}
 
 	_ = amfUeId

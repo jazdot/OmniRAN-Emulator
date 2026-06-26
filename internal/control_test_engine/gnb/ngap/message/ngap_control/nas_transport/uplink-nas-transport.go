@@ -8,12 +8,12 @@ import (
 	"OmniRAN-Emulator/lib/ngap/ngapType"
 )
 
-func getUplinkNASTransport(amfUeNgapID, ranUeNgapID int64, nasPdu []byte, plmn []byte, tac []byte, gnbId []byte) ([]byte, error) {
-	message := buildUplinkNasTransport(amfUeNgapID, ranUeNgapID, nasPdu, plmn, tac, gnbId)
+func getUplinkNASTransport(amfUeNgapID, ranUeNgapID int64, nasPdu []byte, plmn []byte, tac []byte, gnbId []byte, cellId ...int64) ([]byte, error) {
+	message := buildUplinkNasTransport(amfUeNgapID, ranUeNgapID, nasPdu, plmn, tac, gnbId, cellId...)
 	return ngap.Encoder(message)
 }
 
-func buildUplinkNasTransport(amfUeNgapID, ranUeNgapID int64, nasPdu []byte, plmn []byte, tac []byte, gnbId []byte) (pdu ngapType.NGAPPDU) {
+func buildUplinkNasTransport(amfUeNgapID, ranUeNgapID int64, nasPdu []byte, plmn []byte, tac []byte, gnbId []byte, cellId ...int64) (pdu ngapType.NGAPPDU) {
 
 	pdu.Present = ngapType.NGAPPDUPresentInitiatingMessage
 	pdu.InitiatingMessage = new(ngapType.InitiatingMessage)
@@ -82,8 +82,12 @@ func buildUplinkNasTransport(amfUeNgapID, ranUeNgapID int64, nasPdu []byte, plmn
 	if len(gnbId) >= 3 {
 		copy(cellIdBytes[0:3], gnbId[0:3])
 	}
-	cellIdBytes[3] = 0x00
-	cellIdBytes[4] = 0x10 // Cell ID 1 (36-bit: 24 bits gnb + 12 bits cell id)
+	cid := int64(1)
+	if len(cellId) > 0 {
+		cid = cellId[0]
+	}
+	cellIdBytes[3] = byte((cid >> 4) & 0xFF)
+	cellIdBytes[4] = byte((cid & 0x0F) << 4)
 
 	userLocationInformationNR.NRCGI.NRCellIdentity.Value = aper.BitString{
 		Bytes:     cellIdBytes,
@@ -100,7 +104,7 @@ func buildUplinkNasTransport(amfUeNgapID, ranUeNgapID int64, nasPdu []byte, plmn
 
 func SendUplinkNasTransport(message []byte, ue *context.GNBUe, gnb *context.GNBContext) ([]byte, error) {
 
-	sendMsg, err := getUplinkNASTransport(ue.GetAmfUeId(), ue.GetRanUeId(), message, gnb.GetMccAndMncInOctets(), gnb.GetTacInBytes(), gnb.GetGnbIdInBytes())
+	sendMsg, err := getUplinkNASTransport(ue.GetAmfUeId(), ue.GetRanUeId(), message, gnb.GetMccAndMncInOctets(), gnb.GetTacInBytes(), gnb.GetGnbIdInBytes(), gnb.GetCellId())
 	if err != nil {
 		return nil, fmt.Errorf("Error getting UE Id %d NAS Authentication Response", ue.GetRanUeId())
 	}

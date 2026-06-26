@@ -18,12 +18,12 @@ func init() {
 	TestPlmn.Value = aper.OctetString("\x02\xf8\x39")
 }
 
-func GetInitialUEMessage(ranUeNgapID int64, nasPdu []byte, fiveGSTmsi string, plmn []byte, tac []byte, rrcCause int, gnbId []byte) ([]byte, error) {
-	message := BuildInitialUEMessage(ranUeNgapID, nasPdu, fiveGSTmsi, plmn, tac, rrcCause, gnbId)
+func GetInitialUEMessage(ranUeNgapID int64, nasPdu []byte, fiveGSTmsi string, plmn []byte, tac []byte, rrcCause int, gnbId []byte, cellId ...int64) ([]byte, error) {
+	message := BuildInitialUEMessage(ranUeNgapID, nasPdu, fiveGSTmsi, plmn, tac, rrcCause, gnbId, cellId...)
 	return ngap.Encoder(message)
 }
 
-func BuildInitialUEMessage(ranUeNgapID int64, nasPdu []byte, fiveGSTmsi string, plmn []byte, tac []byte, rrcCause int, gnbId []byte) (pdu ngapType.NGAPPDU) {
+func BuildInitialUEMessage(ranUeNgapID int64, nasPdu []byte, fiveGSTmsi string, plmn []byte, tac []byte, rrcCause int, gnbId []byte, cellId ...int64) (pdu ngapType.NGAPPDU) {
 
 	pdu.Present = ngapType.NGAPPDUPresentInitiatingMessage
 	pdu.InitiatingMessage = new(ngapType.InitiatingMessage)
@@ -80,8 +80,12 @@ func BuildInitialUEMessage(ranUeNgapID int64, nasPdu []byte, fiveGSTmsi string, 
 	if len(gnbId) >= 3 {
 		copy(cellIdBytes[0:3], gnbId[0:3])
 	}
-	cellIdBytes[3] = 0x00
-	cellIdBytes[4] = 0x10 // Cell ID 1 (36-bit: 24 bits gnb + 12 bits cell id)
+	cid := int64(1)
+	if len(cellId) > 0 {
+		cid = cellId[0]
+	}
+	cellIdBytes[3] = byte((cid >> 4) & 0xFF)
+	cellIdBytes[4] = byte((cid & 0x0F) << 4)
 
 	userLocationInformationNR.NRCGI.NRCellIdentity.Value = aper.BitString{
 		Bytes:     cellIdBytes,
@@ -157,7 +161,7 @@ func SendInitialUeMessage(registrationRequest []byte, ue *context.GNBUe, gnb *co
 		rrcCause = int(ngapType.RRCEstablishmentCausePresentMoVoiceCall)
 	}
 
-	sendMsg, err := GetInitialUEMessage(ue.GetRanUeId(), registrationRequest, "", gnb.GetMccAndMncInOctets(), gnb.GetTacInBytes(), rrcCause, gnb.GetGnbIdInBytes())
+	sendMsg, err := GetInitialUEMessage(ue.GetRanUeId(), registrationRequest, "", gnb.GetMccAndMncInOctets(), gnb.GetTacInBytes(), rrcCause, gnb.GetGnbIdInBytes(), gnb.GetCellId())
 	if err != nil {
 		return nil, fmt.Errorf("Error in %d ue initial message", ue.GetRanUeId())
 	}
