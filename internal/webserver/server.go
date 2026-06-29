@@ -141,6 +141,7 @@ func StartServer(host string, port int) error {
 	mux.HandleFunc("/api/auth/setup", handleAuthSetup)
 	mux.HandleFunc("/api/auth/login", handleAuthLogin)
 	mux.HandleFunc("/api/auth/logout", handleAuthLogout)
+	mux.HandleFunc("/api/auth/change-password", withAuth(handleChangePassword))
 
 	// User Management (Admin Only)
 	mux.HandleFunc("/api/auth/users", withAdminAuth(handleListUsers))
@@ -2384,4 +2385,60 @@ func handleEditScenario(w http.ResponseWriter, r *http.Request) {
 		status = "scenario_deleted"
 	}
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
+}
+
+func handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	session, err := authenticate(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		OldPassword string `json:"oldPassword"`
+		NewPassword string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(req.NewPassword) < 8 {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"New password must be at least 8 characters"}`))
+		return
+	}
+
+	usersMu.Lock()
+	defer usersMu.Unlock()
+
+	u, exists := users[session.Username]
+	if !exists {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	if !verifyPassword(req.OldPassword, u.Salt, u.PasswordHash) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"Incorrect old password"}`))
+		return
+	}
+
+	salt, _ := generateSalt()
+	u.PasswordHash = hashPassword(req.NewPassword, salt)
+	u.Salt = hex.EncodeToString(salt)
+
+	users[session.Username] = u
+	if err := saveUsers(); err != nil {
+		http.Error(w, "Failed to save user database", http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "password_changed"})
 }

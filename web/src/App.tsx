@@ -28,7 +28,8 @@ import {
   Users,
   Lock,
   UserPlus,
-  LogOut
+  LogOut,
+  Key
 } from 'lucide-react';
 
 // API base path (works with relative path when served by Go, or proxied in dev)
@@ -649,6 +650,41 @@ export default function App() {
   const [saveScenarioDesc, setSaveScenarioDesc] = useState<string>('');
   const [scenarioManageError, setScenarioManageError] = useState<string>('');
   const [scenarioManageSuccess, setScenarioManageSuccess] = useState<string>('');
+
+  // Change Password states & logic
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState<boolean>(false);
+  const [oldPassword, setOldPassword] = useState<string>('');
+  const [newPasswordVal, setNewPasswordVal] = useState<string>('');
+  const [changePasswordError, setChangePasswordError] = useState<string>('');
+  const [changePasswordSuccess, setChangePasswordSuccess] = useState<string>('');
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangePasswordError('');
+    setChangePasswordSuccess('');
+    if (newPasswordVal.length < 8) {
+      setChangePasswordError('New password must be at least 8 characters');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/auth/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldPassword, newPassword: newPasswordVal }),
+      });
+      if (res.ok) {
+        setChangePasswordSuccess('Password successfully updated!');
+        setOldPassword('');
+        setNewPasswordVal('');
+        setTimeout(() => setShowChangePasswordModal(false), 1500);
+      } else {
+        const errData = await res.json();
+        setChangePasswordError(errData.error || 'Failed to change password');
+      }
+    } catch (err) {
+      setChangePasswordError('Network error. Failed to change password.');
+    }
+  };
 
   // Documentation states and helpers
   const [docsContent, setDocsContent] = useState<string>('');
@@ -3416,12 +3452,25 @@ export default function App() {
           )}
         </nav>
 
-        <div className="sidebar-footer" style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '12px', marginTop: 'auto' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{currentUser?.username}</span>
-              <span style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{currentUser?.role}</span>
-            </div>
+        <div className="sidebar-footer" style={{ display: 'flex', borderTop: '1px solid var(--border-color)', paddingTop: '12px', marginTop: 'auto', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{currentUser?.username}</span>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{currentUser?.role}</span>
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button 
+              onClick={() => {
+                setChangePasswordError('');
+                setChangePasswordSuccess('');
+                setOldPassword('');
+                setNewPasswordVal('');
+                setShowChangePasswordModal(true);
+              }} 
+              style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              title="Change password"
+            >
+              <Key size={14} />
+            </button>
             <button 
               onClick={handleLogout} 
               style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: '4px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -3429,10 +3478,6 @@ export default function App() {
             >
               <LogOut size={14} />
             </button>
-          </div>
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: '10px' }}>
-            <span className="footer-label">EMULATOR VERSION</span>
-            <span className="footer-value">v1.0.1 SA</span>
           </div>
         </div>
       </aside>
@@ -7159,49 +7204,28 @@ export default function App() {
           </div>
         )}
 
-        {/* ─── Documentation Tab ─────────────────────────────────────────── */}
         {activeTab === 'docs' && (
-          <div className="view-body fade-in">
-            <div className="card" style={{ padding: '24px', maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '8px' }}>
-                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <FileText size={22} className="text-blue" />
-                  Technical Reference Manual & Documentation
-                </h3>
-                <button 
-                  onClick={fetchDocsContent} 
-                  className="btn btn-xs btn-primary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', border: 'none', borderRadius: '6px', background: '#3b82f6', color: '#fff', cursor: 'pointer', fontWeight: 'bold' }}
-                >
-                  <RefreshCw size={12} />
-                  Refresh
-                </button>
+          <div className="view-body fade-in" style={{ padding: '0 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)', overflow: 'hidden' }}>
+            {docsLoading ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGrow: 1, gap: '12px', color: 'var(--text-muted)' }}>
+                <RefreshCw size={24} className="animate-spin text-blue" />
+                <span>Loading documentation...</span>
               </div>
-
-              {docsLoading ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '300px', gap: '12px', color: 'var(--text-muted)' }}>
-                  <RefreshCw size={24} className="animate-spin text-blue" />
-                  <span>Loading documentation...</span>
-                </div>
-              ) : (
-                <div 
-                  className="docs-content" 
-                  style={{ 
-                    maxHeight: '70vh', 
-                    overflowY: 'auto', 
-                    padding: '16px 24px', 
-                    borderRadius: '8px', 
-                    background: 'var(--bg-input)', 
-                    border: '1px solid var(--border-color)',
-                    lineHeight: '1.7',
-                    fontSize: '14px',
-                    color: 'var(--text-primary)'
-                  }}
-                >
-                  {renderFormattedDocs(docsContent)}
-                </div>
-              )}
-            </div>
+            ) : (
+              <div 
+                className="docs-content" 
+                style={{ 
+                  flexGrow: 1,
+                  overflowY: 'auto', 
+                  padding: '12px 0 24px 0', 
+                  lineHeight: '1.7',
+                  fontSize: '14px',
+                  color: 'var(--text-primary)'
+                }}
+              >
+                {renderFormattedDocs(docsContent)}
+              </div>
+            )}
           </div>
         )}
 
@@ -8233,6 +8257,83 @@ export default function App() {
                   style={{ padding: '8px 20px', borderRadius: '6px', fontWeight: 'bold' }}
                 >
                   Save Scenario
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Change Password Modal Overlay ─────────────────────────── */}
+      {showChangePasswordModal && (
+        <div className="fleet-form-overlay" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000 }}>
+          <div className="fleet-form-card" style={{ width: '400px', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', boxShadow: '0 10px 40px rgba(0,0,0,0.4)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+              <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+                <Key size={18} className="text-blue" style={{ color: '#3b82f6' }} />
+                Change Password
+              </h4>
+              <button 
+                onClick={() => setShowChangePasswordModal(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '16px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {changePasswordError && (
+              <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', borderRadius: '6px', fontSize: '12px', fontWeight: 600 }}>
+                {changePasswordError}
+              </div>
+            )}
+            {changePasswordSuccess && (
+              <div style={{ padding: '8px 12px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#10b981', borderRadius: '6px', fontSize: '12px', fontWeight: 600 }}>
+                {changePasswordSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleUpdatePassword} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Current Password *</label>
+                <input 
+                  type="password" 
+                  className="form-input" 
+                  value={oldPassword} 
+                  onChange={e => setOldPassword(e.target.value)} 
+                  placeholder="••••••••" 
+                  required 
+                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '10px', borderRadius: '6px' }}
+                />
+              </div>
+
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>New Password (min 8 chars) *</label>
+                <input 
+                  type="password" 
+                  className="form-input" 
+                  value={newPasswordVal} 
+                  onChange={e => setNewPasswordVal(e.target.value)} 
+                  placeholder="••••••••" 
+                  required 
+                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '10px', borderRadius: '6px' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '8px' }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => setShowChangePasswordModal(false)}
+                  style={{ padding: '8px 16px', borderRadius: '6px' }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary"
+                  style={{ padding: '8px 20px', borderRadius: '6px', fontWeight: 'bold' }}
+                >
+                  Update Password
                 </button>
               </div>
             </form>

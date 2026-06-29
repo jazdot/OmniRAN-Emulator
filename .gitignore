@@ -9,3 +9,4 @@ go_sdk.tar.gz
 # Local logs or configuration overrides
 *.log
 config/config.local.yml
+config/users.json
