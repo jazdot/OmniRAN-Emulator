@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -52,8 +53,9 @@ type SliceSlaProfile struct {
 }
 
 var (
-	slicesSlaMu sync.RWMutex
-	slicesSlas  = map[string]SliceSlaProfile{
+	slicesSlaMu   sync.RWMutex
+	slicesSlaFile = "config/slices_sla.json"
+	slicesSlas    = map[string]SliceSlaProfile{
 		"1-": {
 			SST:             1,
 			SD:              "",
@@ -69,7 +71,45 @@ func getSliceSlaKey(sst int32, sd string) string {
 	return fmt.Sprintf("%d-%s", sst, sd)
 }
 
+func loadSlicesSla() error {
+	slicesSlaMu.Lock()
+	defer slicesSlaMu.Unlock()
+
+	data, err := os.ReadFile(slicesSlaFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return saveSlicesSlaLocked()
+		}
+		return err
+	}
+
+	var list []SliceSlaProfile
+	if err := json.Unmarshal(data, &list); err != nil {
+		return err
+	}
+
+	slicesSlas = make(map[string]SliceSlaProfile)
+	for _, s := range list {
+		key := getSliceSlaKey(s.SST, s.SD)
+		slicesSlas[key] = s
+	}
+	return nil
+}
+
+func saveSlicesSlaLocked() error {
+	list := make([]SliceSlaProfile, 0, len(slicesSlas))
+	for _, s := range slicesSlas {
+		list = append(list, s)
+	}
+	data, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(slicesSlaFile, data, 0644)
+}
+
 func init() {
+	_ = loadSlicesSla()
 	// Start background metric collector
 	go startTelemetryCollector()
 }
@@ -388,6 +428,7 @@ func handleSlicesSla(w http.ResponseWriter, r *http.Request) {
 
 		slicesSlaMu.Lock()
 		slicesSlas[key] = req
+		_ = saveSlicesSlaLocked()
 		slicesSlaMu.Unlock()
 
 		_ = json.NewEncoder(w).Encode(req)

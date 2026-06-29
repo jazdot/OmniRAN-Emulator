@@ -111,8 +111,25 @@ func (h *WebLogHook) UnregisterClient(ch chan string) {
 	delete(h.clients, ch)
 }
 
+func startSessionJanitor() {
+	ticker := time.NewTicker(5 * time.Minute)
+	go func() {
+		for range ticker.C {
+			sessionMu.Lock()
+			now := time.Now()
+			for token, info := range activeSessions {
+				if now.After(info.Expires) {
+					delete(activeSessions, token)
+				}
+			}
+			sessionMu.Unlock()
+		}
+	}()
+}
+
 // StartServer starts the Go HTTP backend and serves the embedded Web UI.
 func StartServer(host string, port int) error {
+	startSessionJanitor()
 	// Clean up stale socket files on startup
 	if files, err := filepath.Glob("/tmp/gnb_*.sock"); err == nil {
 		for _, f := range files {

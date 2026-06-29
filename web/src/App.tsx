@@ -69,6 +69,128 @@ const CodeBlock = ({ codeText, lang, onLaunchInRunner }: { codeText: string; lan
   );
 };
 
+const TelemetryChart = ({ history }: { history: { time: string; registered: number; sessions: number }[] }) => {
+  if (history.length < 2) {
+    return (
+      <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'rgba(30, 41, 59, 0.2)' }}>
+        Gathering real-time diagnostic telemetry... (Waiting for statistics)
+      </div>
+    );
+  }
+
+  const width = 800;
+  const height = 150;
+  const padding = 30;
+  const chartWidth = width - padding * 2;
+  const chartHeight = height - padding * 2;
+
+  const maxVal = Math.max(
+    ...history.map(d => Math.max(d.registered, d.sessions, 4))
+  ) * 1.2;
+
+  const pointsReg = history.map((d, idx) => {
+    const x = padding + (idx / (history.length - 1)) * chartWidth;
+    const y = height - padding - (d.registered / maxVal) * chartHeight;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+
+  const pointsSess = history.map((d, idx) => {
+    const x = padding + (idx / (history.length - 1)) * chartWidth;
+    const y = height - padding - (d.sessions / maxVal) * chartHeight;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+
+  return (
+    <div className="card" style={{ marginTop: '20px', padding: '16px' }}>
+      <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+        <Activity size={18} className="text-blue" /> Live Core Control & User Plane Telemetry
+      </h3>
+      <div style={{ position: 'relative' }}>
+        <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
+          <defs>
+            <linearGradient id="blueGlow" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.2"/>
+              <stop offset="100%" stopColor="#3b82f6" stopOpacity="0"/>
+            </linearGradient>
+            <linearGradient id="emeraldGlow" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.2"/>
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0"/>
+            </linearGradient>
+          </defs>
+
+          {/* Grid lines */}
+          <line x1={padding} y1={padding} x2={width - padding} y2={padding} stroke="var(--border-color)" strokeDasharray="4 4" />
+          <line x1={padding} y1={padding + chartHeight / 2} x2={width - padding} y2={padding + chartHeight / 2} stroke="var(--border-color)" strokeDasharray="4 4" />
+          <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="var(--border-color)" />
+
+          {/* Time Labels */}
+          {history.map((d, idx) => {
+            if (idx % 3 !== 0 && idx !== history.length - 1) return null;
+            const x = padding + (idx / (history.length - 1)) * chartWidth;
+            return (
+              <text key={idx} x={x} y={height - 8} fontSize="9px" fill="var(--text-muted)" textAnchor="middle">
+                {d.time}
+              </text>
+            );
+          })}
+
+          {/* Y Axis Max Label */}
+          <text x={padding - 6} y={padding + 4} fontSize="9px" fill="var(--text-muted)" textAnchor="end">
+            {Math.round(maxVal)}
+          </text>
+          <text x={padding - 6} y={height - padding + 4} fontSize="9px" fill="var(--text-muted)" textAnchor="end">
+            0
+          </text>
+
+          {/* Area Gradients */}
+          {history.length > 1 && (
+            <>
+              <polygon
+                points={`${padding},${height - padding} ${pointsReg} ${width - padding},${height - padding}`}
+                fill="url(#blueGlow)"
+              />
+              <polygon
+                points={`${padding},${height - padding} ${pointsSess} ${width - padding},${height - padding}`}
+                fill="url(#emeraldGlow)"
+              />
+            </>
+          )}
+
+          {/* Paths */}
+          <polyline points={pointsReg} fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          <polyline points={pointsSess} fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* Scatter dots on last point */}
+          {history.length > 0 && (() => {
+            const lastIdx = history.length - 1;
+            const regLastY = height - padding - (history[lastIdx].registered / maxVal) * chartHeight;
+            const sessLastY = height - padding - (history[lastIdx].sessions / maxVal) * chartHeight;
+            const lastX = width - padding;
+            return (
+              <>
+                <circle cx={lastX} cy={regLastY} r="4" fill="#3b82f6" stroke="#fff" strokeWidth="1" />
+                <circle cx={lastX} cy={sessLastY} r="4" fill="#10b981" stroke="#fff" strokeWidth="1" />
+              </>
+            );
+          })()}
+        </svg>
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', justifyContent: 'center', gap: '24px', marginTop: '12px', fontSize: '11px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ width: '12px', height: '4px', background: '#3b82f6', borderRadius: '2px' }} />
+          <span style={{ color: 'var(--text-secondary)' }}>Registered UEs ({history[history.length - 1]?.registered || 0})</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ width: '12px', height: '4px', background: '#10b981', borderRadius: '2px' }} />
+          <span style={{ color: 'var(--text-secondary)' }}>Active GTP Sessions ({history[history.length - 1]?.sessions || 0})</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const API_BASE = '/api';
 
 const originalFetch = window.fetch;
@@ -1660,6 +1782,7 @@ export default function App() {
   }, [theme]);
 
   const [status, setStatus] = useState<StatusData | null>(null);
+  const [dashboardHistory, setDashboardHistory] = useState<{ time: string; registered: number; sessions: number }[]>([]);
   const [configData, setConfigData] = useState<ConfigData | null>(null);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [logs, setLogs] = useState<LogMsg[]>([]);
@@ -2987,6 +3110,25 @@ export default function App() {
     return () => clearInterval(timer);
   }, [autoRefresh]);
 
+  useEffect(() => {
+    if (!status) return;
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const registered = activeUEs.filter((u) => u.stateMmDesc?.includes('REGISTERED') || u.stateMMDesc?.includes('REGISTERED')).length;
+    const sessions = activeUEs.reduce((acc, u) => acc + (u.pduSessions?.filter((s: any) => s.stateDesc?.includes('ACTIVE')).length || 0), 0);
+
+    setDashboardHistory((prev) => {
+      const newEntry = { time, registered, sessions };
+      if (prev.length > 0 && prev[prev.length - 1].time === time && prev[prev.length - 1].registered === registered && prev[prev.length - 1].sessions === sessions) {
+        return prev;
+      }
+      const next = [...prev, newEntry];
+      if (next.length > 15) {
+        return next.slice(1);
+      }
+      return next;
+    });
+  }, [status, activeUEs]);
+
   // Run Connectivity Checks on load or tab change
   useEffect(() => {
     if (activeTab === 'connectivity') {
@@ -4078,6 +4220,9 @@ export default function App() {
                 </span>
               </div>
             </div>
+
+            {/* Live Diagnostic Telemetry Chart */}
+            <TelemetryChart history={dashboardHistory} />
 
             {/* Network Topology Visualizer */}
             <div className="topology-panel">
