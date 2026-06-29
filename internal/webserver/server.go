@@ -1,6 +1,10 @@
 package webserver
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -10,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -121,68 +126,88 @@ func StartServer(host string, port int) error {
 		logrus.Warnf("[WEB] Failed to load fleet config: %v (starting with empty fleet)", err)
 	}
 
+	// Initialize users and custom scenarios on server start
+	if err := loadUsers(); err != nil {
+		logrus.Errorf("[WEB] Failed to load users database: %v", err)
+	}
+	if err := loadSavedScenarios(); err != nil {
+		logrus.Errorf("[WEB] Failed to load custom scenarios: %v", err)
+	}
+
 	mux := http.NewServeMux()
 
-	// REST API Routes
-	mux.HandleFunc("/api/status", handleStatus)
-	mux.HandleFunc("/api/config", handleConfig)
-	mux.HandleFunc("/api/config/release", handleConfigRelease)
-	mux.HandleFunc("/api/scenarios", handleScenariosList)
-	mux.HandleFunc("/api/scenarios/run", handleScenarioRun)
-	mux.HandleFunc("/api/scenarios/stop", handleScenarioStop)
+	// Public Authentication APIs
+	mux.HandleFunc("/api/auth/session", handleAuthSession)
+	mux.HandleFunc("/api/auth/setup", handleAuthSetup)
+	mux.HandleFunc("/api/auth/login", handleAuthLogin)
+	mux.HandleFunc("/api/auth/logout", handleAuthLogout)
+
+	// User Management (Admin Only)
+	mux.HandleFunc("/api/auth/users", withAdminAuth(handleListUsers))
+	mux.HandleFunc("/api/auth/users/create", withAdminAuth(handleCreateUser))
+	mux.HandleFunc("/api/auth/users/delete", withAdminAuth(handleDeleteUser))
+	mux.HandleFunc("/api/auth/users/update", withAdminAuth(handleUpdateUser))
+
+	// Custom Scenario Management
+	mux.HandleFunc("/api/scenarios/save", withAuth(handleSaveScenario))
+	mux.HandleFunc("/api/scenarios/edit", withAdminAuth(handleEditScenario))
+
+	// REST API Routes (Wrapped in Authentication middleware)
+	mux.HandleFunc("/api/status", withAuth(handleStatus))
+	mux.HandleFunc("/api/config", withAuth(handleConfig))
+	mux.HandleFunc("/api/config/release", withAuth(handleConfigRelease))
+	mux.HandleFunc("/api/scenarios", withAuth(handleScenariosList))
+	mux.HandleFunc("/api/scenarios/run", withAuth(handleScenarioRun))
+	mux.HandleFunc("/api/scenarios/stop", withAuth(handleScenarioStop))
+	mux.HandleFunc("/api/scenarios/custom/run", withAuth(handleCustomScenarioRun))
+	mux.HandleFunc("/api/scenarios/custom/status", withAuth(handleCustomScenarioStatus))
+	mux.HandleFunc("/api/scenarios/custom/stop", withAuth(handleCustomScenarioStop))
+	mux.HandleFunc("/api/chaos/configure", withAuth(handleChaosConfigure))
+	mux.HandleFunc("/api/chaos/status", withAuth(handleChaosStatus))
+	mux.HandleFunc("/api/chaos/reset", withAuth(handleChaosReset))
+	mux.HandleFunc("/api/chaos/fuzz/configure", withAuth(handleChaosFuzzConfigure))
+	mux.HandleFunc("/api/chaos/fuzz/status", withAuth(handleChaosFuzzStatus))
+	mux.HandleFunc("/api/chaos/sctp-failover", withAuth(handleChaosSctpFailover))
+	mux.HandleFunc("/api/ue/active", withAuth(handleActiveUEs))
+	mux.HandleFunc("/api/ue/action", withAuth(handleUEAction))
+	mux.HandleFunc("/api/ping", withAuth(handlePingTest))
+	mux.HandleFunc("/api/logs/stream", withAuth(handleLogStream))
+	mux.HandleFunc("/api/ue/ping", withAuth(handleUEPing))
+	mux.HandleFunc("/api/ue/http", withAuth(handleUEHttp))
+	mux.HandleFunc("/api/ue/stream", withAuth(handleUEStream))
+	mux.HandleFunc("/api/ue/vonr/dial", withAuth(handleUEVonrDial))
+	mux.HandleFunc("/api/ue/vonr/hangup", withAuth(handleUEVonrHangup))
+	mux.HandleFunc("/api/ue/traffic/stats", withAuth(handleUETrafficStats))
+	mux.HandleFunc("/api/ue/traffic/performance", withAuth(handleUETrafficPerformance))
+	mux.HandleFunc("/api/ue/traffic/packets", withAuth(handleUETrafficPackets))
+	mux.HandleFunc("/api/slices/sla", withAuth(handleSlicesSla))
+	mux.HandleFunc("/api/test/performance", withAuth(handlePerformanceTest))
 	
-	// Custom Scenario and Chaos API Routes
-	mux.HandleFunc("/api/scenarios/custom/run", handleCustomScenarioRun)
-	mux.HandleFunc("/api/scenarios/custom/status", handleCustomScenarioStatus)
-	mux.HandleFunc("/api/scenarios/custom/stop", handleCustomScenarioStop)
-	mux.HandleFunc("/api/chaos/configure", handleChaosConfigure)
-	mux.HandleFunc("/api/chaos/status", handleChaosStatus)
-	mux.HandleFunc("/api/chaos/reset", handleChaosReset)
-	mux.HandleFunc("/api/chaos/fuzz/configure", handleChaosFuzzConfigure)
-	mux.HandleFunc("/api/chaos/fuzz/status", handleChaosFuzzStatus)
-	mux.HandleFunc("/api/chaos/sctp-failover", handleChaosSctpFailover)
-	mux.HandleFunc("/api/ue/active", handleActiveUEs)
-	mux.HandleFunc("/api/ue/action", handleUEAction)
-	mux.HandleFunc("/api/ping", handlePingTest)
-	mux.HandleFunc("/api/logs/stream", handleLogStream)
-
-	// User Plane Traffic API Routes
-	mux.HandleFunc("/api/ue/ping", handleUEPing)
-	mux.HandleFunc("/api/ue/http", handleUEHttp)
-	mux.HandleFunc("/api/ue/stream", handleUEStream)
-	mux.HandleFunc("/api/ue/vonr/dial", handleUEVonrDial)
-	mux.HandleFunc("/api/ue/vonr/hangup", handleUEVonrHangup)
-	mux.HandleFunc("/api/ue/traffic/stats", handleUETrafficStats)
-	mux.HandleFunc("/api/ue/traffic/performance", handleUETrafficPerformance)
-	mux.HandleFunc("/api/ue/traffic/packets", handleUETrafficPackets)
-	mux.HandleFunc("/api/slices/sla", handleSlicesSla)
-	mux.HandleFunc("/api/test/performance", handlePerformanceTest)
-
-	// Fleet Manager API Routes
-	mux.HandleFunc("/api/fleet/ue", handleFleetUEProfiles)
-	mux.HandleFunc("/api/fleet/ue/", handleFleetUEProfileDelete)
-	mux.HandleFunc("/api/fleet/gnb", handleFleetGNBProfiles)
-	mux.HandleFunc("/api/fleet/gnb/", handleFleetGNBProfileDelete)
-	mux.HandleFunc("/api/fleet/launch/ue", handleFleetLaunchUE)
-	mux.HandleFunc("/api/fleet/launch/gnb", handleFleetLaunchGNB)
-	mux.HandleFunc("/api/fleet/stop/ue", handleFleetStopUE)
-	mux.HandleFunc("/api/fleet/stop/gnb/", handleFleetStopGNB)
-	mux.HandleFunc("/api/fleet/running", handleFleetRunning)
-
-	// Diagnostics / PCAP API Routes
-	mux.HandleFunc("/api/diagnostics/pcap/interfaces", handleGetInterfaces)
-	mux.HandleFunc("/api/diagnostics/pcap/start", handleStartPcap)
-	mux.HandleFunc("/api/diagnostics/pcap/stop", handleStopPcap)
-	mux.HandleFunc("/api/diagnostics/pcap/status", handleGetPcapStatus)
-	mux.HandleFunc("/api/diagnostics/pcap/list", handleListPcaps)
-	mux.HandleFunc("/api/diagnostics/pcap/download", handleDownloadPcap)
-	mux.HandleFunc("/api/diagnostics/pcap/delete", handleDeletePcap)
-	mux.HandleFunc("/api/diagnostics/pcap/parse", handleParsePcap)
-	mux.HandleFunc("/api/diagnostics/logs/download", handleDownloadLogs)
-	mux.HandleFunc("/api/diagnostics/logs/clear", handleClearLogs)
-	mux.HandleFunc("/api/diagnostics/logs/history", handleGetLogsHistory)
-	mux.HandleFunc("/api/diagnostics/logs/parse", handleParseLogs)
-	mux.HandleFunc("/api/docs", handleDocs)
+	// Fleet Manager Routes (Wrapped in Authentication middleware)
+	mux.HandleFunc("/api/fleet/ue", withAuth(handleFleetUEProfiles))
+	mux.HandleFunc("/api/fleet/ue/", withAuth(handleFleetUEProfileDelete))
+	mux.HandleFunc("/api/fleet/gnb", withAuth(handleFleetGNBProfiles))
+	mux.HandleFunc("/api/fleet/gnb/", withAuth(handleFleetGNBProfileDelete))
+	mux.HandleFunc("/api/fleet/launch/ue", withAuth(handleFleetLaunchUE))
+	mux.HandleFunc("/api/fleet/launch/gnb", withAuth(handleFleetLaunchGNB))
+	mux.HandleFunc("/api/fleet/stop/ue", withAuth(handleFleetStopUE))
+	mux.HandleFunc("/api/fleet/stop/gnb/", withAuth(handleFleetStopGNB))
+	mux.HandleFunc("/api/fleet/running", withAuth(handleFleetRunning))
+	
+	// Diagnostics / PCAP API Routes (Wrapped in Authentication middleware)
+	mux.HandleFunc("/api/diagnostics/pcap/interfaces", withAuth(handleGetInterfaces))
+	mux.HandleFunc("/api/diagnostics/pcap/start", withAuth(handleStartPcap))
+	mux.HandleFunc("/api/diagnostics/pcap/stop", withAuth(handleStopPcap))
+	mux.HandleFunc("/api/diagnostics/pcap/status", withAuth(handleGetPcapStatus))
+	mux.HandleFunc("/api/diagnostics/pcap/list", withAuth(handleListPcaps))
+	mux.HandleFunc("/api/diagnostics/pcap/download", withAuth(handleDownloadPcap))
+	mux.HandleFunc("/api/diagnostics/pcap/delete", withAuth(handleDeletePcap))
+	mux.HandleFunc("/api/diagnostics/pcap/parse", withAuth(handleParsePcap))
+	mux.HandleFunc("/api/diagnostics/logs/download", withAuth(handleDownloadLogs))
+	mux.HandleFunc("/api/diagnostics/logs/clear", withAuth(handleClearLogs))
+	mux.HandleFunc("/api/diagnostics/logs/history", withAuth(handleGetLogsHistory))
+	mux.HandleFunc("/api/diagnostics/logs/parse", withAuth(handleParseLogs))
+	mux.HandleFunc("/api/docs", withAuth(handleDocs))
 
 	// Embedded static React files
 	assetsFS, err := fs.Sub(web.Assets, "dist")
@@ -488,34 +513,41 @@ func handleConfigRelease(w http.ResponseWriter, r *http.Request) {
 }
 
 type ScenarioItem struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	IsCustom    bool         `json:"isCustom"`
+	Steps       []CustomStep `json:"steps,omitempty"`
 }
 
 func handleScenariosList(w http.ResponseWriter, r *http.Request) {
-	scenarios := []ScenarioItem{
-		{"interactive-ue", "Interactive UE Control Session", "Registers a UE and keeps it active/running, allowing dynamic operations via the UE Controller card"},
-		{"periodic-reg", "Periodic Registration Update", "Registers a UE, simulates T3512 expiration, and triggers a Periodic Registration Update"},
-		{"mobility-reg", "Mobility Registration Update (TAU)", "Registers a UE, simulates cell crossing, and triggers a Mobility Tracking Area Update (TAU)"},
-		{"emergency-reg", "Emergency Registration", "Triggers unauthenticated Emergency Registration to the core network"},
-		{"handover", "N2 Handover (Path Switch)", "Simulates cell change by executing a Path Switch Request between gNodeBs"},
-		{"xn-handover", "Xn Handover (Inter-gNB)", "Starts two GNodeBs (Source and Target), registers a UE, establishes a PDU session, and performs Xn-based handover between GNodeBs"},
-		{"pdu-lifecycle", "PDU Session Lifecycle", "Registers a UE, establishes a PDU session, releases the PDU session, and validates state transitions back to INACTIVE"},
-		{"pdu-mod-lifecycle", "PDU Session Modification Lifecycle", "Registers a UE, establishes a PDU session, modifies session parameters, and clean releases the session"},
-		{"full-lifecycle", "Full UE Lifecycle", "Executes full sequence: Attach → PDU Active → CM-IDLE → Service Request → Detach"},
-		{"deregister", "UE-initiated Deregistration", "Registers a UE and performs a clean power-off Deregistration Request"},
-		{"load-test", "Multi-UE Load Endurance Test", "Stress tests the AMF by attaching multiple simulated UEs sequentially in a queue"},
-		{"amf-load-loop", "AMF Load Loop (Stress Test)", "Periodically generates heavy registration requests to evaluate AMF throughput under stress"},
-		{"ue-latency-interval", "UE Registration Latency", "Evaluates and measures the average registration latency for a queue of UEs"},
-		{"amf-availability", "AMF Core Uptime Availability", "Performs reachability checks to evaluate the core uptime over a specified interval"},
-		{"r17-ntn", "3GPP Rel 17: RedCap & NTN Attachment", "Demonstrates Release 17 capabilities, including RedCap cell access, satellite orbit parameter IEs, and XR low-latency QoS flows"},
-		{"r18-uav", "3GPP Rel 18: UAV Flight & Slicing", "Demonstrates Release 18 capabilities: Aerial drone trajectory registration, PEI support, and Slice Groups handover"},
-		{"r19-sensing", "3GPP Rel 19: AI & ISAC Sensing", "Demonstrates Release 19 capabilities: Ambient IoT passive sensor relay tags, direct RAN AI model inference deployment, and ISAC radar target sweeps"},
-		{"storm", "AMF Registration Storm", "Simulates cell-congestion by launching a rapid burst of concurrent registration requests to stress-test the AMF core"},
+	defaults := []ScenarioItem{
+		{ID: "interactive-ue", Name: "Interactive UE Control Session", Description: "Registers a UE and keeps it active/running, allowing dynamic operations via the UE Controller card"},
+		{ID: "periodic-reg", Name: "Periodic Registration Update", Description: "Registers a UE, simulates T3512 expiration, and triggers a Periodic Registration Update"},
+		{ID: "mobility-reg", Name: "Mobility Registration Update (TAU)", Description: "Registers a UE, simulates cell crossing, and triggers a Mobility Tracking Area Update (TAU)"},
+		{ID: "emergency-reg", Name: "Emergency Registration", Description: "Triggers unauthenticated Emergency Registration to the core network"},
+		{ID: "handover", Name: "N2 Handover (Path Switch)", Description: "Simulates cell change by executing a Path Switch Request between gNodeBs"},
+		{ID: "xn-handover", Name: "Xn Handover (Inter-gNB)", Description: "Starts two GNodeBs (Source and Target), registers a UE, establishes a PDU session, and performs Xn-based handover between GNodeBs"},
+		{ID: "pdu-lifecycle", Name: "PDU Session Lifecycle", Description: "Registers a UE, establishes a PDU session, releases the PDU session, and validates state transitions back to INACTIVE"},
+		{ID: "pdu-mod-lifecycle", Name: "PDU Session Modification Lifecycle", Description: "Registers a UE, establishes a PDU session, modifies session parameters, and clean releases the session"},
+		{ID: "full-lifecycle", Name: "Full UE Lifecycle", Description: "Executes full sequence: Attach → PDU Active → CM-IDLE → Service Request → Detach"},
+		{ID: "deregister", Name: "UE-initiated Deregistration", Description: "Registers a UE and performs a clean power-off Deregistration Request"},
+		{ID: "load-test", Name: "Multi-UE Load Endurance Test", Description: "Stress tests the AMF by attaching multiple simulated UEs sequentially in a queue"},
+		{ID: "amf-load-loop", Name: "AMF Load Loop (Stress Test)", Description: "Periodically generates heavy registration requests to evaluate AMF throughput under stress"},
+		{ID: "ue-latency-interval", Name: "UE Registration Latency", Description: "Evaluates and measures the average registration latency for a queue of UEs"},
+		{ID: "amf-availability", Name: "AMF Core Uptime Availability", Description: "Performs reachability checks to evaluate the core uptime over a specified interval"},
+		{ID: "r17-ntn", Name: "3GPP Rel 17: RedCap & NTN Attachment", Description: "Demonstrates Release 17 capabilities, including RedCap cell access, satellite orbit parameter IEs, and XR low-latency QoS flows"},
+		{ID: "r18-uav", Name: "3GPP Rel 18: UAV Flight & Slicing", Description: "Demonstrates Release 18 capabilities: Aerial drone trajectory registration, PEI support, and Slice Groups handover"},
+		{ID: "r19-sensing", Name: "3GPP Rel 19: AI & ISAC Sensing", Description: "Demonstrates Release 19 capabilities: Ambient IoT passive sensor relay tags, direct RAN AI model inference deployment, and ISAC radar target sweeps"},
+		{ID: "storm", Name: "AMF Registration Storm", Description: "Simulates cell-congestion by launching a rapid burst of concurrent registration requests to stress-test the AMF core"},
 	}
+
+	scenariosMu.RLock()
+	merged := append(defaults, savedScenarios...)
+	scenariosMu.RUnlock()
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(scenarios)
+	_ = json.NewEncoder(w).Encode(merged)
 }
 
 type RunRequest struct {
@@ -550,6 +582,32 @@ func handleScenarioRun(w http.ResponseWriter, r *http.Request) {
 
 	var req RunRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if req.Scenario != "" && strings.HasPrefix(req.Scenario, "custom-") {
+		var targetScen *ScenarioItem
+		scenariosMu.RLock()
+		for _, s := range savedScenarios {
+			if s.ID == req.Scenario {
+				targetScen = &s
+				break
+			}
+		}
+		scenariosMu.RUnlock()
+		if targetScen != nil {
+			customScen := CustomScenario{
+				Name:        targetScen.Name,
+				Description: targetScen.Description,
+				Steps:       targetScen.Steps,
+			}
+			GlobalCustomRunner.Run(customScen)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"running"}`))
+			return
+		} else {
+			http.Error(w, "Custom scenario not found", http.StatusNotFound)
+			return
+		}
+	}
 
 	runningName = req.Scenario
 	if runningName == "" {
@@ -1666,4 +1724,664 @@ func handleDocs(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(DocsResponse{
 		Content: string(content),
 	})
+}
+
+// ─── Authentication, Session & User Management ───────────────────────────────
+
+type User struct {
+	Username     string `json:"username"`
+	PasswordHash string `json:"passwordHash"`
+	Salt         string `json:"salt"`
+	Role         string `json:"role"` // "admin" or "user"
+}
+
+type SessionInfo struct {
+	Username string
+	Role     string
+	Expires  time.Time
+}
+
+var (
+	usersFile      = "config/users.json"
+	users          = make(map[string]User)
+	usersMu        sync.RWMutex
+	activeSessions = make(map[string]*SessionInfo)
+	sessionMu      sync.RWMutex
+)
+
+// Hashing & Salt functions
+func hashPassword(password string, salt []byte) string {
+	hasher := sha256.New()
+	hasher.Write(salt)
+	hasher.Write([]byte(password))
+	hash := hasher.Sum(nil)
+	for i := 0; i < 9999; i++ {
+		h := sha256.New()
+		h.Write(hash)
+		hash = h.Sum(nil)
+	}
+	return hex.EncodeToString(hash)
+}
+
+func generateSalt() ([]byte, error) {
+	salt := make([]byte, 16)
+	_, err := rand.Read(salt)
+	if err != nil {
+		return nil, err
+	}
+	return salt, nil
+}
+
+func verifyPassword(password, saltHex, hashHex string) bool {
+	salt, err := hex.DecodeString(saltHex)
+	if err != nil {
+		return false
+	}
+	computedHash := hashPassword(password, salt)
+	computedBytes, _ := hex.DecodeString(computedHash)
+	storedBytes, _ := hex.DecodeString(hashHex)
+	return subtle.ConstantTimeCompare(computedBytes, storedBytes) == 1
+}
+
+// Load & Save Users
+func loadUsers() error {
+	usersMu.Lock()
+	defer usersMu.Unlock()
+
+	file, err := os.Open(usersFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+
+	var uList []User
+	if err := json.NewDecoder(file).Decode(&uList); err != nil {
+		return err
+	}
+
+	users = make(map[string]User)
+	for _, u := range uList {
+		users[u.Username] = u
+	}
+	return nil
+}
+
+func saveUsers() error {
+	var uList []User
+	for _, u := range users {
+		uList = append(uList, u)
+	}
+
+	_ = os.MkdirAll("config", 0755)
+	data, err := json.MarshalIndent(uList, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(usersFile, data, 0600)
+}
+
+// Authentication Middlewares
+func authenticate(r *http.Request) (*SessionInfo, error) {
+	token := r.Header.Get("X-Session-Token")
+	if token == "" {
+		if cookie, err := r.Cookie("session_token"); err == nil {
+			token = cookie.Value
+		}
+	}
+	if token == "" {
+		return nil, fmt.Errorf("missing session token")
+	}
+
+	sessionMu.RLock()
+	session, ok := activeSessions[token]
+	sessionMu.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("invalid session")
+	}
+	if time.Now().After(session.Expires) {
+		sessionMu.Lock()
+		delete(activeSessions, token)
+		sessionMu.Unlock()
+		return nil, fmt.Errorf("session expired")
+	}
+	return session, nil
+}
+
+func withAuth(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Session-Token")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		_, err := authenticate(r)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"Unauthorized: login required"}`))
+			return
+		}
+		handler(w, r)
+	}
+}
+
+func withAdminAuth(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Session-Token")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		session, err := authenticate(r)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"Unauthorized: login required"}`))
+			return
+		}
+
+		if session.Role != "admin" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"Forbidden: admin role required"}`))
+			return
+		}
+		handler(w, r)
+	}
+}
+
+// ─── Public Authentication Endpoints ─────────────────────────────────────────
+
+func handleAuthSession(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	usersMu.RLock()
+	hasAdmin := false
+	for _, u := range users {
+		if u.Role == "admin" {
+			hasAdmin = true
+			break
+		}
+	}
+	usersMu.RUnlock()
+
+	status := struct {
+		SetupRequired bool   `json:"setupRequired"`
+		LoggedIn      bool   `json:"loggedIn"`
+		Username      string `json:"username"`
+		Role          string `json:"role"`
+	}{
+		SetupRequired: !hasAdmin,
+	}
+
+	session, err := authenticate(r)
+	if err == nil {
+		status.LoggedIn = true
+		status.Username = session.Username
+		status.Role = session.Role
+	}
+
+	_ = json.NewEncoder(w).Encode(status)
+}
+
+func handleAuthSetup(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	usersMu.Lock()
+	defer usersMu.Unlock()
+
+	hasAdmin := false
+	for _, u := range users {
+		if u.Role == "admin" {
+			hasAdmin = true
+			break
+		}
+	}
+	if hasAdmin {
+		http.Error(w, "Setup already completed", http.StatusConflict)
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Username == "" || len(req.Password) < 8 {
+		http.Error(w, "Username cannot be empty and password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	salt, err := generateSalt()
+	if err != nil {
+		http.Error(w, "Failed to generate salt", http.StatusInternalServerError)
+		return
+	}
+
+	hash := hashPassword(req.Password, salt)
+	adminUser := User{
+		Username:     req.Username,
+		PasswordHash: hash,
+		Salt:         hex.EncodeToString(salt),
+		Role:         "admin",
+	}
+
+	users[req.Username] = adminUser
+	if err := saveUsers(); err != nil {
+		http.Error(w, "Failed to save user database", http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "setup_completed"})
+}
+
+func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	usersMu.RLock()
+	u, ok := users[req.Username]
+	usersMu.RUnlock()
+
+	if !ok || !verifyPassword(req.Password, u.Salt, u.PasswordHash) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"Invalid credentials"}`))
+		return
+	}
+
+	tokenBytes := make([]byte, 32)
+	_, _ = rand.Read(tokenBytes)
+	token := hex.EncodeToString(tokenBytes)
+
+	sessionMu.Lock()
+	activeSessions[token] = &SessionInfo{
+		Username: u.Username,
+		Role:     u.Role,
+		Expires:  time.Now().Add(2 * time.Hour),
+	}
+	sessionMu.Unlock()
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    token,
+		Path:     "/",
+		Expires:  time.Now().Add(2 * time.Hour),
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"token":    token,
+		"username": u.Username,
+		"role":     u.Role,
+	})
+}
+
+func handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	token := r.Header.Get("X-Session-Token")
+	if token == "" {
+		if cookie, err := r.Cookie("session_token"); err == nil {
+			token = cookie.Value
+		}
+	}
+
+	if token != "" {
+		sessionMu.Lock()
+		delete(activeSessions, token)
+		sessionMu.Unlock()
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    "",
+		Path:     "/",
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+	})
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"logged_out"}`))
+}
+
+// ─── User Administration Endpoints (Admin Only) ─────────────────────────────
+
+type PublicUser struct {
+	Username string `json:"username"`
+	Role     string `json:"role"`
+}
+
+func handleListUsers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	usersMu.RLock()
+	var list []PublicUser
+	for _, u := range users {
+		list = append(list, PublicUser{Username: u.Username, Role: u.Role})
+	}
+	usersMu.RUnlock()
+	_ = json.NewEncoder(w).Encode(list)
+}
+
+func handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Username == "" || len(req.Password) < 8 {
+		http.Error(w, "Username cannot be empty and password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+	if req.Role != "admin" && req.Role != "user" {
+		req.Role = "user"
+	}
+
+	usersMu.Lock()
+	defer usersMu.Unlock()
+
+	if _, exists := users[req.Username]; exists {
+		http.Error(w, "User already exists", http.StatusConflict)
+		return
+	}
+
+	salt, _ := generateSalt()
+	hash := hashPassword(req.Password, salt)
+
+	users[req.Username] = User{
+		Username:     req.Username,
+		PasswordHash: hash,
+		Salt:         hex.EncodeToString(salt),
+		Role:         req.Role,
+	}
+
+	if err := saveUsers(); err != nil {
+		http.Error(w, "Failed to save user database", http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "user_created"})
+}
+
+func handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	session, _ := authenticate(r)
+	if session != nil && session.Username == req.Username {
+		http.Error(w, "Cannot delete currently logged-in administrator", http.StatusConflict)
+		return
+	}
+
+	usersMu.Lock()
+	defer usersMu.Unlock()
+
+	if _, exists := users[req.Username]; !exists {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	delete(users, req.Username)
+	if err := saveUsers(); err != nil {
+		http.Error(w, "Failed to save user database", http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "user_deleted"})
+}
+
+func handleUpdateUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password,omitempty"`
+		Role     string `json:"role,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	usersMu.Lock()
+	defer usersMu.Unlock()
+
+	u, exists := users[req.Username]
+	if !exists {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	if req.Password != "" {
+		if len(req.Password) < 8 {
+			http.Error(w, "Password must be at least 8 characters", http.StatusBadRequest)
+			return
+		}
+		salt, _ := generateSalt()
+		u.PasswordHash = hashPassword(req.Password, salt)
+		u.Salt = hex.EncodeToString(salt)
+	}
+
+	if req.Role == "admin" || req.Role == "user" {
+		u.Role = req.Role
+	}
+
+	users[req.Username] = u
+	if err := saveUsers(); err != nil {
+		http.Error(w, "Failed to save user database", http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "user_updated"})
+}
+
+// ─── Scenario Customization & Storage Endpoints ──────────────────────────────
+
+var (
+	scenariosFile  = "config/scenarios.json"
+	savedScenarios = []ScenarioItem{}
+	scenariosMu    sync.RWMutex
+)
+
+func loadSavedScenarios() error {
+	scenariosMu.Lock()
+	defer scenariosMu.Unlock()
+
+	file, err := os.Open(scenariosFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+
+	return json.NewDecoder(file).Decode(&savedScenarios)
+}
+
+func saveSavedScenarios() error {
+	_ = os.MkdirAll("config", 0755)
+	data, err := json.MarshalIndent(savedScenarios, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(scenariosFile, data, 0644)
+}
+
+func handleSaveScenario(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Name        string       `json:"name"`
+		Description string       `json:"description"`
+		Steps       []CustomStep `json:"steps"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" || len(req.Steps) == 0 {
+		http.Error(w, "Scenario Name and steps are required", http.StatusBadRequest)
+		return
+	}
+
+	scenariosMu.Lock()
+	defer scenariosMu.Unlock()
+
+	customId := "custom-" + strings.ToLower(strings.ReplaceAll(req.Name, " ", "-"))
+	
+	foundIdx := -1
+	for idx, s := range savedScenarios {
+		if s.ID == customId {
+			foundIdx = idx
+			break
+		}
+	}
+
+	newScen := ScenarioItem{
+		ID:          customId,
+		Name:        req.Name,
+		Description: req.Description,
+		IsCustom:    true,
+		Steps:       req.Steps,
+	}
+
+	if foundIdx >= 0 {
+		savedScenarios[foundIdx] = newScen
+	} else {
+		savedScenarios = append(savedScenarios, newScen)
+	}
+
+	if err := saveSavedScenarios(); err != nil {
+		http.Error(w, "Failed to save custom scenarios", http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "scenario_saved", "id": customId})
+}
+
+func handleEditScenario(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID          string       `json:"id"`
+		Name        string       `json:"name"`
+		Description string       `json:"description"`
+		Steps       []CustomStep `json:"steps"`
+		Delete      bool         `json:"delete,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		http.Error(w, "Scenario ID is required", http.StatusBadRequest)
+		return
+	}
+
+	if !strings.HasPrefix(req.ID, "custom-") {
+		http.Error(w, "Cannot modify built-in default scenarios", http.StatusForbidden)
+		return
+	}
+
+	scenariosMu.Lock()
+	defer scenariosMu.Unlock()
+
+	foundIdx := -1
+	for idx, s := range savedScenarios {
+		if s.ID == req.ID {
+			foundIdx = idx
+			break
+		}
+	}
+
+	if foundIdx < 0 {
+		http.Error(w, "Scenario not found", http.StatusNotFound)
+		return
+	}
+
+	if req.Delete {
+		savedScenarios = append(savedScenarios[:foundIdx], savedScenarios[foundIdx+1:]...)
+	} else {
+		savedScenarios[foundIdx].Name = req.Name
+		savedScenarios[foundIdx].Description = req.Description
+		if len(req.Steps) > 0 {
+			savedScenarios[foundIdx].Steps = req.Steps
+		}
+	}
+
+	if err := saveSavedScenarios(); err != nil {
+		http.Error(w, "Failed to save custom scenarios", http.StatusInternalServerError)
+		return
+	}
+
+	status := "scenario_updated"
+	if req.Delete {
+		status = "scenario_deleted"
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
 }

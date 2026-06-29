@@ -24,11 +24,37 @@ import {
   FileText,
   X,
   Eye,
-  GitCommit
+  GitCommit,
+  Users,
+  Lock,
+  UserPlus,
+  LogOut
 } from 'lucide-react';
 
 // API base path (works with relative path when served by Go, or proxied in dev)
 const API_BASE = '/api';
+
+const originalFetch = window.fetch;
+window.fetch = async function (input, init) {
+  const token = sessionStorage.getItem('session_token') || '';
+  if (token && typeof input === 'string' && input.includes('/api/')) {
+    init = init || {};
+    init.headers = init.headers || {};
+    if (init.headers instanceof Headers) {
+      init.headers.set('X-Session-Token', token);
+    } else {
+      init.headers = { ...init.headers, 'X-Session-Token': token };
+    }
+  }
+  const response = await originalFetch(input, init);
+  if (response.status === 401 && typeof input === 'string' && !input.includes('/api/auth/')) {
+    sessionStorage.removeItem('session_token');
+    sessionStorage.removeItem('session_username');
+    sessionStorage.removeItem('session_role');
+    window.dispatchEvent(new Event('auth-unauthorized'));
+  }
+  return response;
+};
 
 interface PDUSession {
   Id: number;
@@ -134,6 +160,8 @@ interface Scenario {
   id: string;
   name: string;
   description: string;
+  isCustom?: boolean;
+  steps?: any[];
 }
 
 interface LogMsg {
@@ -587,9 +615,41 @@ export default function App() {
     const saved = localStorage.getItem('theme');
     return (saved === 'dark' || saved === 'light') ? saved : 'light';
   });
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity' | 'fleet' | 'diagnostics' | 'docs'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity' | 'fleet' | 'diagnostics' | 'docs' | 'users'>('dashboard');
   const [selectedNode, setSelectedNode] = useState<'ue' | 'gnb' | 'amf' | 'upf' | 'dn' | 'uu-link' | 'n2-link' | 'n3-link' | 'n6-link' | null>('ue');
   
+  // Security / Authentication states
+  const [sessionToken, setSessionToken] = useState<string>(() => sessionStorage.getItem('session_token') || '');
+  const [currentUser, setCurrentUser] = useState<{ username: string; role: string } | null>(() => {
+    const username = sessionStorage.getItem('session_username');
+    const role = sessionStorage.getItem('session_role');
+    return (username && role) ? { username, role } : null;
+  });
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
+  const [setupRequired, setSetupRequired] = useState<boolean>(false);
+  
+  // Login / Setup Form states
+  const [authUsername, setAuthUsername] = useState<string>('');
+  const [authPassword, setAuthPassword] = useState<string>('');
+  const [authConfirmPassword, setAuthConfirmPassword] = useState<string>('');
+  const [authError, setAuthError] = useState<string>('');
+  const [authLoading, setAuthLoading] = useState<boolean>(false);
+
+  // User list states (for user administration)
+  const [usersList, setUsersList] = useState<any[]>([]);
+  const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
+  const [newUserPassword, setNewUserPassword] = useState<string>('');
+  const [newUserUsername, setNewUserUsername] = useState<string>('');
+  const [userManageError, setUserManageError] = useState<string>('');
+  const [userManageSuccess, setUserManageSuccess] = useState<string>('');
+
+  // Custom scenario saving states
+  const [showSaveScenarioModal, setShowSaveScenarioModal] = useState<boolean>(false);
+  const [saveScenarioName, setSaveScenarioName] = useState<string>('');
+  const [saveScenarioDesc, setSaveScenarioDesc] = useState<string>('');
+  const [scenarioManageError, setScenarioManageError] = useState<string>('');
+  const [scenarioManageSuccess, setScenarioManageSuccess] = useState<string>('');
+
   // Documentation states and helpers
   const [docsContent, setDocsContent] = useState<string>('');
   const [docsLoading, setDocsLoading] = useState<boolean>(false);
@@ -608,6 +668,262 @@ export default function App() {
       setDocsLoading(false);
     }
   };
+
+  const checkAuthSession = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/session`);
+      if (res.ok) {
+        const data = await res.json();
+        setSetupRequired(data.setupRequired);
+        if (data.loggedIn) {
+          setCurrentUser({ username: data.username, role: data.role });
+        } else {
+          setCurrentUser(null);
+          setSessionToken('');
+        }
+      }
+    } catch (err) {
+      console.error('Error checking auth session:', err);
+    } finally {
+      setAuthChecked(true);
+    }
+  };
+
+  useEffect(() => {
+    checkAuthSession();
+  }, [sessionToken]);
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setSessionToken('');
+      setCurrentUser(null);
+      sessionStorage.removeItem('session_token');
+      sessionStorage.removeItem('session_username');
+      sessionStorage.removeItem('session_role');
+    };
+    window.addEventListener('auth-unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('auth-unauthorized', handleUnauthorized);
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: authUsername, password: authPassword }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        sessionStorage.setItem('session_token', data.token);
+        sessionStorage.setItem('session_username', data.username);
+        sessionStorage.setItem('session_role', data.role);
+        setSessionToken(data.token);
+        setCurrentUser({ username: data.username, role: data.role });
+        setAuthUsername('');
+        setAuthPassword('');
+      } else {
+        const errData = await res.json();
+        setAuthError(errData.error || 'Invalid credentials');
+      }
+    } catch (err) {
+      setAuthError('Network error. Failed to login.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSetup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    if (authPassword !== authConfirmPassword) {
+      setAuthError('Passwords do not match');
+      return;
+    }
+    if (authPassword.length < 8) {
+      setAuthError('Password must be at least 8 characters');
+      return;
+    }
+    setAuthLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/setup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: authUsername, password: authPassword }),
+      });
+      if (res.ok) {
+        const loginRes = await fetch(`${API_BASE}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: authUsername, password: authPassword }),
+        });
+        if (loginRes.ok) {
+          const data = await loginRes.json();
+          sessionStorage.setItem('session_token', data.token);
+          sessionStorage.setItem('session_username', data.username);
+          sessionStorage.setItem('session_role', data.role);
+          setSessionToken(data.token);
+          setCurrentUser({ username: data.username, role: data.role });
+          setSetupRequired(false);
+          setAuthUsername('');
+          setAuthPassword('');
+          setAuthConfirmPassword('');
+        }
+      } else {
+        const txt = await res.text();
+        setAuthError(txt || 'Failed to complete setup');
+      }
+    } catch (err) {
+      setAuthError('Failed to establish connection for setup');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, { method: 'POST' });
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      sessionStorage.removeItem('session_token');
+      sessionStorage.removeItem('session_username');
+      sessionStorage.removeItem('session_role');
+      setSessionToken('');
+      setCurrentUser(null);
+      setActiveTab('dashboard');
+    }
+  };
+
+  const fetchUsersList = async () => {
+    if (currentUser?.role !== 'admin') return;
+    try {
+      const res = await fetch(`${API_BASE}/auth/users`);
+      if (res.ok) {
+        const data = await res.json();
+        setUsersList(data);
+      }
+    } catch (err) {
+      console.error('Error fetching users:', err);
+    }
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUserManageError('');
+    setUserManageSuccess('');
+    if (!newUserUsername || newUserPassword.length < 8) {
+      setUserManageError('Username cannot be empty and password must be at least 8 characters');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/auth/users/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: newUserUsername, password: newUserPassword, role: newUserRole }),
+      });
+      if (res.ok) {
+        setUserManageSuccess(`User "${newUserUsername}" successfully created.`);
+        setNewUserUsername('');
+        setNewUserPassword('');
+        setNewUserRole('user');
+        fetchUsersList();
+      } else {
+        const txt = await res.text();
+        setUserManageError(txt || 'Failed to create user');
+      }
+    } catch (err) {
+      setUserManageError('Network error. Failed to create user.');
+    }
+  };
+
+  const handleDeleteUser = async (username: string) => {
+    if (!window.confirm(`Are you sure you want to delete user "${username}"?`)) return;
+    setUserManageError('');
+    setUserManageSuccess('');
+    try {
+      const res = await fetch(`${API_BASE}/auth/users/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username }),
+      });
+      if (res.ok) {
+        setUserManageSuccess(`User "${username}" successfully deleted.`);
+        fetchUsersList();
+      } else {
+        const txt = await res.text();
+        setUserManageError(txt || 'Failed to delete user');
+      }
+    } catch (err) {
+      setUserManageError('Network error. Failed to delete user.');
+    }
+  };
+
+  const handleSaveScenario = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setScenarioManageError('');
+    setScenarioManageSuccess('');
+    if (!saveScenarioName.trim()) {
+      setScenarioManageError('Scenario name is required');
+      return;
+    }
+    let steps: any[] = [];
+    try {
+      const parsed = JSON.parse(customScenarioText);
+      steps = parsed.steps || [];
+    } catch (err) {
+      setScenarioManageError('Invalid JSON in custom scripting editor. Cannot save.');
+      return;
+    }
+    if (steps.length === 0) {
+      setScenarioManageError('Scenario steps cannot be empty');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/scenarios/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: saveScenarioName, description: saveScenarioDesc, steps }),
+      });
+      if (res.ok) {
+        setScenarioManageSuccess('Scenario successfully saved!');
+        setShowSaveScenarioModal(false);
+        setSaveScenarioName('');
+        setSaveScenarioDesc('');
+        fetchScenarios();
+      } else {
+        const txt = await res.text();
+        setScenarioManageError(txt || 'Failed to save scenario');
+      }
+    } catch (err) {
+      setScenarioManageError('Network error. Failed to save scenario.');
+    }
+  };
+
+  const handleDeleteScenario = async (scenarioId: string) => {
+    if (!window.confirm('Are you sure you want to delete this custom scenario?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/scenarios/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: scenarioId, delete: true }),
+      });
+      if (res.ok) {
+        fetchScenarios();
+      }
+    } catch (err) {
+      console.error('Failed to delete scenario:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'users') {
+      fetchUsersList();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab === 'docs') {
@@ -628,9 +944,9 @@ export default function App() {
       const type = match[1];
       const content = match[2];
       if (type === '**') {
-        parts.push(<strong key={idx++} style={{ color: '#fff', fontWeight: 'bold' }}>{content}</strong>);
+        parts.push(<strong key={idx++} style={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>{content}</strong>);
       } else if (type === '`') {
-        parts.push(<code key={idx++} style={{ background: 'rgba(255,255,255,0.08)', padding: '2px 6px', borderRadius: '4px', fontFamily: 'Consolas, monospace', fontSize: '12px', color: '#f43f5e' }}>{content}</code>);
+        parts.push(<code key={idx++} style={{ background: 'var(--bg-main)', padding: '2px 6px', borderRadius: '4px', fontFamily: 'Consolas, monospace', fontSize: '12px', color: '#3b82f6', border: '1px solid var(--border-color)' }}>{content}</code>);
       }
       lastIndex = regex.lastIndex;
     }
@@ -652,7 +968,7 @@ export default function App() {
           const codeText = codeBlockContent.join('\n');
           codeBlockContent = [];
           return (
-            <pre key={idx} style={{ background: '#0f172a', padding: '12px 16px', borderRadius: '6px', overflowX: 'auto', border: '1px solid rgba(255,255,255,0.05)', fontFamily: 'Consolas, monospace', fontSize: '12px', margin: '8px 0', color: '#e2e8f0' }}>
+            <pre key={idx} style={{ background: 'var(--bg-main)', padding: '12px 16px', borderRadius: '6px', overflowX: 'auto', border: '1px solid var(--border-color)', fontFamily: 'Consolas, monospace', fontSize: '12px', margin: '8px 0', color: 'var(--text-primary)' }}>
               <code>{codeText}</code>
             </pre>
           );
@@ -666,13 +982,13 @@ export default function App() {
         return null;
       }
       if (line.startsWith('# ')) {
-        return <h1 key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '8px', marginTop: '24px', marginBottom: '12px', color: '#fff', fontSize: '22px' }}>{line.slice(2)}</h1>;
+        return <h1 key={idx} style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', marginTop: '24px', marginBottom: '12px', color: 'var(--text-primary)', fontSize: '22px' }}>{line.slice(2)}</h1>;
       }
       if (line.startsWith('## ')) {
-        return <h2 key={idx} style={{ marginTop: '20px', marginBottom: '10px', color: '#e2e8f0', fontSize: '18px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '4px' }}>{line.slice(3)}</h2>;
+        return <h2 key={idx} style={{ marginTop: '20px', marginBottom: '10px', color: 'var(--text-primary)', fontSize: '18px', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px' }}>{line.slice(3)}</h2>;
       }
       if (line.startsWith('### ')) {
-        return <h3 key={idx} style={{ marginTop: '16px', marginBottom: '8px', color: '#cbd5e1', fontSize: '15px' }}>{line.slice(4)}</h3>;
+        return <h3 key={idx} style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-primary)', fontSize: '15px' }}>{line.slice(4)}</h3>;
       }
       if (line.trim().startsWith('* ') || line.trim().startsWith('- ')) {
         return (
@@ -2885,6 +3201,140 @@ export default function App() {
     );
   };
 
+  if (!authChecked) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg-main)', color: 'var(--text-primary)', gap: '16px', fontFamily: 'sans-serif' }}>
+        <RefreshCw className="animate-spin text-blue" size={32} style={{ color: '#3b82f6' }} />
+        <span style={{ fontWeight: 600, fontSize: '12px', letterSpacing: '0.05em' }}>VERIFYING SECURITY CREDENTIALS...</span>
+      </div>
+    );
+  }
+
+  if (setupRequired) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg-main)', color: 'var(--text-primary)', fontFamily: 'sans-serif' }}>
+        <form onSubmit={handleSetup} className="card" style={{ padding: '32px', width: '400px', display: 'flex', flexDirection: 'column', gap: '20px', border: '1px solid var(--border-color)', borderRadius: '12px', background: 'var(--bg-panel)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+          <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+            <Lock size={32} className="text-blue" style={{ color: '#3b82f6' }} />
+            <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold' }}>Create Administrator</h2>
+            <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>OmniRAN core emulator setup is required.</p>
+          </div>
+
+          {authError && (
+            <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', borderRadius: '6px', fontSize: '13px', fontWeight: 600 }}>
+              {authError}
+            </div>
+          )}
+
+          <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Admin Username</label>
+            <input 
+              type="text" 
+              className="form-input" 
+              value={authUsername} 
+              onChange={e => setAuthUsername(e.target.value)} 
+              placeholder="e.g. admin" 
+              required 
+              style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '10px', borderRadius: '6px' }}
+            />
+          </div>
+
+          <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Secure Password (min 8 chars)</label>
+            <input 
+              type="password" 
+              className="form-input" 
+              value={authPassword} 
+              onChange={e => setAuthPassword(e.target.value)} 
+              placeholder="••••••••" 
+              required 
+              style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '10px', borderRadius: '6px' }}
+            />
+          </div>
+
+          <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Confirm Password</label>
+            <input 
+              type="password" 
+              className="form-input" 
+              value={authConfirmPassword} 
+              onChange={e => setAuthConfirmPassword(e.target.value)} 
+              placeholder="••••••••" 
+              required 
+              style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '10px', borderRadius: '6px' }}
+            />
+          </div>
+
+          <button 
+            type="submit" 
+            disabled={authLoading} 
+            className="btn btn-primary"
+            style={{ width: '100%', padding: '12px', fontWeight: 'bold', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+          >
+            {authLoading ? <RefreshCw className="animate-spin" size={16} /> : <UserPlus size={16} />}
+            Setup Admin Account
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  if (!sessionToken || !currentUser) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg-main)', color: 'var(--text-primary)', fontFamily: 'sans-serif' }}>
+        <form onSubmit={handleLogin} className="card" style={{ padding: '32px', width: '400px', display: 'flex', flexDirection: 'column', gap: '20px', border: '1px solid var(--border-color)', borderRadius: '12px', background: 'var(--bg-panel)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+          <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+            <Lock size={32} className="text-blue" style={{ color: '#3b82f6' }} />
+            <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold' }}>Core Security Access</h2>
+            <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>Authentication is required to access emulator console.</p>
+          </div>
+
+          {authError && (
+            <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', borderRadius: '6px', fontSize: '13px', fontWeight: 600 }}>
+              {authError}
+            </div>
+          )}
+
+          <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Username</label>
+            <input 
+              type="text" 
+              className="form-input" 
+              value={authUsername} 
+              onChange={e => setAuthUsername(e.target.value)} 
+              placeholder="Enter your username" 
+              required 
+              style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '10px', borderRadius: '6px' }}
+            />
+          </div>
+
+          <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Password</label>
+            <input 
+              type="password" 
+              className="form-input" 
+              value={authPassword} 
+              onChange={e => setAuthPassword(e.target.value)} 
+              placeholder="••••••••" 
+              required 
+              style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '10px', borderRadius: '6px' }}
+            />
+          </div>
+
+          <button 
+            type="submit" 
+            disabled={authLoading} 
+            className="btn btn-primary"
+            style={{ width: '100%', padding: '12px', fontWeight: 'bold', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+          >
+            {authLoading ? <RefreshCw className="animate-spin" size={16} /> : <Lock size={16} />}
+            Authenticate Access
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       {/* Sidebar Navigation */}
@@ -2955,11 +3405,35 @@ export default function App() {
             <FileText />
             <span>Documentation</span>
           </li>
+          {currentUser?.role === 'admin' && (
+            <li
+              className={`nav-item ${activeTab === 'users' ? 'active' : ''}`}
+              onClick={() => setActiveTab('users')}
+            >
+              <Users />
+              <span>User Management</span>
+            </li>
+          )}
         </nav>
 
-        <div className="sidebar-footer">
-          <span className="footer-label">EMULATOR VERSION</span>
-          <span className="footer-value">v1.0.1 SA</span>
+        <div className="sidebar-footer" style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '12px', marginTop: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{currentUser?.username}</span>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{currentUser?.role}</span>
+            </div>
+            <button 
+              onClick={handleLogout} 
+              style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: '4px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              title="Logout session"
+            >
+              <LogOut size={14} />
+            </button>
+          </div>
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: '10px' }}>
+            <span className="footer-label">EMULATOR VERSION</span>
+            <span className="footer-value">v1.0.1 SA</span>
+          </div>
         </div>
       </aside>
 
@@ -2976,6 +3450,7 @@ export default function App() {
               {activeTab === 'fleet' && 'Fleet Manager'}
               {activeTab === 'diagnostics' && 'Diagnostics & Captures'}
               {activeTab === 'docs' && 'Technical Documentation'}
+              {activeTab === 'users' && 'User Administration'}
             </h1>
           </div>
 
@@ -4553,7 +5028,14 @@ export default function App() {
                   return (
                     <div className="card scenario-card" key={scen.id}>
                       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span className="card-title font-bold text-white">{scen.name}</span>
+                        <span className="card-title font-bold text-white" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {scen.name}
+                          {scen.isCustom && (
+                            <span style={{ fontSize: '10px', color: '#60a5fa', background: 'rgba(59,130,246,0.15)', padding: '2px 6px', borderRadius: '4px', textTransform: 'uppercase', fontWeight: 'bold' }}>
+                              Custom
+                            </span>
+                          )}
+                        </span>
                         {isRunningThis ? (
                           <Activity size={12} className="animate-pulse" style={{ color: '#f59e0b' }} />
                         ) : (
@@ -4676,11 +5158,12 @@ export default function App() {
                           </div>
                         )}
 
-                        <div style={{ marginTop: 'auto' }}>
+                        <div style={{ marginTop: 'auto', display: 'flex', gap: '8px' }}>
                           <button
                             className={`btn btn-primary`}
                             disabled={status?.isRunning}
                             onClick={() => runScenario(scen.id)}
+                            style={{ flex: 1 }}
                           >
                             {isRunningThis ? (
                               <>
@@ -4694,6 +5177,35 @@ export default function App() {
                               </>
                             )}
                           </button>
+                          {scen.isCustom && currentUser?.role === 'admin' && (
+                            <>
+                              <button
+                                className="btn btn-secondary"
+                                disabled={status?.isRunning}
+                                onClick={() => {
+                                  setScenarioMode('custom');
+                                  setCustomScenarioText(JSON.stringify({
+                                    name: scen.name,
+                                    description: scen.description,
+                                    steps: scen.steps
+                                  }, null, 2));
+                                }}
+                                style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)', color: '#60a5fa', cursor: 'pointer' }}
+                                title="Edit scenario script"
+                              >
+                                <Settings size={14} />
+                              </button>
+                              <button
+                                className="btn btn-danger"
+                                disabled={status?.isRunning}
+                                onClick={() => handleDeleteScenario(scen.id)}
+                                style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                title="Delete custom scenario"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -4791,14 +5303,30 @@ export default function App() {
                         STOP SCENARIO
                       </button>
                     ) : (
-                      <button
-                        className="btn btn-primary"
-                        onClick={runCustomScenario}
-                        disabled={status?.isRunning}
-                        style={{ flex: 1, padding: '10px', fontWeight: 'bold' }}
-                      >
-                        LAUNCH SCENARIO
-                      </button>
+                      <>
+                        <button
+                          className="btn btn-primary"
+                          onClick={runCustomScenario}
+                          disabled={status?.isRunning}
+                          style={{ flex: 2, padding: '10px', fontWeight: 'bold' }}
+                        >
+                          LAUNCH SCENARIO
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => {
+                            setScenarioManageError('');
+                            setScenarioManageSuccess('');
+                            setSaveScenarioName('');
+                            setSaveScenarioDesc('');
+                            setShowSaveScenarioModal(true);
+                          }}
+                          disabled={status?.isRunning}
+                          style={{ flex: 1, padding: '10px', fontWeight: 'bold', background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)', color: '#60a5fa', cursor: 'pointer' }}
+                        >
+                          SAVE SCRIPT
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -6663,8 +7191,8 @@ export default function App() {
                     overflowY: 'auto', 
                     padding: '16px 24px', 
                     borderRadius: '8px', 
-                    background: 'rgba(0,0,0,0.15)', 
-                    border: '1px solid rgba(255,255,255,0.03)',
+                    background: 'var(--bg-input)', 
+                    border: '1px solid var(--border-color)',
                     lineHeight: '1.7',
                     fontSize: '14px',
                     color: 'var(--text-primary)'
@@ -6673,6 +7201,124 @@ export default function App() {
                   {renderFormattedDocs(docsContent)}
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ─── User Management Tab (Admin Only) ─────────────────────────── */}
+        {activeTab === 'users' && currentUser?.role === 'admin' && (
+          <div className="view-body fade-in">
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px', maxWidth: '1100px', margin: '0 auto' }}>
+              
+              {/* Users List Column */}
+              <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                  <Users className="text-blue" size={20} />
+                  Registered System Users
+                </h3>
+                
+                {userManageSuccess && (
+                  <div style={{ padding: '8px 12px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#10b981', borderRadius: '6px', fontSize: '13px', fontWeight: 600 }}>
+                    {userManageSuccess}
+                  </div>
+                )}
+                {userManageError && (
+                  <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', borderRadius: '6px', fontSize: '13px', fontWeight: 600 }}>
+                    {userManageError}
+                  </div>
+                )}
+
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--border-color)', opacity: 0.8 }}>
+                        <th style={{ padding: '10px 8px' }}>Username</th>
+                        <th style={{ padding: '10px 8px' }}>Role</th>
+                        <th style={{ padding: '10px 8px', textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usersList.map((usr) => (
+                        <tr key={usr.username} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                          <td style={{ padding: '12px 8px', fontWeight: 600, color: 'var(--text-primary)' }}>{usr.username}</td>
+                          <td style={{ padding: '12px 8px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 'bold', padding: '3px 8px', borderRadius: '12px', background: usr.role === 'admin' ? 'rgba(59,130,246,0.15)' : 'rgba(156,163,175,0.15)', color: usr.role === 'admin' ? '#60a5fa' : '#9ca3af' }}>
+                              {usr.role.toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 8px', textAlign: 'right' }}>
+                            <button
+                              disabled={usr.username === currentUser?.username}
+                              onClick={() => handleDeleteUser(usr.username)}
+                              className="btn btn-xs"
+                              style={{ background: usr.username === currentUser?.username ? 'rgba(255,255,255,0.05)' : 'rgba(239,68,68,0.15)', color: usr.username === currentUser?.username ? 'var(--text-muted)' : '#ef4444', border: 'none', borderRadius: '4px', cursor: usr.username === currentUser?.username ? 'not-allowed' : 'pointer', padding: '4px 10px', fontSize: '11px', fontWeight: 'bold' }}
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Create User Column */}
+              <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                  <UserPlus className="text-blue" size={20} />
+                  Create System User
+                </h3>
+
+                <form onSubmit={handleCreateUser} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Username</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={newUserUsername}
+                      onChange={e => setNewUserUsername(e.target.value)}
+                      placeholder="e.g. testing_engineer"
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Access Password</label>
+                    <input
+                      type="password"
+                      className="form-input"
+                      value={newUserPassword}
+                      onChange={e => setNewUserPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Authorization Role</label>
+                    <select
+                      className="form-input"
+                      value={newUserRole}
+                      onChange={e => setNewUserRole(e.target.value as 'admin' | 'user')}
+                      style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', padding: '8px', borderRadius: '6px' }}
+                    >
+                      <option value="user">User (Run Scenarios & Save Scripts)</option>
+                      <option value="admin">Administrator (Full Manage & Edit Scenarios)</option>
+                    </select>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    style={{ padding: '10px', marginTop: '8px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                  >
+                    <UserPlus size={16} />
+                    Add User Account
+                  </button>
+                </form>
+              </div>
+
             </div>
           </div>
         )}
@@ -7517,6 +8163,81 @@ export default function App() {
 
           </div>
         </dialog>
+      )}
+
+      {/* ─── Save Custom Scenario Modal Overlay ────────────────────────── */}
+      {showSaveScenarioModal && (
+        <div className="fleet-form-overlay" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000 }}>
+          <div className="fleet-form-card" style={{ width: '450px', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', boxShadow: '0 10px 40px rgba(0,0,0,0.4)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+              <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+                <FileText size={18} className="text-blue" style={{ color: '#3b82f6' }} />
+                Save Custom Scenario
+              </h4>
+              <button 
+                onClick={() => setShowSaveScenarioModal(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '16px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {scenarioManageError && (
+              <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', borderRadius: '6px', fontSize: '12px', fontWeight: 600 }}>
+                {scenarioManageError}
+              </div>
+            )}
+            {scenarioManageSuccess && (
+              <div style={{ padding: '8px 12px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#10b981', borderRadius: '6px', fontSize: '12px', fontWeight: 600 }}>
+                {scenarioManageSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveScenario} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Scenario Name *</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={saveScenarioName} 
+                  onChange={e => setSaveScenarioName(e.target.value)} 
+                  placeholder="e.g. Rel17 Paging Congestion Test" 
+                  required 
+                  style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '10px', borderRadius: '6px' }}
+                />
+              </div>
+
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Description</label>
+                <textarea 
+                  className="form-input" 
+                  value={saveScenarioDesc} 
+                  onChange={e => setSaveScenarioDesc(e.target.value)} 
+                  placeholder="Describe what this script tests..." 
+                  style={{ minHeight: '80px', resize: 'vertical', background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '10px', borderRadius: '6px' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '8px' }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => setShowSaveScenarioModal(false)}
+                  style={{ padding: '8px 16px', borderRadius: '6px' }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary"
+                  style={{ padding: '8px 20px', borderRadius: '6px', fontWeight: 'bold' }}
+                >
+                  Save Scenario
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       </main>
