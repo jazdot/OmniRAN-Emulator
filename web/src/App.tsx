@@ -33,6 +33,31 @@ import {
 } from 'lucide-react';
 
 // API base path (works with relative path when served by Go, or proxied in dev)
+const CodeBlock = ({ codeText, lang }: { codeText: string; lang: string }) => {
+  const [copied, setCopied] = React.useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(codeText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <div style={{ margin: '16px 0', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden', background: '#0f172a' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1e293b', padding: '6px 16px', borderBottom: '1px solid var(--border-color)' }}>
+        <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#94a3b8', fontWeight: 600 }}>{lang.toUpperCase() || 'COMMAND / CONFIG'}</span>
+        <button 
+          onClick={handleCopy}
+          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', padding: '4px 10px', fontSize: '10px', color: '#cbd5e1', cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+      <pre style={{ margin: 0, padding: '14px 18px', overflowX: 'auto', fontFamily: 'Consolas, monospace', fontSize: '13px', color: '#38bdf8', lineHeight: '1.6' }}>
+        <code>{codeText}</code>
+      </pre>
+    </div>
+  );
+};
+
 const API_BASE = '/api';
 
 const originalFetch = window.fetch;
@@ -970,7 +995,7 @@ export default function App() {
   const parseInlineStyles = (text: string) => {
     const parts: React.ReactNode[] = [];
     let idx = 0;
-    const regex = /(\*\*|`)(.*?)\1/g;
+    const regex = /(\*\*|`|\[)(.*?)(?:\1|\]\((.*?)\))/g;
     let match;
     let lastIndex = 0;
     while ((match = regex.exec(text)) !== null) {
@@ -978,11 +1003,24 @@ export default function App() {
         parts.push(text.substring(lastIndex, match.index));
       }
       const type = match[1];
-      const content = match[2];
       if (type === '**') {
-        parts.push(<strong key={idx++} style={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>{content}</strong>);
+        parts.push(<strong key={idx++} style={{ color: 'var(--text-primary)', fontWeight: 'bold' }}>{match[2]}</strong>);
       } else if (type === '`') {
-        parts.push(<code key={idx++} style={{ background: 'var(--bg-main)', padding: '2px 6px', borderRadius: '4px', fontFamily: 'Consolas, monospace', fontSize: '12px', color: '#3b82f6', border: '1px solid var(--border-color)' }}>{content}</code>);
+        parts.push(<code key={idx++} style={{ background: 'var(--bg-main)', padding: '2px 6px', borderRadius: '4px', fontFamily: 'Consolas, monospace', fontSize: '12px', color: '#e11d48', border: '1px solid var(--border-color)' }}>{match[2]}</code>);
+      } else if (type === '[') {
+        const linkText = match[2];
+        const linkUrl = match[3] || '';
+        parts.push(
+          <a 
+            key={idx++} 
+            href={linkUrl} 
+            target={linkUrl.startsWith('http') || linkUrl.startsWith('file:') ? '_blank' : undefined}
+            rel="noopener noreferrer"
+            style={{ color: '#3b82f6', textDecoration: 'underline', fontWeight: '500' }}
+          >
+            {linkText}
+          </a>
+        );
       }
       lastIndex = regex.lastIndex;
     }
@@ -995,61 +1033,199 @@ export default function App() {
   const renderFormattedDocs = (text: string) => {
     if (!text) return null;
     const lines = text.split('\n');
+    const nodes: React.ReactNode[] = [];
+    
     let inCodeBlock = false;
     let codeBlockContent: string[] = [];
-    return lines.map((line, idx) => {
-      if (line.trim().startsWith('```')) {
+    let codeBlockLang = '';
+    
+    let inTable = false;
+    let tableRows: string[][] = [];
+    
+    const flushTable = (keyIdx: number) => {
+      if (tableRows.length > 0) {
+        const headers = tableRows[0];
+        const bodyRows = tableRows.slice(1);
+        nodes.push(
+          <div key={`table-${keyIdx}`} style={{ overflowX: 'auto', margin: '18px 0', borderRadius: '8px', border: '1px solid var(--border-color)', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ background: 'var(--bg-panel)', borderBottom: '2px solid var(--border-color)' }}>
+                  {headers.map((h, i) => (
+                    <th key={i} style={{ padding: '10px 14px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {bodyRows.map((row, rIdx) => (
+                  <tr key={rIdx} style={{ borderBottom: '1px solid var(--border-color)', background: rIdx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
+                    {row.map((cell, cIdx) => (
+                      <td key={cIdx} style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>{parseInlineStyles(cell)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+        tableRows = [];
+        inTable = false;
+      }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      // Handle Code Block
+      if (trimmed.startsWith('```')) {
         if (inCodeBlock) {
           inCodeBlock = false;
-          const codeText = codeBlockContent.join('\n');
-          codeBlockContent = [];
-          return (
-            <pre key={idx} style={{ background: 'var(--bg-main)', padding: '12px 16px', borderRadius: '6px', overflowX: 'auto', border: '1px solid var(--border-color)', fontFamily: 'Consolas, monospace', fontSize: '12px', margin: '8px 0', color: 'var(--text-primary)' }}>
-              <code>{codeText}</code>
-            </pre>
+          nodes.push(
+            <CodeBlock 
+              key={`code-${i}`} 
+              codeText={codeBlockContent.join('\n')} 
+              lang={codeBlockLang} 
+            />
           );
+          codeBlockContent = [];
+          codeBlockLang = '';
         } else {
           inCodeBlock = true;
-          return null;
+          codeBlockLang = trimmed.replace('```', '').trim() || 'Config';
         }
+        continue;
       }
+
       if (inCodeBlock) {
         codeBlockContent.push(line);
-        return null;
+        continue;
       }
-      if (line.startsWith('# ')) {
-        const textVal = line.slice(2).trim();
-        const elementId = textVal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-        return <h1 id={elementId} key={idx} style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', marginTop: '24px', marginBottom: '12px', color: 'var(--text-primary)', fontSize: '22px' }}>{textVal}</h1>;
+
+      // Handle Table
+      if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+        const isSeparator = trimmed.replace(/[\s|:\-]/g, '').length === 0;
+        if (!isSeparator) {
+          const cells = trimmed.split('|')
+            .slice(1, -1)
+            .map(c => c.trim());
+          tableRows.push(cells);
+          inTable = true;
+        }
+        continue;
+      } else if (inTable) {
+        flushTable(i);
       }
-      if (line.startsWith('## ')) {
-        const textVal = line.slice(3).trim();
-        const elementId = textVal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-        return <h2 id={elementId} key={idx} style={{ marginTop: '20px', marginBottom: '10px', color: 'var(--text-primary)', fontSize: '18px', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px' }}>{textVal}</h2>;
-      }
-      if (line.startsWith('### ')) {
-        const textVal = line.slice(4).trim();
-        const elementId = textVal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-        return <h3 id={elementId} key={idx} style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-primary)', fontSize: '15px' }}>{textVal}</h3>;
-      }
-      if (line.trim().startsWith('* ') || line.trim().startsWith('- ')) {
-        return (
-          <ul key={idx} style={{ margin: '4px 0 4px 20px', paddingLeft: '0', listStyleType: 'disc' }}>
-            <li style={{ color: 'var(--text-primary)', marginBottom: '2px' }}>
-              {parseInlineStyles(line.trim().slice(2))}
-            </li>
-          </ul>
+
+      // Handle blockquote/alerts
+      if (trimmed.startsWith('>')) {
+        let alertColor = '#3b82f6';
+        let alertBg = 'rgba(59, 130, 246, 0.05)';
+        let cleanQuote = trimmed.replace(/^>\s*/, '');
+        
+        if (cleanQuote.startsWith('[!WARNING]') || cleanQuote.startsWith('**Warning:**')) {
+          alertColor = '#f59e0b';
+          alertBg = 'rgba(245, 158, 11, 0.05)';
+          cleanQuote = cleanQuote.replace(/^(\[!WARNING\]|\*\*Warning:\*\*)\s*/, '');
+        } else if (cleanQuote.startsWith('[!IMPORTANT]') || cleanQuote.startsWith('**Important:**')) {
+          alertColor = '#ef4444';
+          alertBg = 'rgba(239, 68, 68, 0.05)';
+          cleanQuote = cleanQuote.replace(/^(\[!IMPORTANT\]|\*\*Important:\*\*)\s*/, '');
+        } else if (cleanQuote.startsWith('[!NOTE]') || cleanQuote.startsWith('**Note:**')) {
+          cleanQuote = cleanQuote.replace(/^(\[!NOTE\]|\*\*Note:\*\*)\s*/, '');
+        }
+
+        nodes.push(
+          <div key={`quote-${i}`} style={{ 
+            borderLeft: `4px solid ${alertColor}`, 
+            background: alertBg, 
+            padding: '12px 18px', 
+            borderRadius: '0 8px 8px 0', 
+            margin: '14px 0', 
+            color: 'var(--text-secondary)', 
+            fontSize: '13.5px',
+            lineHeight: '1.5'
+          }}>
+            {parseInlineStyles(cleanQuote)}
+          </div>
         );
+        continue;
       }
-      if (line.trim() === '') {
-        return <div key={idx} style={{ height: '8px' }} />;
+
+      // Headers
+      if (trimmed.startsWith('# ')) {
+        const textVal = trimmed.slice(2).trim();
+        const elementId = textVal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+        nodes.push(
+          <h1 id={elementId} key={`h1-${i}`} style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginTop: '32px', marginBottom: '16px', color: 'var(--text-primary)', fontSize: '24px', fontWeight: 'bold' }}>
+            {textVal}
+          </h1>
+        );
+        continue;
       }
-      return (
-        <p key={idx} style={{ margin: '8px 0', color: 'var(--text-secondary)' }}>
-          {parseInlineStyles(line)}
+
+      if (trimmed.startsWith('## ')) {
+        const textVal = trimmed.slice(3).trim();
+        const elementId = textVal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+        nodes.push(
+          <h2 id={elementId} key={`h2-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '4px solid #3b82f6', paddingLeft: '12px', marginTop: '26px', marginBottom: '12px', color: 'var(--text-primary)', fontSize: '18px', fontWeight: '600' }}>
+            {textVal}
+          </h2>
+        );
+        continue;
+      }
+
+      if (trimmed.startsWith('### ')) {
+        const textVal = trimmed.slice(4).trim();
+        const elementId = textVal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+        nodes.push(
+          <h3 id={elementId} key={`h3-${i}`} style={{ marginTop: '20px', marginBottom: '8px', color: 'var(--text-primary)', fontSize: '15px', fontWeight: '600' }}>
+            {textVal}
+          </h3>
+        );
+        continue;
+      }
+
+      // Lists
+      if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+        const listText = trimmed.slice(2).trim();
+        nodes.push(
+          <div key={`li-${i}`} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', margin: '6px 0 6px 16px' }}>
+            <span style={{ color: '#3b82f6', fontSize: '14px', lineHeight: '1.4' }}>•</span>
+            <div style={{ color: 'var(--text-secondary)', fontSize: '13.5px', lineHeight: '1.5' }}>
+              {parseInlineStyles(listText)}
+            </div>
+          </div>
+        );
+        continue;
+      }
+
+      // Horizontal lines
+      if (trimmed === '---') {
+        nodes.push(
+          <hr key={`hr-${i}`} style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '24px 0' }} />
+        );
+        continue;
+      }
+
+      // Blank line
+      if (trimmed === '') {
+        nodes.push(<div key={`blank-${i}`} style={{ height: '6px' }} />);
+        continue;
+      }
+
+      // Standard paragraph
+      nodes.push(
+        <p key={`p-${i}`} style={{ margin: '10px 0', color: 'var(--text-secondary)', fontSize: '13.5px', lineHeight: '1.6' }}>
+          {parseInlineStyles(trimmed)}
         </p>
       );
-    });
+    }
+
+    // Flush any trailing table
+    flushTable(lines.length);
+
+    return nodes;
   };
   
   // Custom Scenarios & Chaos State variables
