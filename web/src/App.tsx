@@ -1018,13 +1018,19 @@ export default function App() {
         return null;
       }
       if (line.startsWith('# ')) {
-        return <h1 key={idx} style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', marginTop: '24px', marginBottom: '12px', color: 'var(--text-primary)', fontSize: '22px' }}>{line.slice(2)}</h1>;
+        const textVal = line.slice(2).trim();
+        const elementId = textVal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+        return <h1 id={elementId} key={idx} style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', marginTop: '24px', marginBottom: '12px', color: 'var(--text-primary)', fontSize: '22px' }}>{textVal}</h1>;
       }
       if (line.startsWith('## ')) {
-        return <h2 key={idx} style={{ marginTop: '20px', marginBottom: '10px', color: 'var(--text-primary)', fontSize: '18px', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px' }}>{line.slice(3)}</h2>;
+        const textVal = line.slice(3).trim();
+        const elementId = textVal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+        return <h2 id={elementId} key={idx} style={{ marginTop: '20px', marginBottom: '10px', color: 'var(--text-primary)', fontSize: '18px', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px' }}>{textVal}</h2>;
       }
       if (line.startsWith('### ')) {
-        return <h3 key={idx} style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-primary)', fontSize: '15px' }}>{line.slice(4)}</h3>;
+        const textVal = line.slice(4).trim();
+        const elementId = textVal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+        return <h3 id={elementId} key={idx} style={{ marginTop: '16px', marginBottom: '8px', color: 'var(--text-primary)', fontSize: '15px' }}>{textVal}</h3>;
       }
       if (line.trim().startsWith('* ') || line.trim().startsWith('- ')) {
         return (
@@ -3452,32 +3458,81 @@ export default function App() {
           )}
         </nav>
 
-        <div className="sidebar-footer" style={{ display: 'flex', borderTop: '1px solid var(--border-color)', paddingTop: '12px', marginTop: 'auto', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{currentUser?.username}</span>
-            <span style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{currentUser?.role}</span>
-          </div>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <button 
-              onClick={() => {
-                setChangePasswordError('');
-                setChangePasswordSuccess('');
-                setOldPassword('');
-                setNewPasswordVal('');
-                setShowChangePasswordModal(true);
-              }} 
-              style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              title="Change password"
-            >
-              <Key size={14} />
-            </button>
-            <button 
-              onClick={handleLogout} 
-              style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: '4px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              title="Logout session"
-            >
-              <LogOut size={14} />
-            </button>
+        <div className="sidebar-footer" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px', marginTop: 'auto', display: 'flex', width: '100%' }}>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '10px', 
+            background: 'var(--bg-input)', 
+            border: '1px solid var(--border-color)', 
+            padding: '8px 12px', 
+            borderRadius: '10px', 
+            width: '100%',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+          }}>
+            <div style={{ 
+              width: '28px', 
+              height: '28px', 
+              borderRadius: '50%', 
+              background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              color: '#fff', 
+              fontWeight: 'bold', 
+              fontSize: '12px', 
+              flexShrink: 0 
+            }}>
+              {currentUser?.username ? currentUser.username.charAt(0).toUpperCase() : 'U'}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flexGrow: 1 }}>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{currentUser?.username}</span>
+              <span style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{currentUser?.role}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+              <button 
+                onClick={() => {
+                  setChangePasswordError('');
+                  setChangePasswordSuccess('');
+                  setOldPassword('');
+                  setNewPasswordVal('');
+                  setShowChangePasswordModal(true);
+                }} 
+                style={{ 
+                  background: 'none', 
+                  border: 'none', 
+                  color: 'var(--text-secondary)', 
+                  cursor: 'pointer', 
+                  padding: '4px', 
+                  borderRadius: '4px', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  transition: 'background 0.2s'
+                }}
+                title="Change password"
+              >
+                <Key size={13} />
+              </button>
+              <button 
+                onClick={handleLogout} 
+                style={{ 
+                  background: 'none', 
+                  border: 'none', 
+                  color: '#ef4444', 
+                  cursor: 'pointer', 
+                  padding: '4px', 
+                  borderRadius: '4px', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  transition: 'background 0.2s'
+                }}
+                title="Logout session"
+              >
+                <LogOut size={13} />
+              </button>
+            </div>
           </div>
         </div>
       </aside>
@@ -7212,19 +7267,91 @@ export default function App() {
                 <span>Loading documentation...</span>
               </div>
             ) : (
-              <div 
-                className="docs-content" 
-                style={{ 
-                  flexGrow: 1,
-                  overflowY: 'auto', 
-                  padding: '12px 0 24px 0', 
-                  lineHeight: '1.7',
-                  fontSize: '14px',
-                  color: 'var(--text-primary)'
-                }}
-              >
-                {renderFormattedDocs(docsContent)}
-              </div>
+              (() => {
+                const lines = docsContent.split('\n');
+                const headings = lines
+                  .filter(line => line.startsWith('# ') || line.startsWith('## ') || line.startsWith('### '))
+                  .map(line => {
+                    const level = line.startsWith('# ') ? 1 : line.startsWith('## ') ? 2 : 3;
+                    const text = line.replace(/^#+\s+/, '').trim();
+                    const id = text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                    return { level, text, id };
+                  });
+
+                return (
+                  <div style={{ display: 'flex', flexGrow: 1, overflow: 'hidden', height: '100%' }}>
+                    {/* Left Column: Interactive Table of Contents */}
+                    {headings.length > 0 && (
+                      <div style={{ 
+                        width: '260px', 
+                        borderRight: '1px solid var(--border-color)', 
+                        paddingRight: '20px', 
+                        marginRight: '20px', 
+                        overflowY: 'auto',
+                        flexShrink: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '12px',
+                        paddingTop: '12px',
+                        paddingBottom: '24px'
+                      }}>
+                        <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                          Table of Contents
+                        </span>
+                        <ul style={{ listStyleType: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {headings.map((h, i) => (
+                            <li 
+                              key={i} 
+                              style={{ 
+                                paddingLeft: `${(h.level - 1) * 12}px`,
+                                lineHeight: '1.4'
+                              }}
+                            >
+                              <a 
+                                href={`#${h.id}`}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  const el = document.getElementById(h.id);
+                                  if (el) {
+                                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                  }
+                                }}
+                                style={{ 
+                                  color: h.level === 1 ? 'var(--text-primary)' : 'var(--text-secondary)', 
+                                  textDecoration: 'none', 
+                                  fontSize: h.level === 1 ? '13px' : '12px',
+                                  fontWeight: h.level === 1 ? '600' : 'normal',
+                                  cursor: 'pointer',
+                                  transition: 'color 0.2s'
+                                }}
+                                className="toc-link"
+                              >
+                                {h.text}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Right Column: Scrollable Content */}
+                    <div 
+                      className="docs-content" 
+                      style={{ 
+                        flexGrow: 1,
+                        overflowY: 'auto', 
+                        padding: '12px 0 24px 0', 
+                        lineHeight: '1.7',
+                        fontSize: '14px',
+                        color: 'var(--text-primary)',
+                        scrollBehavior: 'smooth'
+                      }}
+                    >
+                      {renderFormattedDocs(docsContent)}
+                    </div>
+                  </div>
+                );
+              })()
             )}
           </div>
         )}

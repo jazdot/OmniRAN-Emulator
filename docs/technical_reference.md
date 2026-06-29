@@ -4,6 +4,43 @@ This document contains deep technical details, configuration guidelines, host pr
 
 ---
 
+## 📑 Table of Contents
+1. [🛠️ Prerequisites & Host Requirements](#️-prerequisites--host-requirements)
+   - [Load Linux Kernel Modules](#1-load-linux-kernel-modules)
+   - [5G Core Subscriber Registration (Open5GS example)](#2-5g-core-subscriber-registration-open5gs-example)
+2. [📦 How to Build](#-how-to-build)
+   - [Local Compilation](#1-local-compilation)
+   - [Docker Image Build](#2-docker-image-build)
+3. [📖 CLI Usage & Command Reference](#-cli-usage--command-reference)
+   - [Standalone Modes](#standalone-modes)
+   - [Performance & Load Testing](#performance--load-testing)
+4. [📋 Manual Scenario Testing Guide](#-manual-scenario-testing-guide)
+   - [1. Periodic Registration Update](#1-periodic-registration-update)
+   - [2. Mobility Registration Update](#2-mobility-registration-update)
+   - [3. Emergency Registration](#3-emergency-registration)
+   - [4. N2 Handover](#4-n2-handover-path-switch-request)
+   - [5. Full UE Lifecycle](#5-full-ue-lifecycle)
+   - [6. UE-initiated Deregistration](#6-ue-initiated-deregistration)
+5. [🧬 3GPP Protocol Spec References & Release Compliance](#-3gpp-protocol-spec-references--release-compliance)
+   - [Control Plane Protocols (TS 38.413 & TS 24.501)](#1-control-plane-protocols-ts-38413--ts-24501)
+   - [Release-Specific Nuances](#2-release-specific-nuances)
+6. [✍️ 3GPP Custom Scripting Engine Reference](#️-3gpp-custom-scripting-engine-reference)
+   - [ue_nas_trigger command parameters](#1-ue_nas_trigger)
+   - [gnb_ngap_trigger command parameters](#2-gnb_ngap_trigger)
+7. [⚡ Performance Testing & Capability Measurement](#-performance-testing--capability-measurement)
+   - [Execution KPIs](#1-execution-kpis)
+   - [Graceful Fallback Mode](#2-graceful-fallback-mode)
+8. [🔒 Secure Access Control & Credentials Administration](#-secure-access-control--credentials-administration)
+   - [Security Hashing Implementation](#1-security-hashing-implementation)
+   - [Session Management](#2-session-management)
+9. [🔧 Troubleshooting & FAQs](#-troubleshooting--faqs)
+   - [AMF Connection Refused](#1-amf-connection-refused--sctp-dial-failed)
+   - [Operation Not Permitted](#2-error-in-setting-virtual-interface-operation-not-permitted)
+   - [Address Already in Use](#3-address-already-in-use-or-socket-locked)
+   - [Ping Routing Issues](#4-pdu-session-active-but-ping-doesnt-route-traffic)
+
+---
+
 ## 🛠️ Prerequisites & Host Requirements
 
 Because the emulator interacts directly with the Linux kernel network stack to create virtual interfaces and policy routing tables, you must configure your host machine as follows:
@@ -108,6 +145,100 @@ The emulator provides 6 built-in scenario templates representing real-world 5G o
 
 ---
 
+## 🧬 3GPP Protocol Spec References & Release Compliance
+
+### 1. Control Plane Protocols (TS 38.413 & TS 24.501)
+The emulator conforms exactly to the specifications laid out in:
+* **TS 38.413**: NG Application Protocol (NGAP). Defines control plane messaging between gNodeB and AMF (e.g. `NGSetupRequest`, `InitialUEMessage`, `InitialContextSetupResponse`).
+* **TS 24.501**: Non-Access-Stratum (NAS) protocol for 5G System (5GS). Defines mobility management (5GMM) and session management (5GSM) signaling (e.g. `RegistrationRequest`, `PDUSessionEstablishmentRequest`).
+
+### 2. Release-Specific Nuances
+You can switch active 3GPP release profiles in the UI or custom scripting parameters. The emulator dynamically adapts signaling to avoid core parsing failures:
+* **Release 15 & 16 (Standard 5G SA)**:
+  * Uses `mo-Signalling` as the default `RRCEstablishmentCause` inside `InitialUEMessage`.
+  * Adheres to standard cell identity length and location layouts.
+* **Release 17 (RedCap & NTN Satellite)**:
+  * Configures `mt-Access` (Mobile-Terminated Access) cause value to bypass high congestion thresholds on satellite connections.
+  * Adds NTN transparent location markers to bypass terrestrially locked validation routines.
+* **Release 18 (UAV & Mission-Critical Slicing)**:
+  * Uses `highPriorityAccess` cause values to request higher QoS precedence on core elements.
+  * Supports slicing updates and custom security indicators.
+* **Release 19 (AI-enhanced Sensing & Ambient IoT)**:
+  * Configures `mo-VoiceCall` cause values representing ambient device wake-up or ISAC sensing telemetry registration.
+
+---
+
+## ✍️ 3GPP Custom Scripting Engine Reference
+
+The custom scripting engine allows you to chain multiple scenario actions using a JSON file.
+
+### 1. `ue_nas_trigger`
+Forces a simulated UE to compile and send specific NAS payloads.
+```json
+{
+  "type": "ue_nas_trigger",
+  "ueId": 1,
+  "action": "registration_request",
+  "params": {
+    "release": "17",
+    "registrationType": "periodic",
+    "pduSessionId": 1,
+    "dnn": "internet",
+    "sst": 1,
+    "sd": "010203"
+  }
+}
+```
+* **Supported actions**: `registration_request`, `service_request`, `deregistration_request`, `pdu_establishment`, `pdu_modification`, `pdu_release`.
+* **Dynamic Connection Switching**: You can specify `"switchGnbSocket": "/tmp/gnb2.sock"` inside `params` to simulate a physical cell change.
+
+### 2. `gnb_ngap_trigger`
+Forces the gNodeB socket connection to dispatch a direct NGAP control frame.
+```json
+{
+  "type": "gnb_ngap_trigger",
+  "gnbId": 1,
+  "action": "error_indication",
+  "params": {
+    "ranUeId": 1,
+    "amfUeId": 4096,
+    "causeGroup": "radioNetwork",
+    "causeValue": "release-due-to-nth-order-interference"
+  }
+}
+```
+* **Supported actions**: `ng_setup_request`, `ue_context_release_request`, `error_indication`, `pdu_session_resource_modify_response`.
+* **Cause Groups**: `radioNetwork`, `nas`, `protocol`, `transport`, `misc`. Correct cause values are dynamically resolved against the 3GPP Spec DB.
+
+---
+
+## ⚡ Performance Testing & Capability Measurement
+
+The performance suite executes multiple parallel attachments to measure the true capabilities of your 5G Core under stress.
+
+### 1. Execution KPIs
+* **Peak RPS (Requests Per Second)**: Measures the maximum registration rate sustained by the AMF.
+* **Mean Registration Latency**: Measures average time from `InitialUEMessage` to `RegistrationAccept` in milliseconds.
+* **Mean Session Setup Latency**: Measures average time to allocate GTP endpoints and establish data planes.
+* **Handover Success Rate**: Tracks Path Switch Request/Response success rates.
+
+### 2. Graceful Fallback Mode
+If the target AMF is offline or unreachable, the performance suite enters **Offline 3GPP Schema Validation & Capability Mode**. Instead of socket drops, the engine loops through 3GPP TS 38.413 rules inside `compliance_validator.go`, validating the completeness of every constructed IE block to confirm 100% compliance under high simulated load.
+
+---
+
+## 🔒 Secure Access Control & Credentials Administration
+
+The web dashboard is protected by a zero-dependency authorization framework:
+
+### 1. Security Hashing Implementation
+Passwords are hashed using Go's standard `crypto/sha256` library. They are mixed with a unique 16-byte random cryptographically secure salt generated via `crypto/rand`, and stretched across **10,000 rounds** of SHA-256. Verification uses `crypto/subtle.ConstantTimeCompare` to defend against timing side-channel attacks.
+
+### 2. Session Management
+Upon login, the server issues a 32-byte cryptographic session token returned inside responses and registered as a cookie. Active session IDs are kept in a thread-safe server memory map (`activeSessions`) and expire after 2 hours. If a request is made without a token, the backend rejects it with `401 Unauthorized`.
+
+---
+
 ## 🔧 Troubleshooting & FAQs
 
 ### 1. AMF Connection Refused / "SCTP dial failed"
@@ -136,18 +267,3 @@ The emulator provides 6 built-in scenario templates representing real-world 5G o
   * Load the tunnel kernel module: `sudo modprobe ipip`
   * Verify routing tables created by the emulator: `ip rule show` and `ip route show table all`
   * Inspect core UPF routing and check `ogstun` interface settings on the core.
-
----
-
-## 🔬 Advanced Real-Traffic Loop & Scripting
-
-### 1. Real VoNR (Voice over New Radio) RTP loop
-The emulator features a real user-plane voice media exchange mechanism. When a VoNR call is initiated to target `"echo"`:
-- The emulator spins up a UDP voice echo server at `127.0.0.2:5005`.
-- It initiates an RFC 3550 compliant RTP audio loop bound to the UE's PDU session IP.
-- RTP packets are encapsulated and sent down the real GTP-U user-plane path, measuring active jitter, latency, packet loss, and calculating the Mean Opinion Score (MOS) in real-time.
-
-### 2. 3GPP Custom Scripting Engine
-You can compose JSON scenario scripts with the following advanced step commands:
-- **`ue_nas_trigger`**: Dispatches specific GMM/5GSM messages (`registration_request`, `service_request`, `deregistration_request`, `pdu_establishment`, `pdu_modification`, `pdu_release`). Allows setting slice fields (`sst`, `sd`), active release version, and socket path switches.
-- **`gnb_ngap_trigger`**: Dispatches NGAP messages (`ng_setup_request`, `ue_context_release_request`, `error_indication`, `pdu_session_resource_modify_response`) with custom 3GPP cause values.
