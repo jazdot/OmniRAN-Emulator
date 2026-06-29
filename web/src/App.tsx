@@ -33,23 +33,34 @@ import {
 } from 'lucide-react';
 
 // API base path (works with relative path when served by Go, or proxied in dev)
-const CodeBlock = ({ codeText, lang }: { codeText: string; lang: string }) => {
+const CodeBlock = ({ codeText, lang, onLaunchInRunner }: { codeText: string; lang: string; onLaunchInRunner?: (cmd: string) => void }) => {
   const [copied, setCopied] = React.useState(false);
   const handleCopy = () => {
     navigator.clipboard.writeText(codeText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+  const isRunnable = codeText.trim().startsWith('./app ') || codeText.trim().startsWith('sudo ./app ') || codeText.trim().startsWith('./app') || codeText.trim().startsWith('sudo ./app');
   return (
     <div style={{ margin: '16px 0', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden', background: '#0f172a' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1e293b', padding: '6px 16px', borderBottom: '1px solid var(--border-color)' }}>
         <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#94a3b8', fontWeight: 600 }}>{lang.toUpperCase() || 'COMMAND / CONFIG'}</span>
-        <button 
-          onClick={handleCopy}
-          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', padding: '4px 10px', fontSize: '10px', color: '#cbd5e1', cursor: 'pointer', fontWeight: 'bold' }}
-        >
-          {copied ? 'Copied!' : 'Copy'}
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {isRunnable && onLaunchInRunner && (
+            <button 
+              onClick={() => onLaunchInRunner(codeText.trim())}
+              style={{ background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '4px', padding: '4px 10px', fontSize: '10px', color: '#60a5fa', cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              🚀 Launch in Runner
+            </button>
+          )}
+          <button 
+            onClick={handleCopy}
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', padding: '4px 10px', fontSize: '10px', color: '#cbd5e1', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </div>
       </div>
       <pre style={{ margin: 0, padding: '14px 18px', overflowX: 'auto', fontFamily: 'Consolas, monospace', fontSize: '13px', color: '#38bdf8', lineHeight: '1.6' }}>
         <code>{codeText}</code>
@@ -715,6 +726,10 @@ export default function App() {
   const [docsContent, setDocsContent] = useState<string>('');
   const [docsLoading, setDocsLoading] = useState<boolean>(false);
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
+  const [docSearchQuery, setDocSearchQuery] = useState<string>('');
+  const [docFontSize, setDocFontSize] = useState<number>(14);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+  const [scrollPercent, setScrollPercent] = useState<number>(0);
 
   const fetchDocsContent = async () => {
     setDocsLoading(true);
@@ -993,6 +1008,24 @@ export default function App() {
     }
   }, [activeTab]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (activeTab === 'docs' && e.key === '/') {
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+          return;
+        }
+        e.preventDefault();
+        const searchInput = document.getElementById('docsSearchInput');
+        if (searchInput) {
+          searchInput.focus();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab]);
+
   const parseInlineStyles = (text: string) => {
     const parts: React.ReactNode[] = [];
     let idx = 0;
@@ -1031,7 +1064,108 @@ export default function App() {
     return parts.length > 0 ? parts : text;
   };
 
-  const renderFormattedDocs = (text: string) => {
+  const handleLaunchInRunner = (cmd: string) => {
+    setActiveTab('scenarios');
+    setScenarioMode('presets');
+
+    const cleanCmd = cmd.replace('sudo ', '').trim();
+
+    if (cleanCmd.startsWith('./app scenario ')) {
+      const scenarioPart = cleanCmd.replace('./app scenario ', '').trim();
+      const firstWord = scenarioPart.split(' ')[0];
+      
+      if (firstWord.startsWith('handover')) {
+        const ipMatch = cleanCmd.match(/--target-gnb-ip\s+([^\s]+)/);
+        const portMatch = cleanCmd.match(/--target-gnb-port\s+(\d+)/);
+        const delayMatch = cleanCmd.match(/--delay\s+(\d+)/);
+        if (ipMatch) setTargetGnbIp(ipMatch[1]);
+        if (portMatch) setTargetGnbPort(parseInt(portMatch[1]));
+        if (delayMatch) setDelay(parseInt(delayMatch[1]));
+      } else if (firstWord.startsWith('full-lifecycle')) {
+        const idleMatch = cleanCmd.match(/--idle-seconds\s+(\d+)/);
+        if (idleMatch) setIdleSeconds(parseInt(idleMatch[1]));
+      }
+      
+      setTimeout(() => {
+        const cardEl = document.getElementById(`scenario-card-${firstWord}`);
+        if (cardEl) {
+          cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          cardEl.style.outline = '2px solid #3b82f6';
+          cardEl.style.boxShadow = '0 0 15px rgba(59, 130, 246, 0.4)';
+          setTimeout(() => {
+            cardEl.style.outline = 'none';
+            cardEl.style.boxShadow = 'none';
+          }, 3000);
+        }
+      }, 300);
+    } else if (cleanCmd.startsWith('./app load-test')) {
+      const ueMatch = cleanCmd.match(/-n\s+(\d+)/);
+      if (ueMatch) setUeCount(parseInt(ueMatch[1]));
+      const ueOnlyMatch = cleanCmd.includes('--ue-only');
+      setUeOnly(ueOnlyMatch);
+      setTimeout(() => {
+        const cardEl = document.getElementById('scenario-card-load-test');
+        if (cardEl) {
+          cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          cardEl.style.outline = '2px solid #3b82f6';
+          cardEl.style.boxShadow = '0 0 15px rgba(59, 130, 246, 0.4)';
+          setTimeout(() => {
+            cardEl.style.outline = 'none';
+            cardEl.style.boxShadow = 'none';
+          }, 3000);
+        }
+      }, 300);
+    } else if (cleanCmd.startsWith('./app amf-load-loop')) {
+      const reqMatch = cleanCmd.match(/-n\s+(\d+)/);
+      const durMatch = cleanCmd.match(/-t\s+(\d+)/);
+      if (reqMatch) setRequests(parseInt(reqMatch[1]));
+      if (durMatch) setDuration(parseInt(durMatch[1]));
+      setTimeout(() => {
+        const cardEl = document.getElementById('scenario-card-amf-load-loop');
+        if (cardEl) {
+          cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          cardEl.style.outline = '2px solid #3b82f6';
+          cardEl.style.boxShadow = '0 0 15px rgba(59, 130, 246, 0.4)';
+          setTimeout(() => {
+            cardEl.style.outline = 'none';
+            cardEl.style.boxShadow = 'none';
+          }, 3000);
+        }
+      }, 300);
+    } else if (cleanCmd.startsWith('./app ue-latency-interval')) {
+      const reqMatch = cleanCmd.match(/-n\s+(\d+)/);
+      if (reqMatch) setRequests(parseInt(reqMatch[1]));
+      setTimeout(() => {
+        const cardEl = document.getElementById('scenario-card-ue-latency-interval');
+        if (cardEl) {
+          cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          cardEl.style.outline = '2px solid #3b82f6';
+          cardEl.style.boxShadow = '0 0 15px rgba(59, 130, 246, 0.4)';
+          setTimeout(() => {
+            cardEl.style.outline = 'none';
+            cardEl.style.boxShadow = 'none';
+          }, 3000);
+        }
+      }, 300);
+    } else if (cleanCmd.startsWith('./app amf-availability')) {
+      const durMatch = cleanCmd.match(/-t\s+(\d+)/);
+      if (durMatch) setDuration(parseInt(durMatch[1]));
+      setTimeout(() => {
+        const cardEl = document.getElementById('scenario-card-amf-availability');
+        if (cardEl) {
+          cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          cardEl.style.outline = '2px solid #3b82f6';
+          cardEl.style.boxShadow = '0 0 15px rgba(59, 130, 246, 0.4)';
+          setTimeout(() => {
+            cardEl.style.outline = 'none';
+            cardEl.style.boxShadow = 'none';
+          }, 3000);
+        }
+      }, 300);
+    }
+  };
+
+  const renderFormattedDocs = (text: string, onLaunchInRunner?: (cmd: string) => void) => {
     if (!text) return null;
     const lines = text.split('\n');
     const nodes: React.ReactNode[] = [];
@@ -1087,6 +1221,7 @@ export default function App() {
               key={`code-${i}`} 
               codeText={codeBlockContent.join('\n')} 
               lang={codeBlockLang} 
+              onLaunchInRunner={onLaunchInRunner}
             />
           );
           codeBlockContent = [];
@@ -5303,7 +5438,7 @@ export default function App() {
                 {scenarios.map((scen) => {
                   const isRunningThis = status?.isRunning && status.runningName === scen.id;
                   return (
-                    <div className="card scenario-card" key={scen.id}>
+                    <div className="card scenario-card" key={scen.id} id={`scenario-card-${scen.id}`} style={{ transition: 'all 0.3s ease' }}>
                       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span className="card-title font-bold text-white" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           {scen.name}
@@ -7437,7 +7572,12 @@ export default function App() {
         )}
 
         {activeTab === 'docs' && (
-          <div className="view-body fade-in" style={{ padding: '0 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)', overflow: 'hidden' }}>
+          <div className="view-body fade-in" style={{ padding: '0 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)', overflow: 'hidden', position: 'relative' }}>
+            {/* Scroll Progress Bar */}
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'rgba(255,255,255,0.03)', zIndex: 10 }}>
+              <div style={{ height: '100%', width: `${scrollPercent}%`, background: '#3b82f6', transition: 'width 0.1s ease-out' }} />
+            </div>
+
             {docsLoading ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGrow: 1, gap: '12px', color: 'var(--text-muted)' }}>
                 <RefreshCw size={24} className="animate-spin text-blue" />
@@ -7455,29 +7595,91 @@ export default function App() {
                     return { level, text, id };
                   });
 
+                const filteredHeadings = headings.filter(h => 
+                  h.text.toLowerCase().includes(docSearchQuery.toLowerCase())
+                );
+
+                let currentH1Id = '';
+                const h1Map: Record<string, string> = {};
+                headings.forEach(h => {
+                  if (h.level === 1) {
+                    currentH1Id = h.id;
+                  }
+                  h1Map[h.id] = currentH1Id;
+                });
+
+                const handleSearchSubmit = (e: React.FormEvent) => {
+                  e.preventDefault();
+                  if (filteredHeadings.length > 0) {
+                    const firstMatch = filteredHeadings[0];
+                    const el = document.getElementById(firstMatch.id);
+                    const container = document.getElementById('docsContentContainer');
+                    if (el && container) {
+                      const offsetTop = el.offsetTop - container.offsetTop;
+                      container.scrollTo({ top: offsetTop - 20, behavior: 'smooth' });
+                      setActiveHeadingId(firstMatch.id);
+                    }
+                  }
+                };
+
                 return (
-                  <div style={{ display: 'flex', flexGrow: 1, overflow: 'hidden', height: '100%' }}>
+                  <div style={{ display: 'flex', flexGrow: 1, overflow: 'hidden', height: '100%', paddingTop: '12px' }}>
                     {/* Left Column: Interactive Table of Contents */}
-                    {headings.length > 0 && (
-                      <div style={{ 
-                        width: '260px', 
-                        borderRight: '1px solid var(--border-color)', 
-                        paddingRight: '20px', 
-                        marginRight: '20px', 
-                        overflowY: 'auto',
-                        flexShrink: 0,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '12px',
-                        paddingTop: '12px',
-                        paddingBottom: '24px'
-                      }}>
-                        <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    <div style={{ 
+                      width: '270px', 
+                      borderRight: '1px solid var(--border-color)', 
+                      paddingRight: '20px', 
+                      marginRight: '20px', 
+                      overflowY: 'auto',
+                      flexShrink: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '16px',
+                      paddingBottom: '24px'
+                    }}>
+                      <form onSubmit={handleSearchSubmit} style={{ position: 'relative', width: '100%' }}>
+                        <input 
+                          type="text" 
+                          id="docsSearchInput"
+                          placeholder="Search manual... (Press '/')"
+                          value={docSearchQuery}
+                          onChange={(e) => setDocSearchQuery(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px 8px 32px',
+                            borderRadius: '8px',
+                            background: 'var(--bg-input)',
+                            border: '1px solid var(--border-color)',
+                            fontSize: '12px',
+                            color: 'var(--text-primary)',
+                            outline: 'none'
+                          }}
+                        />
+                        <span style={{ position: 'absolute', left: '10px', top: '9px', color: 'var(--text-muted)', fontSize: '13px' }}>🔍</span>
+                        {docSearchQuery && (
+                          <button 
+                            type="button"
+                            onClick={() => setDocSearchQuery('')}
+                            style={{ position: 'absolute', right: '10px', top: '7px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '13px' }}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </form>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', paddingLeft: '8px', marginBottom: '4px' }}>
                           Table of Contents
                         </span>
-                        <ul style={{ listStyleType: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          {headings.map((h, i) => {
+                        <ul style={{ listStyleType: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          {filteredHeadings.map((h, i) => {
                             const isActive = h.id === activeHeadingId;
+                            const parentH1 = h1Map[h.id];
+                            const isCollapsed = h.level > 1 && parentH1 && collapsedSections[parentH1];
+                            if (isCollapsed && !docSearchQuery) {
+                              return null;
+                            }
+
                             return (
                               <li 
                                 key={i} 
@@ -7486,75 +7688,169 @@ export default function App() {
                                   lineHeight: '1.4'
                                 }}
                               >
-                                <a 
-                                  href={`#${h.id}`}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    const el = document.getElementById(h.id);
-                                    const container = document.getElementById('docsContentContainer');
-                                    if (el && container) {
-                                      const offsetTop = el.offsetTop - container.offsetTop;
-                                      container.scrollTo({ top: offsetTop - 20, behavior: 'smooth' });
-                                      setActiveHeadingId(h.id);
-                                    }
-                                  }}
-                                  style={{ 
-                                    display: 'block',
-                                    padding: '6px 10px',
-                                    borderRadius: '6px',
-                                    color: isActive 
-                                      ? '#3b82f6' 
-                                      : h.level === 1 ? 'var(--text-primary)' : 'var(--text-secondary)', 
-                                    background: isActive ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
-                                    textDecoration: 'none', 
-                                    fontSize: h.level === 1 ? '13px' : '12px',
-                                    fontWeight: isActive || h.level === 1 ? '600' : 'normal',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.15s ease-in-out',
-                                    borderLeft: isActive ? '2px solid #3b82f6' : '2px solid transparent',
-                                    paddingLeft: isActive ? '8px' : '10px'
-                                  }}
-                                  className="toc-link"
-                                >
-                                  {h.text}
-                                </a>
+                                <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                                  <a 
+                                    href={`#${h.id}`}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      const el = document.getElementById(h.id);
+                                      const container = document.getElementById('docsContentContainer');
+                                      if (el && container) {
+                                        const offsetTop = el.offsetTop - container.offsetTop;
+                                        container.scrollTo({ top: offsetTop - 20, behavior: 'smooth' });
+                                        setActiveHeadingId(h.id);
+                                      }
+                                    }}
+                                    style={{ 
+                                      display: 'block',
+                                      flexGrow: 1,
+                                      padding: '5px 8px',
+                                      borderRadius: '6px',
+                                      color: isActive 
+                                        ? '#3b82f6' 
+                                        : h.level === 1 ? 'var(--text-primary)' : 'var(--text-secondary)', 
+                                      background: isActive ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
+                                      textDecoration: 'none', 
+                                      fontSize: h.level === 1 ? '13px' : '12px',
+                                      fontWeight: isActive || h.level === 1 ? '600' : 'normal',
+                                      cursor: 'pointer',
+                                      transition: 'all 0.15s ease-in-out',
+                                      borderLeft: isActive ? '2px solid #3b82f6' : '2px solid transparent',
+                                      paddingLeft: isActive ? '6px' : '8px',
+                                      textOverflow: 'ellipsis',
+                                      overflow: 'hidden',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                    title={h.text}
+                                    className="toc-link"
+                                  >
+                                    {h.text}
+                                  </a>
+                                  {h.level === 1 && !docSearchQuery && (
+                                    <button
+                                      onClick={() => {
+                                        setCollapsedSections(prev => ({
+                                          ...prev,
+                                          [h.id]: !prev[h.id]
+                                        }));
+                                      }}
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: 'var(--text-muted)',
+                                        cursor: 'pointer',
+                                        padding: '4px',
+                                        fontSize: '10px',
+                                        marginLeft: 'auto',
+                                        display: 'flex',
+                                        alignItems: 'center'
+                                      }}
+                                      title={collapsedSections[h.id] ? "Expand section" : "Collapse section"}
+                                    >
+                                      {collapsedSections[h.id] ? '▶' : '▼'}
+                                    </button>
+                                  )}
+                                </div>
                               </li>
                             );
                           })}
                         </ul>
                       </div>
-                    )}
+                    </div>
 
-                    {/* Right Column: Scrollable Content */}
-                    <div 
-                      className="docs-content" 
-                      id="docsContentContainer"
-                      onScroll={(e) => {
-                        const container = e.currentTarget;
-                        const headingElems = container.querySelectorAll('h1, h2, h3');
-                        let currentActive = '';
-                        for (let j = 0; j < headingElems.length; j++) {
-                          const hEl = headingElems[j] as HTMLElement;
-                          const offsetTop = hEl.offsetTop - container.offsetTop;
-                          if (container.scrollTop >= offsetTop - 40) {
-                            currentActive = hEl.id;
+                    {/* Right Column: Scrollable Content & Controls */}
+                    <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, overflow: 'hidden' }}>
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'flex-end', 
+                        alignItems: 'center', 
+                        gap: '12px', 
+                        paddingBottom: '8px', 
+                        borderBottom: '1px solid var(--border-color)',
+                        marginBottom: '8px'
+                      }}>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Font Size:</span>
+                        <div style={{ display: 'flex', border: '1px solid var(--border-color)', borderRadius: '6px', overflow: 'hidden' }}>
+                          <button 
+                            onClick={() => setDocFontSize(12.5)} 
+                            style={{ 
+                              padding: '4px 8px', 
+                              border: 'none', 
+                              background: docFontSize === 12.5 ? '#3b82f6' : 'transparent', 
+                              color: docFontSize === 12.5 ? '#fff' : 'var(--text-secondary)',
+                              fontSize: '10px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            A-
+                          </button>
+                          <button 
+                            onClick={() => setDocFontSize(14)} 
+                            style={{ 
+                              padding: '4px 8px', 
+                              border: 'none', 
+                              borderLeft: '1px solid var(--border-color)', 
+                              borderRight: '1px solid var(--border-color)', 
+                              background: docFontSize === 14 ? '#3b82f6' : 'transparent', 
+                              color: docFontSize === 14 ? '#fff' : 'var(--text-secondary)',
+                              fontSize: '11px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            A
+                          </button>
+                          <button 
+                            onClick={() => setDocFontSize(16)} 
+                            style={{ 
+                              padding: '4px 8px', 
+                              border: 'none', 
+                              background: docFontSize === 16 ? '#3b82f6' : 'transparent', 
+                              color: docFontSize === 16 ? '#fff' : 'var(--text-secondary)',
+                              fontSize: '12px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            A+
+                          </button>
+                        </div>
+                      </div>
+
+                      <div 
+                        className="docs-content" 
+                        id="docsContentContainer"
+                        onScroll={(e) => {
+                          const container = e.currentTarget;
+                          const scrollTop = container.scrollTop;
+                          const scrollHeight = container.scrollHeight;
+                          const clientHeight = container.clientHeight;
+                          const percent = scrollHeight > clientHeight ? (scrollTop / (scrollHeight - clientHeight)) * 100 : 0;
+                          setScrollPercent(percent);
+
+                          const headingElems = container.querySelectorAll('h1, h2, h3');
+                          let currentActive = '';
+                          for (let j = 0; j < headingElems.length; j++) {
+                            const hEl = headingElems[j] as HTMLElement;
+                            const offsetTop = hEl.offsetTop - container.offsetTop;
+                            if (scrollTop >= offsetTop - 40) {
+                              currentActive = hEl.id;
+                            }
                           }
-                        }
-                        if (currentActive && currentActive !== activeHeadingId) {
-                          setActiveHeadingId(currentActive);
-                        }
-                      }}
-                      style={{ 
-                        flexGrow: 1,
-                        overflowY: 'auto', 
-                        padding: '12px 0 24px 0', 
-                        lineHeight: '1.7',
-                        fontSize: '14px',
-                        color: 'var(--text-primary)',
-                        scrollBehavior: 'smooth'
-                      }}
-                    >
-                      {renderFormattedDocs(docsContent)}
+                          if (currentActive && currentActive !== activeHeadingId) {
+                            setActiveHeadingId(currentActive);
+                          }
+                        }}
+                        style={{ 
+                          flexGrow: 1,
+                          overflowY: 'auto', 
+                          padding: '12px 0 24px 0', 
+                          lineHeight: '1.75',
+                          fontSize: `${docFontSize}px`,
+                          color: 'var(--text-primary)',
+                          scrollBehavior: 'smooth'
+                        }}
+                      >
+                        {renderFormattedDocs(docsContent, handleLaunchInRunner)}
+                      </div>
                     </div>
                   </div>
                 );
