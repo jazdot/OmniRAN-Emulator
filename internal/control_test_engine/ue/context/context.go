@@ -319,6 +319,18 @@ func (ue *UEContext) GetIp(pduSessionId uint8) string {
 	return ue.GetPduSession(pduSessionId).ueIP
 }
 
+func (ue *UEContext) GetFirstActiveIP() string {
+	if ue.PduSessions == nil {
+		return ""
+	}
+	for _, sess := range ue.PduSessions {
+		if sess.ueIP != "" {
+			return sess.ueIP
+		}
+	}
+	return ""
+}
+
 func (ue *UEContext) GetGatewayIp(pduSessionId uint8) net.IP {
 	return ue.GetPduSession(pduSessionId).gatewayIP
 }

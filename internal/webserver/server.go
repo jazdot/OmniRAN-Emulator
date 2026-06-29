@@ -46,6 +46,25 @@ var (
 	runningMu    sync.Mutex
 )
 
+func isAnyFleetGNBOrUERunning() bool {
+	runningGNBsMu.RLock()
+	hasGNBs := len(runningGNBs) > 0
+	runningGNBsMu.RUnlock()
+
+	hasUEs := len(ueContext.GetAllActiveUEs()) > 0
+	return hasGNBs || hasUEs
+}
+
+func isScenarioOrCustomRunning() bool {
+	if atomic.LoadInt32(&runningState) == 1 {
+		return true
+	}
+	GlobalCustomRunner.mu.RLock()
+	isCustom := GlobalCustomRunner.Status == "running"
+	GlobalCustomRunner.mu.RUnlock()
+	return isCustom
+}
+
 func init() {
 	logHook = &WebLogHook{
 		clients: make(map[chan string]bool),
@@ -163,6 +182,7 @@ func StartServer(host string, port int) error {
 	mux.HandleFunc("/api/diagnostics/logs/clear", handleClearLogs)
 	mux.HandleFunc("/api/diagnostics/logs/history", handleGetLogsHistory)
 	mux.HandleFunc("/api/diagnostics/logs/parse", handleParseLogs)
+	mux.HandleFunc("/api/docs", handleDocs)
 
 	// Embedded static React files
 	assetsFS, err := fs.Sub(web.Assets, "dist")
@@ -516,10 +536,17 @@ func handleScenarioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !atomic.CompareAndSwapInt32(&runningState, 0, 1) {
+	if isScenarioOrCustomRunning() {
 		http.Error(w, "Another scenario is already executing", http.StatusConflict)
 		return
 	}
+
+	if isAnyFleetGNBOrUERunning() {
+		http.Error(w, "Cannot run scenario: active gNBs or UEs exist in the Fleet Manager. Please stop them first.", http.StatusConflict)
+		return
+	}
+
+	atomic.StoreInt32(&runningState, 1)
 
 	var req RunRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1243,6 +1270,11 @@ func handleFleetLaunchUE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isScenarioOrCustomRunning() {
+		http.Error(w, "Cannot launch UE: a scenario is currently executing. Please stop the scenario first.", http.StatusConflict)
+		return
+	}
+
 	var req FleetLaunchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
@@ -1271,6 +1303,11 @@ func handleFleetLaunchUE(w http.ResponseWriter, r *http.Request) {
 func handleFleetLaunchGNB(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if isScenarioOrCustomRunning() {
+		http.Error(w, "Cannot launch gNB: a scenario is currently executing. Please stop the scenario first.", http.StatusConflict)
 		return
 	}
 
@@ -1363,19 +1400,21 @@ func handleCustomScenarioRun(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	if isScenarioOrCustomRunning() {
+		http.Error(w, "Another scenario is already executing", http.StatusConflict)
+		return
+	}
+
+	if isAnyFleetGNBOrUERunning() {
+		http.Error(w, "Cannot run scenario: active gNBs or UEs exist in the Fleet Manager. Please stop them first.", http.StatusConflict)
+		return
+	}
+
 	var scen CustomScenario
 	err := json.NewDecoder(r.Body).Decode(&scen)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	GlobalCustomRunner.mu.RLock()
-	isAlreadyRunning := GlobalCustomRunner.Status == "running"
-	GlobalCustomRunner.mu.RUnlock()
-
-	if isAlreadyRunning {
-		http.Error(w, "Another custom scenario is already running", http.StatusConflict)
 		return
 	}
 
@@ -1568,6 +1607,24 @@ func handlePerformanceTest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	if isScenarioOrCustomRunning() {
+		http.Error(w, "Cannot run performance test: another scenario is already executing", http.StatusConflict)
+		return
+	}
+
+	if isAnyFleetGNBOrUERunning() {
+		http.Error(w, "Cannot run performance test: active gNBs or UEs exist in the Fleet Manager. Please stop them first.", http.StatusConflict)
+		return
+	}
+
+	atomic.StoreInt32(&runningState, 1)
+	runningName = "Performance Test"
+	defer func() {
+		atomic.StoreInt32(&runningState, 0)
+		runningName = ""
+	}()
+
 	var req perfRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
@@ -1588,4 +1645,25 @@ func handlePerformanceTest(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(report)
+}
+
+func handleDocs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	content, err := os.ReadFile("docs/technical_reference.md")
+	if err != nil {
+		content = []byte("# OmniRAN Technical Documentation\n\nFailed to load docs/technical_reference.md. Please ensure the file is present in the docs/ directory.")
+	}
+
+	type DocsResponse struct {
+		Content string `json:"content"`
+	}
+
+	_ = json.NewEncoder(w).Encode(DocsResponse{
+		Content: string(content),
+	})
 }

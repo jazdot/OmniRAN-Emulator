@@ -71,6 +71,7 @@ func GnbListen(amf *context.GNBAmf, gnb *context.GNBContext) {
 
 		n, info, err := conn.SCTPRead(buf[:])
 		if err != nil {
+			log.Warnf("[GNB][SCTP] SCTP socket read error or disconnect: %v", err)
 			break
 		}
 
@@ -84,6 +85,7 @@ func GnbListen(amf *context.GNBAmf, gnb *context.GNBContext) {
 
 	}
 
+	gnb.SignalConnLoss()
 }
 
 func StartXnListener(gnb *context.GNBContext) error {

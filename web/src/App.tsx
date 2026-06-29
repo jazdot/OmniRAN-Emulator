@@ -587,8 +587,112 @@ export default function App() {
     const saved = localStorage.getItem('theme');
     return (saved === 'dark' || saved === 'light') ? saved : 'light';
   });
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity' | 'fleet' | 'diagnostics'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity' | 'fleet' | 'diagnostics' | 'docs'>('dashboard');
   const [selectedNode, setSelectedNode] = useState<'ue' | 'gnb' | 'amf' | 'upf' | 'dn' | 'uu-link' | 'n2-link' | 'n3-link' | 'n6-link' | null>('ue');
+  
+  // Documentation states and helpers
+  const [docsContent, setDocsContent] = useState<string>('');
+  const [docsLoading, setDocsLoading] = useState<boolean>(false);
+
+  const fetchDocsContent = async () => {
+    setDocsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/docs`);
+      if (res.ok) {
+        const data = await res.json();
+        setDocsContent(data.content || '');
+      }
+    } catch (err) {
+      console.error('Error fetching docs:', err);
+    } finally {
+      setDocsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'docs') {
+      fetchDocsContent();
+    }
+  }, [activeTab]);
+
+  const parseInlineStyles = (text: string) => {
+    const parts: React.ReactNode[] = [];
+    let idx = 0;
+    const regex = /(\*\*|`)(.*?)\1/g;
+    let match;
+    let lastIndex = 0;
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(text.substring(lastIndex, match.index));
+      }
+      const type = match[1];
+      const content = match[2];
+      if (type === '**') {
+        parts.push(<strong key={idx++} style={{ color: '#fff', fontWeight: 'bold' }}>{content}</strong>);
+      } else if (type === '`') {
+        parts.push(<code key={idx++} style={{ background: 'rgba(255,255,255,0.08)', padding: '2px 6px', borderRadius: '4px', fontFamily: 'Consolas, monospace', fontSize: '12px', color: '#f43f5e' }}>{content}</code>);
+      }
+      lastIndex = regex.lastIndex;
+    }
+    if (lastIndex < text.length) {
+      parts.push(text.substring(lastIndex));
+    }
+    return parts.length > 0 ? parts : text;
+  };
+
+  const renderFormattedDocs = (text: string) => {
+    if (!text) return null;
+    const lines = text.split('\n');
+    let inCodeBlock = false;
+    let codeBlockContent: string[] = [];
+    return lines.map((line, idx) => {
+      if (line.trim().startsWith('```')) {
+        if (inCodeBlock) {
+          inCodeBlock = false;
+          const codeText = codeBlockContent.join('\n');
+          codeBlockContent = [];
+          return (
+            <pre key={idx} style={{ background: '#0f172a', padding: '12px 16px', borderRadius: '6px', overflowX: 'auto', border: '1px solid rgba(255,255,255,0.05)', fontFamily: 'Consolas, monospace', fontSize: '12px', margin: '8px 0', color: '#e2e8f0' }}>
+              <code>{codeText}</code>
+            </pre>
+          );
+        } else {
+          inCodeBlock = true;
+          return null;
+        }
+      }
+      if (inCodeBlock) {
+        codeBlockContent.push(line);
+        return null;
+      }
+      if (line.startsWith('# ')) {
+        return <h1 key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '8px', marginTop: '24px', marginBottom: '12px', color: '#fff', fontSize: '22px' }}>{line.slice(2)}</h1>;
+      }
+      if (line.startsWith('## ')) {
+        return <h2 key={idx} style={{ marginTop: '20px', marginBottom: '10px', color: '#e2e8f0', fontSize: '18px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '4px' }}>{line.slice(3)}</h2>;
+      }
+      if (line.startsWith('### ')) {
+        return <h3 key={idx} style={{ marginTop: '16px', marginBottom: '8px', color: '#cbd5e1', fontSize: '15px' }}>{line.slice(4)}</h3>;
+      }
+      if (line.trim().startsWith('* ') || line.trim().startsWith('- ')) {
+        return (
+          <ul key={idx} style={{ margin: '4px 0 4px 20px', paddingLeft: '0', listStyleType: 'disc' }}>
+            <li style={{ color: 'var(--text-primary)', marginBottom: '2px' }}>
+              {parseInlineStyles(line.trim().slice(2))}
+            </li>
+          </ul>
+        );
+      }
+      if (line.trim() === '') {
+        return <div key={idx} style={{ height: '8px' }} />;
+      }
+      return (
+        <p key={idx} style={{ margin: '8px 0', color: 'var(--text-secondary)' }}>
+          {parseInlineStyles(line)}
+        </p>
+      );
+    });
+  };
   
   // Custom Scenarios & Chaos State variables
   const [scenarioMode, setScenarioMode] = useState<'presets' | 'custom'>('presets');
@@ -2844,6 +2948,13 @@ export default function App() {
             <Sliders />
             <span>Diagnostics</span>
           </li>
+          <li
+            className={`nav-item ${activeTab === 'docs' ? 'active' : ''}`}
+            onClick={() => setActiveTab('docs')}
+          >
+            <FileText />
+            <span>Documentation</span>
+          </li>
         </nav>
 
         <div className="sidebar-footer">
@@ -2864,6 +2975,7 @@ export default function App() {
               {activeTab === 'connectivity' && 'Connectivity Tool Panel'}
               {activeTab === 'fleet' && 'Fleet Manager'}
               {activeTab === 'diagnostics' && 'Diagnostics & Captures'}
+              {activeTab === 'docs' && 'Technical Documentation'}
             </h1>
           </div>
 
@@ -2928,6 +3040,17 @@ export default function App() {
                 ))}
               </select>
             </div>
+
+            {/* Docs & Help Button */}
+            <button
+              onClick={() => setActiveTab('docs')}
+              className="status-badge"
+              style={{ background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)', color: '#60a5fa', cursor: 'pointer' }}
+              title="Open Technical Reference Manual"
+            >
+              <FileText size={14} style={{ flexShrink: 0 }} />
+              <span className="font-semibold text-blue" style={{ color: '#60a5fa' }}>DOCS & HELP</span>
+            </button>
 
             {/* Theme Toggle Button */}
             <button
@@ -6504,6 +6627,52 @@ export default function App() {
                   })()
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── Documentation Tab ─────────────────────────────────────────── */}
+        {activeTab === 'docs' && (
+          <div className="view-body fade-in">
+            <div className="card" style={{ padding: '24px', maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '8px' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <FileText size={22} className="text-blue" />
+                  Technical Reference Manual & Documentation
+                </h3>
+                <button 
+                  onClick={fetchDocsContent} 
+                  className="btn btn-xs btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', border: 'none', borderRadius: '6px', background: '#3b82f6', color: '#fff', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  <RefreshCw size={12} />
+                  Refresh
+                </button>
+              </div>
+
+              {docsLoading ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '300px', gap: '12px', color: 'var(--text-muted)' }}>
+                  <RefreshCw size={24} className="animate-spin text-blue" />
+                  <span>Loading documentation...</span>
+                </div>
+              ) : (
+                <div 
+                  className="docs-content" 
+                  style={{ 
+                    maxHeight: '70vh', 
+                    overflowY: 'auto', 
+                    padding: '16px 24px', 
+                    borderRadius: '8px', 
+                    background: 'rgba(0,0,0,0.15)', 
+                    border: '1px solid rgba(255,255,255,0.03)',
+                    lineHeight: '1.7',
+                    fontSize: '14px',
+                    color: 'var(--text-primary)'
+                  }}
+                >
+                  {renderFormattedDocs(docsContent)}
+                </div>
+              )}
             </div>
           </div>
         )}

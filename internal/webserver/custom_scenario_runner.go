@@ -11,12 +11,21 @@ import (
 	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/internal/chaos"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb"
+	gnbContext "OmniRAN-Emulator/internal/control_test_engine/gnb/context"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/interface_management"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/pdu_session_management"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/ue_context_management"
+	gnbSender "OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/sender"
 	"OmniRAN-Emulator/internal/control_test_engine/ue"
 	ueContext "OmniRAN-Emulator/internal/control_test_engine/ue/context"
+	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/nas_control/mm_5gs"
+	ueSender "OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/sender"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/service"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/trigger"
+	"OmniRAN-Emulator/lib/aper"
 	"OmniRAN-Emulator/lib/nas/nasMessage"
 	"OmniRAN-Emulator/lib/nas/security"
+	"OmniRAN-Emulator/lib/ngap/ngapType"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -374,6 +383,240 @@ func (s *CustomRunnerState) Run(scen CustomScenario) {
 					chaos.GlobalChaosManager.ConfigureNgap(gnbId, chaosCfg)
 				}
 
+			case "ue_nas_trigger":
+				ueIdVal, _ := step.Params["ueId"].(float64)
+				ueId := uint8(ueIdVal)
+				msgType, _ := step.Params["msgType"].(string)
+
+				s.mu.RLock()
+				u, exists := s.activeUes[ueId]
+				s.mu.RUnlock()
+
+				if !exists {
+					s.SetError(fmt.Sprintf("UE %d not found in active context", ueId))
+					return
+				}
+
+				// Active Release Override support
+				if rel, ok := step.Params["release"].(string); ok && rel != "" {
+					config.SetActiveRelease(rel)
+					s.AddLog(fmt.Sprintf("Setting active 3GPP release to Rel %s", rel))
+				}
+
+				// Dynamically switch GNodeB connection if requested (for mobility)
+				if socket, ok := step.Params["switchGnbSocket"].(string); ok && socket != "" {
+					s.AddLog(fmt.Sprintf("UE %d switching connection to GNodeB socket: %s", ueId, socket))
+					u.SetGnbSocketPath(socket)
+					u.SetGnbLinkType("unix")
+					
+					// Resolve target profile details
+					if gnbId, ok := step.Params["switchGnbId"].(string); ok {
+						u.SetGnbId(gnbId)
+					}
+					if profile, ok := step.Params["switchGnbProfile"].(string); ok {
+						u.SetGnbProfileName(profile)
+					}
+
+					if u.GetUnixConn() != nil {
+						_ = u.GetUnixConn().Close()
+					}
+					if err := service.InitConn(u); err != nil {
+						s.SetError(fmt.Sprintf("UE %d GNodeB reconnect failed: %v", ueId, err))
+						return
+					}
+				}
+
+				var payload []byte
+				var err error
+
+				pduSessIdVal, _ := step.Params["pduSessionId"].(float64)
+				pduSessId := uint8(pduSessIdVal)
+				if pduSessId == 0 {
+					pduSessId = 1
+				}
+
+				s.AddLog(fmt.Sprintf("UE %d triggering NAS message: %s", ueId, msgType))
+
+				switch msgType {
+				case "registration_request":
+					regType := u.GetRegistrationType()
+					if rt, ok := step.Params["registrationType"].(float64); ok {
+						regType = uint8(rt)
+					}
+					payload = mm_5gs.GetRegistrationRequest(regType, nil, nil, false, u)
+					u.SetStateMM_DEREGISTERED()
+
+				case "service_request":
+					svcType := nasMessage.ServiceTypeSignalling
+					if st, ok := step.Params["serviceType"].(float64); ok {
+						svcType = uint8(st)
+					}
+					u.SetStateMM_MM5G_SERVICE_REQ_INIT()
+					payload, err = mm_5gs.ServiceRequest(u, svcType)
+
+				case "deregistration_request":
+					switchOff := false
+					if so, ok := step.Params["switchOff"].(bool); ok {
+						switchOff = so
+					}
+					payload, err = mm_5gs.DeregistrationRequest(u, switchOff)
+
+				case "pdu_establishment":
+					dnn, _ := step.Params["dnn"].(string)
+					sstVal, _ := step.Params["sst"].(float64)
+					sd, _ := step.Params["sd"].(string)
+					sessType, _ := step.Params["sessionType"].(string)
+
+					if dnn == "" {
+						dnn = u.PduSession.Dnn
+					}
+					if sstVal == 0 {
+						sstVal = float64(u.PduSession.Snssai.Sst)
+					}
+					if sd == "" {
+						sd = u.PduSession.Snssai.Sd
+					}
+					if sessType == "" {
+						sessType = u.PduSession.PduSessionType
+					}
+
+					u.SetupPduSession(pduSessId, dnn, sessType, int32(sstVal), sd)
+					payload, err = mm_5gs.UlNasTransport(u, pduSessId, nasMessage.ULNASTransportRequestTypeInitialRequest)
+					if err == nil {
+						u.GetPduSession(pduSessId).State = ueContext.SM5G_PDU_SESSION_ACTIVE_PENDING
+					}
+
+				case "pdu_modification":
+					sess := u.GetPduSession(pduSessId)
+					if sess == nil {
+						s.SetError(fmt.Sprintf("PDU Session %d not active on UE %d", pduSessId, ueId))
+						return
+					}
+					payload, err = mm_5gs.UlNasTransportModification(u, pduSessId)
+
+				case "pdu_release":
+					sess := u.GetPduSession(pduSessId)
+					if sess == nil {
+						s.SetError(fmt.Sprintf("PDU Session %d not active on UE %d", pduSessId, ueId))
+						return
+					}
+					payload, err = mm_5gs.UlNasTransportRelease(u, pduSessId)
+
+				default:
+					s.SetError(fmt.Sprintf("Unknown NAS message type: %s", msgType))
+					return
+				}
+
+				if err != nil {
+					s.SetError(fmt.Sprintf("Failed to build NAS message %s: %v", msgType, err))
+					return
+				}
+
+				ueSender.SendToGnb(u, payload)
+				time.Sleep(100 * time.Millisecond)
+
+			case "gnb_ngap_trigger":
+				gnbIdStr, _ := step.Params["gnbId"].(string)
+				if gnbIdStr == "" {
+					gnbIdStr = "000001"
+				}
+				msgType, _ := step.Params["msgType"].(string)
+
+				gnbContext.ActiveGNBsMu.RLock()
+				g, ok := gnbContext.ActiveGNBs[gnbIdStr]
+				gnbContext.ActiveGNBsMu.RUnlock()
+
+				if !ok || g == nil {
+					s.SetError(fmt.Sprintf("GNodeB %s not found in ActiveGNBs pool", gnbIdStr))
+					return
+				}
+
+				var payload []byte
+				var err error
+
+				s.AddLog(fmt.Sprintf("GNodeB %s triggering NGAP message: %s", gnbIdStr, msgType))
+
+				switch msgType {
+				case "ng_setup_request":
+					payload, err = interface_management.NGSetupRequest(g, "OmniRANEmulator")
+
+				case "ue_context_release_request":
+					ranUeIdVal, _ := step.Params["ranUeId"].(float64)
+					amfUeIdVal, _ := step.Params["amfUeId"].(float64)
+					causeType, _ := step.Params["causeType"].(string)
+					causeVal, _ := step.Params["causeValue"].(float64)
+
+					var cause *ngapType.Cause
+					if causeType != "" {
+						cause = buildNgapCause(causeType, int64(causeVal))
+					}
+					payload, err = ue_context_management.GetUEContextReleaseRequest(int64(ranUeIdVal), int64(amfUeIdVal), cause)
+
+				case "error_indication":
+					var ranUeIdPtr, amfUeIdPtr *int64
+					if ranVal, ok := step.Params["ranUeId"].(float64); ok {
+						val := int64(ranVal)
+						ranUeIdPtr = &val
+					}
+					if amfVal, ok := step.Params["amfUeId"].(float64); ok {
+						val := int64(amfVal)
+						amfUeIdPtr = &val
+					}
+					causeType, _ := step.Params["causeType"].(string)
+					causeVal, _ := step.Params["causeValue"].(float64)
+
+					var cause *ngapType.Cause
+					if causeType != "" {
+						cause = buildNgapCause(causeType, int64(causeVal))
+					}
+					payload, err = interface_management.ErrorIndication(amfUeIdPtr, ranUeIdPtr, cause)
+
+				case "pdu_session_resource_modify_response":
+					ranUeIdVal, _ := step.Params["ranUeId"].(float64)
+					gUe, errGue := g.GetGnbUe(int64(ranUeIdVal))
+					if errGue != nil || gUe == nil {
+						s.SetError(fmt.Sprintf("GNBUe %d not found on GNodeB %s", int64(ranUeIdVal), gnbIdStr))
+						return
+					}
+
+					var modifySessIds []int64
+					if idsList, ok := step.Params["modifySessIds"].([]interface{}); ok {
+						for _, idVal := range idsList {
+							if idFloat, ok := idVal.(float64); ok {
+								modifySessIds = append(modifySessIds, int64(idFloat))
+							}
+						}
+					}
+					if len(modifySessIds) == 0 {
+						modifySessIds = append(modifySessIds, 1)
+					}
+
+					payload, err = pdu_session_management.PDUSessionResourceModifyResponse(gUe, modifySessIds)
+
+				default:
+					s.SetError(fmt.Sprintf("Unknown NGAP message type: %s", msgType))
+					return
+				}
+
+				if err != nil {
+					s.SetError(fmt.Sprintf("Failed to build NGAP message %s: %v", msgType, err))
+					return
+				}
+
+				// Resolve target SCTP association (AMF connection)
+				targetAmf := g.GetActiveAmf()
+				if targetAmf == nil || targetAmf.GetSCTPConn() == nil {
+					s.SetError(fmt.Sprintf("GNodeB %s N2 connection to AMF is not active", gnbIdStr))
+					return
+				}
+
+				err = gnbSender.SendToAmF(payload, targetAmf.GetSCTPConn())
+				if err != nil {
+					s.SetError(fmt.Sprintf("Failed to send NGAP message %s: %v", msgType, err))
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+
 			case "sleep":
 				seconds, _ := step.Params["seconds"].(float64)
 				if seconds == 0 {
@@ -384,4 +627,33 @@ func (s *CustomRunnerState) Run(scen CustomScenario) {
 			}
 		}
 	}()
+}
+
+func buildNgapCause(causeType string, causeVal int64) *ngapType.Cause {
+	cause := new(ngapType.Cause)
+	switch causeType {
+	case "radioNetwork":
+		cause.Present = ngapType.CausePresentRadioNetwork
+		cause.RadioNetwork = new(ngapType.CauseRadioNetwork)
+		cause.RadioNetwork.Value = aper.Enumerated(causeVal)
+	case "nas":
+		cause.Present = ngapType.CausePresentNas
+		cause.Nas = new(ngapType.CauseNas)
+		cause.Nas.Value = aper.Enumerated(causeVal)
+	case "protocol":
+		cause.Present = ngapType.CausePresentProtocol
+		cause.Protocol = new(ngapType.CauseProtocol)
+		cause.Protocol.Value = aper.Enumerated(causeVal)
+	case "transport":
+		cause.Present = ngapType.CausePresentTransport
+		cause.Transport = new(ngapType.CauseTransport)
+		cause.Transport.Value = aper.Enumerated(causeVal)
+	case "misc":
+		cause.Present = ngapType.CausePresentMisc
+		cause.Misc = new(ngapType.CauseMisc)
+		cause.Misc.Value = aper.Enumerated(causeVal)
+	default:
+		return nil
+	}
+	return cause
 }

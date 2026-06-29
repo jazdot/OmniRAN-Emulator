@@ -219,7 +219,7 @@ func handleUEHttp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Retrieve UE IP to bind local address
-	rawIP := u.GetIp(req.UeID)
+	rawIP := u.GetFirstActiveIP()
 	ueIp := strings.Split(rawIP, ",")[0]
 
 	logrus.Infof("[WEB][TRAFFIC] HTTP Fetch on UE %d (IP: %s) to URL: %s", req.UeID, ueIp, url)
@@ -607,7 +607,7 @@ func runVonrCallSimulation(ctx context.Context, c *ActiveCall, uCaller *ueContex
 	appendLog("SIP ACK sent")
 
 	// Determine if we can do real UDP connection
-	callerIP := strings.Split(uCaller.GetIp(c.CallerID), ",")[0]
+	callerIP := strings.Split(uCaller.GetFirstActiveIP(), ",")[0]
 	isRealUdpExchange := false
 
 	var localIP, remoteIP string
@@ -626,7 +626,7 @@ func runVonrCallSimulation(ctx context.Context, c *ActiveCall, uCaller *ueContex
 			if err == nil {
 				uCallee := ueContext.GetActiveUE(uint8(calleeIdInt))
 				if uCallee != nil {
-					calleeIP := strings.Split(uCallee.GetIp(uint8(calleeIdInt)), ",")[0]
+					calleeIP := strings.Split(uCallee.GetFirstActiveIP(), ",")[0]
 					if calleeIP != "" {
 						localIP = callerIP
 						remoteIP = calleeIP

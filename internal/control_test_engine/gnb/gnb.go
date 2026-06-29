@@ -315,9 +315,13 @@ func InitGnbFleet(conf config.Config, ctx stdctx.Context, gnbSocketPath string) 
 		trigger.SendNgSetupRequest(g, amf)
 		log.Infof("[GNB-FLEET] %s NG Setup Request sent", conf.GNodeB.PlmnList.GnbId)
 
-		// Block until context cancelled (stop signal from fleet runner)
-		<-ctx.Done()
-		log.Infof("[GNB-FLEET] %s stopping (context cancelled)", conf.GNodeB.PlmnList.GnbId)
+		// Block until context cancelled or connection lost
+		select {
+		case <-ctx.Done():
+			log.Infof("[GNB-FLEET] %s stopping (context cancelled)", conf.GNodeB.PlmnList.GnbId)
+		case <-g.ConnLossChan():
+			log.Warnf("[GNB-FLEET] %s SCTP connection lost unexpectedly", conf.GNodeB.PlmnList.GnbId)
+		}
 		g.Terminate()
 		if gnbSocketPath != "" {
 			_ = os.Remove(gnbSocketPath)

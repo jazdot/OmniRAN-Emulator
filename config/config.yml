@@ -1,9 +1,9 @@
 gnodeb:
   controlif:
-    ip: "127.0.0.1"
+    ip: 127.0.0.1
     port: 9487
   dataif:
-    ip: "127.0.0.1"
+    ip: 127.0.0.1
     port: 2152
   plmnlist:
     mcc: "999"
@@ -12,27 +12,29 @@ gnodeb:
     gnbid: "000001"
   slicesupportlist:
     sst: "01"
-  link_type: "unix"
+    sd: ""
+  link_type: unix
   link_port: 9488
-
+  paging_drx: ""
+  cell_id: 0
 ue:
   msin: "0000000001"
-  key: "465b5ce8b199b49faa5f0a2ee238a6bc"
-  opc: "e8ed289deba952e4283b54e88e6183ca"
+  key: 465b5ce8b199b49faa5f0a2ee238a6bc
+  opc: e8ed289deba952e4283b54e88e6183ca
   amf: "8000"
   sqn: "000000000000"
-  dnn: "internet"
-  pdusessiontype: "IPv4"
-  registration_type: "initial"
+  dnn: internet
+  pdusessiontype: IPv4
+  registration_type: initial
   hplmn:
     mcc: "999"
     mnc: "70"
   snssai:
     sst: 1
-
+    sd: ""
+  pdusessions: []
 amfif:
-  ip: "127.0.0.1"
+  ip: 127.0.0.1
   port: 38412
-
 logs:
-    level: 4
+  level: 6

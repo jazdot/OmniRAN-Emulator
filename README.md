@@ -11,166 +11,38 @@ OmniRAN Emulator is a unified, high-performance 5G network emulation solution th
 
 ---
 
-## 🚀 Key Modernizations & Optimizations
+## ⚡ Quick Start
 
-1. **Pure Go Workloads**: Removed Cgo and GNU Scientific Library (`gsl`) dependencies from mathematical distribution generators. Workloads are now generated in pure, high-performance Go, removing the requirement to install `libgsl-dev` on target machines.
-2. **Modern Go standard**: Upgraded the module engine to Go 1.22+, utilizing Go modules natively and ensuring compatibility with modern compilers.
-3. **Dynamic Configuration Loading**: Added support for custom configuration files using the global CLI flag `-c` / `--config` (e.g. `./app -c custom_config.yml ue`).
-4. **Ultra-lightweight Docker Packaging**: Redesigned the Docker build process using a multi-stage `golang:1.22-bookworm` builder and an `ubuntu:noble` (24.04) runner. Final container size has been reduced from **~850MB to just 95.8MB (an 88%+ reduction)**.
-5. **Interactive Web UI Dashboard**: Integrated a premium, dark-mode Web UI dashboard directly embedded into the Go executable for zero-dependency execution.
-6. **Advanced 5G Core Emulation**: Integrated TCP Radio Link Simulation (RLS) socket communication, sequential/concurrent multiple PDU sessions (up to 15 concurrent sessions per UE), dual-stack IPv4v6 PDU interface, and advanced NAS signaling procedures (Paging response via Service Request, and Network-initiated De-registration cleanup).
-
----
-
-## 🛠️ Prerequisites & Host Requirements
-
-Because the emulator interacts directly with the Linux kernel network stack to create virtual interfaces and policy routing tables, you must configure your host machine as follows:
-
-### 1. Load Linux Kernel Modules
-Ensure the SCTP (control plane) and IPIP (user plane) kernel modules are loaded:
+### 1. Build React Web Assets & Compile Binary
+You do not need Go pre-installed. The build script automatically downloads a workspace-local Go SDK:
 ```bash
-# Load SCTP module for NGAP control plane
-sudo modprobe sctp
-
-# Load IPIP module for virtual user-plane tunneling
-sudo modprobe ipip
-
-# Verify modules are active
-lsmod | grep -E "sctp|ip"
-```
-
-### 2. 5G Core Subscriber Registration (Open5GS example)
-Before running the emulator, you must provision a matching subscriber profile in your 5G Core:
-1. Open the Open5GS WebUI (typically at `http://localhost:3000` or port `3000` on your core server).
-2. Click **Add Subscriber** and enter the following values matching the default emulator profile (`config/config.yml`):
-   - **IMSI**: `001010000000001` (or match configured PLMN `001`/`01` + MSIN `0000000001`)
-   - **Subscriber Key (K)**: `465B5CE8B199B49FAA5F0A2EE238A6BC`
-   - **OPc**: `E8ED9B87E14101FAFD283A41341B70A0`
-   - **AMF**: `8000`
-   - **SST (Slice Service Type)**: `1`
-   - **SD (Slice Differentiator)**: `010203` (or match configured slice)
-3. Save the subscriber profile.
-
----
-
-## 📦 How to Build
-
-### 1. Local Compilation
-You do not need Go installed on your system. The Makefile will automatically download a local Go SDK inside the workspace if `go` is missing from your PATH:
-```bash
-# Build the React Web UI assets (Requires Node.js installed once on compilation machine)
+# Build React Web UI production assets
 npm --prefix web run build
 
-# Compile the standalone Go binary
+# Compile standalone Go executable
 make build
 ```
-This generates the standalone compiled binary `app` at the root of the project.
 
-### 2. Docker Image Build
-To build the optimized Docker container:
-```bash
-make docker-build
-```
-
----
-
-## 🖥️ Interactive Web UI Dashboard
-
-OmniRAN Emulator features an embedded web dashboard that provides real-time control, diagnostics, configuration editing, and log streaming.
-
-### Starting the Web Dashboard
-Since the emulator configures Linux network interfaces, you must start the web server with root privileges:
+### 2. Launch the Web Dashboard
+Since the emulator configures Linux virtual network interfaces (e.g. `uetun1`), you must start the web server with root privileges:
 ```bash
 sudo ./app web --port 8080 --host 127.0.0.1
 ```
-Open **`http://localhost:8080`** in your browser to access the dashboard.
-
-### Dashboard Modules
-- **Dashboard Tab**: Displays current core connection states, a live network topology visualization (UE ➔ gNodeB ➔ Core), active network interfaces, and a list of active online UEs with their sequential IMSIs and IP addresses.
-- **Scenario Runner Tab**: Launch button control cards for both single-UE scenarios and multi-UE stress/load testing workflows.
-- **Configuration Tab**: Full visual form editor to update the UE parameters (IMSI, keys, slices), GNodeB interfaces, and Core targets without manually touching YAML files.
-- **Live Console Tab**: Real-time streaming of log outputs filtered by log level (Info, Warnings, Errors).
-- **Connectivity Tab**: Panel to execute manual ping tests and inspect system diagnostics (socket clean state, sctp/ipip kernel modules).
+Open **`http://localhost:8080`** in your browser to access the premium interactive dashboard.
 
 ---
 
-## 📖 CLI Usage & Command Reference
+## 📖 Documentation & References
 
-You can also run all tests and emulations directly from the command line:
+All deep technical details, guides, and troubleshooting steps have been migrated out of this file:
 
-### Standalone Modes
-* **`./app ue`**: Runs a single UE registration, authentication, security mode, and PDU session attachment procedure (creates `uetun1`). Add `--ue-only` to run without initializing the gNodeB.
-* **`./app gnb`**: Initializes the SCTP connection (NGAP) and GTP-U tunnel (N3) with the AMF/UPF, simulating a running gNodeB cell.
+* **In-App Dashboard**: Open the **Documentation** tab directly inside the Web UI to view the live parsed reference guide.
+* **Markdown File**: You can read the raw Markdown documentation at [docs/technical_reference.md](file:///home/richu/OmniRAN-Emulator/docs/technical_reference.md).
 
-### Performance & Load Testing
-* **`./app load-test -n 50`**: Stress tests the AMF by firing concurrent/queued registration requests for multiple simulated UEs sequentially in a queue. Add `--ue-only` to run UEs in decoupled mode.
-* **`./app amf-load-loop -n 20 -t 30`**: Generates `20` requests per second over `30` seconds to stress test AMF responsiveness over time.
-* **`./app ue-latency-interval -n 10`**: Evaluates the registration latency of `10` UEs and logs the average latency in milliseconds.
-* **`./app amf-availability -t 60`**: Performs uptime and availability reachability tests on the AMF over a `60` second time window.
-
----
-
-## 📋 Manual Scenario Testing Guide
-
-The emulator provides 6 built-in scenario templates representing real-world 5G operations:
-
-### 1. Periodic Registration Update
-* **Command**: `sudo ./app scenario periodic-reg`
-* **Flow**: Registers a UE ➔ waits 5 seconds to simulate T3512 expiration ➔ sends a Periodic Registration Update.
-* **Verify Core Log**: `sudo journalctl -u open5gs-amfd -f | grep -i "periodic"`
-
-### 2. Mobility Registration Update (Tracking Area Update)
-* **Command**: `sudo ./app scenario mobility-reg`
-* **Flow**: Registers a UE ➔ simulates cell transition (3s delay) ➔ triggers a Mobility Registration Update (TAU).
-* **Verify Core Log**: `sudo journalctl -u open5gs-amfd -f | grep -E "Mobility|registration"`
-
-### 3. Emergency Registration
-* **Command**: `sudo ./app scenario emergency-reg`
-* **Flow**: Triggers unauthenticated Emergency Registration. Note: Depending on your 5G core configuration, it may either accept or reject the emergency request.
-* **Verify Core Log**: `sudo journalctl -u open5gs-amfd -f | grep -i "emergency"`
-
-### 4. N2 Handover (Path Switch Request)
-* **Command**: `sudo ./app scenario handover --target-gnb-ip 127.0.0.1 --target-gnb-port 9489 --delay 5`
-* **Flow**: Registers a UE on Source gNodeB ➔ waits 5 seconds ➔ target gNodeB sends a Path Switch Request NGAP message to notify core of target transport parameters.
-* **Verify Core Log**: `sudo journalctl -u open5gs-amfd -f | grep -i "Path Switch"`
-
-### 5. Full UE Lifecycle
-* **Command**: `sudo ./app scenario full-lifecycle --idle-seconds 5`
-* **Flow**: Registers UE ➔ establishes PDU session ➔ enters CM-IDLE (5s wait) ➔ sends Service Request to wake up ➔ cleanly detaches via UE-initiated Deregistration.
-* **Verify Core Log**: `sudo journalctl -u open5gs-amfd -f | grep -E "Service Request|Deregistration|PDU"`
-
-### 6. UE-initiated Deregistration
-* **Command**: `sudo ./app scenario deregister`
-* **Flow**: Registers UE ➔ waits 3 seconds ➔ sends a Deregistration Request (Access Type: 3GPP, Switch off: false) ➔ receives Deregistration Accept.
-* **Verify Core Log**: `sudo journalctl -u open5gs-amfd -f | grep -i "Deregistration"`
-
----
-
-## 🔧 Troubleshooting & FAQs
-
-### 1. AMF Connection Refused / "SCTP dial failed"
-- **Cause**: The 5G Core AMF is either not running, firewall is blocking port 38412, or the SCTP module is missing.
-- **Troubleshoot**:
-  - Check AMF service state: `sudo systemctl status open5gs-amfd`
-  - Verify AMF is listening on SCTP: `sudo ss -sln | grep 38412`
-  - Check local firewall: `sudo ufw status` (ensure SCTP port 38412 is allowed)
-  - Re-verify kernel module is loaded: `sudo modprobe sctp`
-
-### 2. "Error in setting virtual interface: operation not permitted"
-- **Cause**: The emulator must configure virtual interfaces (`uetun1`) using netlink, which requires root permissions.
-- **Troubleshoot**: Always prefix execution commands with `sudo` (e.g. `sudo ./app ue` or `sudo ./app web`).
-
-### 3. "Address already in use" or "Socket locked"
-- **Cause**: Stale UNIX sockets or ports left over by previously interrupted runs.
-- **Troubleshoot**: Clean up standard socket files and check for orphaned processes:
-  ```bash
-  sudo rm -f /tmp/gnb.sock /tmp/ue*.sock
-  sudo killall app
-  ```
-
-### 4. PDU session active, but "ping" doesn't route traffic
-- **Cause**: The `ipip` tunnel module is missing or core UPF does not route traffic from the allocated UE IP pool.
-- **Troubleshoot**:
-  - Load the tunnel kernel module: `sudo modprobe ipip`
-  - Verify routing tables created by the emulator: `ip rule show` and `ip route show table all`
-  - Inspect core UPF routing and check `ogstun` interface settings on the core.
+### What is covered in the documentation:
+1. **Host Prerequisites**: Loading SCTP & IPIP Linux kernel modules.
+2. **Subscriber Registration**: Core subscriber setup examples (e.g., Open5GS profile provisioning).
+3. **CLI Command Reference**: Command arguments for standalone execution, load testing, latency profiling, and AMF availability checking.
+4. **Manual Scenario Testing Guide**: Built-in 3GPP testing templates (Periodic registration, TAU mobility, Emergency registration, Handover/Path Switch, CM-IDLE to CM-CONNECTED Service Request flow).
+5. **Advanced Features**: Dynamic 3GPP Release overrides, Custom Scripting Engine steps, and Real-Traffic VoNR RTP voice echo loop details.
+6. **Troubleshooting FAQs**: SCTP binding issues, virtual interface netlink permission faults, stale UNIX socket cleanups, and user-plane routing issues.

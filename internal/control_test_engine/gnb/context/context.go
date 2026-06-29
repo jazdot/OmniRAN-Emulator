@@ -50,6 +50,8 @@ type GNBContext struct {
 	idAmfGenerator int64  // ran amf id
 	teidGenerator  uint32 // ran UE downlink Teid
 	ueIpGenerator  uint8  // ran ue ip.
+	connLossChan   chan struct{}
+	connLossOnce   sync.Once
 }
 
 type DataInfo struct {
@@ -126,9 +128,24 @@ func (gnb *GNBContext) NewRanGnbContext(gnbId, mcc, mnc, tac, sst, sd, ip, ipDat
 	gnb.dataInfo.gnbIp = ipData
 	gnb.dataInfo.gnbPort = portData
 
+	gnb.connLossChan = make(chan struct{})
+	gnb.connLossOnce = sync.Once{}
+
 	ActiveGNBsMu.Lock()
 	ActiveGNBs[gnbId] = gnb
 	ActiveGNBsMu.Unlock()
+}
+
+func (gnb *GNBContext) ConnLossChan() <-chan struct{} {
+	return gnb.connLossChan
+}
+
+func (gnb *GNBContext) SignalConnLoss() {
+	gnb.connLossOnce.Do(func() {
+		if gnb.connLossChan != nil {
+			close(gnb.connLossChan)
+		}
+	})
 }
 
 func (gnb *GNBContext) NewGnBUe(conn net.Conn) *GNBUe {
