@@ -714,6 +714,7 @@ export default function App() {
   // Documentation states and helpers
   const [docsContent, setDocsContent] = useState<string>('');
   const [docsLoading, setDocsLoading] = useState<boolean>(false);
+  const [activeHeadingId, setActiveHeadingId] = useState<string>('');
 
   const fetchDocsContent = async () => {
     setDocsLoading(true);
@@ -7474,38 +7475,52 @@ export default function App() {
                         <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                           Table of Contents
                         </span>
-                        <ul style={{ listStyleType: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {headings.map((h, i) => (
-                            <li 
-                              key={i} 
-                              style={{ 
-                                paddingLeft: `${(h.level - 1) * 12}px`,
-                                lineHeight: '1.4'
-                              }}
-                            >
-                              <a 
-                                href={`#${h.id}`}
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  const el = document.getElementById(h.id);
-                                  if (el) {
-                                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                  }
-                                }}
+                        <ul style={{ listStyleType: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {headings.map((h, i) => {
+                            const isActive = h.id === activeHeadingId;
+                            return (
+                              <li 
+                                key={i} 
                                 style={{ 
-                                  color: h.level === 1 ? 'var(--text-primary)' : 'var(--text-secondary)', 
-                                  textDecoration: 'none', 
-                                  fontSize: h.level === 1 ? '13px' : '12px',
-                                  fontWeight: h.level === 1 ? '600' : 'normal',
-                                  cursor: 'pointer',
-                                  transition: 'color 0.2s'
+                                  paddingLeft: `${(h.level - 1) * 12}px`,
+                                  lineHeight: '1.4'
                                 }}
-                                className="toc-link"
                               >
-                                {h.text}
-                              </a>
-                            </li>
-                          ))}
+                                <a 
+                                  href={`#${h.id}`}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    const el = document.getElementById(h.id);
+                                    const container = document.getElementById('docsContentContainer');
+                                    if (el && container) {
+                                      const offsetTop = el.offsetTop - container.offsetTop;
+                                      container.scrollTo({ top: offsetTop - 20, behavior: 'smooth' });
+                                      setActiveHeadingId(h.id);
+                                    }
+                                  }}
+                                  style={{ 
+                                    display: 'block',
+                                    padding: '6px 10px',
+                                    borderRadius: '6px',
+                                    color: isActive 
+                                      ? '#3b82f6' 
+                                      : h.level === 1 ? 'var(--text-primary)' : 'var(--text-secondary)', 
+                                    background: isActive ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
+                                    textDecoration: 'none', 
+                                    fontSize: h.level === 1 ? '13px' : '12px',
+                                    fontWeight: isActive || h.level === 1 ? '600' : 'normal',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease-in-out',
+                                    borderLeft: isActive ? '2px solid #3b82f6' : '2px solid transparent',
+                                    paddingLeft: isActive ? '8px' : '10px'
+                                  }}
+                                  className="toc-link"
+                                >
+                                  {h.text}
+                                </a>
+                              </li>
+                            );
+                          })}
                         </ul>
                       </div>
                     )}
@@ -7513,6 +7528,22 @@ export default function App() {
                     {/* Right Column: Scrollable Content */}
                     <div 
                       className="docs-content" 
+                      id="docsContentContainer"
+                      onScroll={(e) => {
+                        const container = e.currentTarget;
+                        const headingElems = container.querySelectorAll('h1, h2, h3');
+                        let currentActive = '';
+                        for (let j = 0; j < headingElems.length; j++) {
+                          const hEl = headingElems[j] as HTMLElement;
+                          const offsetTop = hEl.offsetTop - container.offsetTop;
+                          if (container.scrollTop >= offsetTop - 40) {
+                            currentActive = hEl.id;
+                          }
+                        }
+                        if (currentActive && currentActive !== activeHeadingId) {
+                          setActiveHeadingId(currentActive);
+                        }
+                      }}
                       style={{ 
                         flexGrow: 1,
                         overflowY: 'auto', 
