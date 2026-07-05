@@ -79,6 +79,11 @@ func HandlerSecurityModeCommand(ue *context.UEContext, message *nas.Message) {
 		log.Info("[UE][NAS] Type of integrity protection algorithm is 128-5G-IA2")
 	}
 
+	// Store ngKsi from Security Mode Command
+	ngKsi := message.SecurityModeCommand.SpareHalfOctetAndNgksi.GetNasKeySetIdentifiler()
+	ue.SetNgKsi(ngKsi)
+	log.Infof("[UE][NAS] Security Mode Command: ngKSI = %d", ngKsi)
+
 	// checking BIT RINMR that triggered registration request in security mode complete.
 	rinmr := message.SecurityModeCommand.Additional5GSecurityInformation.GetRINMR()
 

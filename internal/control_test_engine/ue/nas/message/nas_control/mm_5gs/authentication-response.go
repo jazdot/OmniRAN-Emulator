@@ -14,6 +14,7 @@ func AuthenticationResponse(authenticationResponseParam []uint8, eapMsg string) 
 	m := nas.NewMessage()
 	m.GmmMessage = nas.NewGmmMessage()
 	m.GmmHeader.SetMessageType(nas.MsgTypeAuthenticationResponse)
+	m.GmmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
 
 	authenticationResponse := nasMessage.NewAuthenticationResponse(0)
 	authenticationResponse.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
@@ -24,7 +25,7 @@ func AuthenticationResponse(authenticationResponseParam []uint8, eapMsg string) 
 	if len(authenticationResponseParam) > 0 {
 		authenticationResponse.AuthenticationResponseParameter = nasType.NewAuthenticationResponseParameter(nasMessage.AuthenticationResponseAuthenticationResponseParameterType)
 		authenticationResponse.AuthenticationResponseParameter.SetLen(uint8(len(authenticationResponseParam)))
-		copy(authenticationResponse.AuthenticationResponseParameter.Octet[:], authenticationResponseParam[0:16])
+		copy(authenticationResponse.AuthenticationResponseParameter.Octet[:], authenticationResponseParam)
 	} else if eapMsg != "" {
 		rawEapMsg, _ := base64.StdEncoding.DecodeString(eapMsg)
 		authenticationResponse.EAPMessage = nasType.NewEAPMessage(nasMessage.AuthenticationResponseEAPMessageType)

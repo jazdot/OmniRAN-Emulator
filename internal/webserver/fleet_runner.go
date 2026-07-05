@@ -291,7 +291,7 @@ func LaunchUEFromProfile(profileName string, targetGnbProfile string) (uint8, er
 	// Trigger initial registration in background
 	go func() {
 		trigger.InitRegistration(u)
-		logrus.Infof("[FLEET][UE %d] Registration procedure complete (SUPI: %s)", ueID, u.GetSupi())
+		logrus.Infof("[FLEET][UE %d] Registration procedure initiated (SUPI: %s)", ueID, u.GetSupi())
 	}()
 
 	logrus.Infof("[FLEET] Launched UE profile '%s' as UE ID %d (SUPI: %s)", profileName, ueID, u.GetSupi())
@@ -401,3 +401,26 @@ func resolveUeConnectionDetails(u *ueContext.UEContext) {
 		}
 	}
 }
+
+// CleanUpAll terminates all running fleet UEs and gNBs.
+func CleanUpAll() {
+	logrus.Info("[FLEET] Cleaning up all running UEs and gNBs...")
+	
+	// Terminate UEs
+	ues := ueContext.GetAllActiveUEs()
+	for _, u := range ues {
+		logrus.Infof("[FLEET] Terminating UE %d (SUPI: %s)", u.GetUeId(), u.GetSupi())
+		u.Terminate()
+	}
+
+	// Terminate GNBs
+	runningGNBsMu.Lock()
+	for name, inst := range runningGNBs {
+		logrus.Infof("[FLEET] Terminating gNB profile '%s'", name)
+		inst.Cancel()
+	}
+	// Clear the map
+	runningGNBs = make(map[string]*RunningGNBInstance)
+	runningGNBsMu.Unlock()
+}
+

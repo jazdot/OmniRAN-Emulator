@@ -16,6 +16,7 @@ func getSecurityModeComplete(nasMessageContainer []uint8) (nasPdu []byte) {
 	m := nas.NewMessage()
 	m.GmmMessage = nas.NewGmmMessage()
 	m.GmmHeader.SetMessageType(nas.MsgTypeSecurityModeComplete)
+	m.GmmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
 
 	securityModeComplete := nasMessage.NewSecurityModeComplete(0)
 	securityModeComplete.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)

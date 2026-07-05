@@ -25,6 +25,7 @@ func getServiceRequest(ue *context.UEContext, serviceType uint8) (nasPdu []byte)
 	m := nas.NewMessage()
 	m.GmmMessage = nas.NewGmmMessage()
 	m.GmmHeader.SetMessageType(nas.MsgTypeServiceRequest)
+	m.GmmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
 
 	serviceRequest := nasMessage.NewServiceRequest(0)
 	serviceRequest.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
@@ -34,7 +35,7 @@ func getServiceRequest(ue *context.UEContext, serviceType uint8) (nasPdu []byte)
 
 	// Set Service Type and KSI
 	serviceRequest.ServiceTypeAndNgksi.SetServiceTypeValue(serviceType)
-	serviceRequest.ServiceTypeAndNgksi.SetNasKeySetIdentifiler(0x07) // No key is available or TSC key index
+	serviceRequest.ServiceTypeAndNgksi.SetNasKeySetIdentifiler(ue.GetNgKsi()) // Use active ngKSI
 
 	// Set 5G-S-TMSI
 	serviceRequest.TMSI5GS.SetLen(7)

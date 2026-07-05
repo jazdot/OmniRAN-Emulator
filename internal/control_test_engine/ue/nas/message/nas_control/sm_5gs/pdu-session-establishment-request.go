@@ -15,6 +15,7 @@ func GetPduSessionEstablishmentRequest(pduSessionId uint8, pduSessionType string
 	m := nas.NewMessage()
 	m.GsmMessage = nas.NewGsmMessage()
 	m.GsmHeader.SetMessageType(nas.MsgTypePDUSessionEstablishmentRequest)
+	m.GsmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
 
 	pduSessionEstablishmentRequest := nasMessage.NewPDUSessionEstablishmentRequest(0)
 	pduSessionEstablishmentRequest.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
@@ -23,6 +24,9 @@ func GetPduSessionEstablishmentRequest(pduSessionId uint8, pduSessionType string
 	pduSessionEstablishmentRequest.PTI.SetPTI(0x01)
 	pduSessionEstablishmentRequest.IntegrityProtectionMaximumDataRate.SetMaximumDataRatePerUEForUserPlaneIntegrityProtectionForDownLink(0xff)
 	pduSessionEstablishmentRequest.IntegrityProtectionMaximumDataRate.SetMaximumDataRatePerUEForUserPlaneIntegrityProtectionForUpLink(0xff)
+
+	pduSessionEstablishmentRequest.SSCMode = nasType.NewSSCMode(nasMessage.PDUSessionEstablishmentRequestSSCModeType)
+	pduSessionEstablishmentRequest.SSCMode.SetSSCMode(0x01) // SSC Mode 1
 
 	pduSessionEstablishmentRequest.PDUSessionType = nasType.NewPDUSessionType(nasMessage.PDUSessionEstablishmentRequestPDUSessionTypeType)
 	
@@ -62,6 +66,7 @@ func GetPduSessionReleaseRequest(pduSessionId uint8) (nasPdu []byte) {
 	m := nas.NewMessage()
 	m.GsmMessage = nas.NewGsmMessage()
 	m.GsmHeader.SetMessageType(nas.MsgTypePDUSessionReleaseRequest)
+	m.GsmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
 
 	pduSessionReleaseRequest := nasMessage.NewPDUSessionReleaseRequest(0)
 	pduSessionReleaseRequest.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
@@ -90,6 +95,7 @@ func GetPduSessionReleaseComplete(pduSessionId uint8) (nasPdu []byte) {
 	m := nas.NewMessage()
 	m.GsmMessage = nas.NewGsmMessage()
 	m.GsmHeader.SetMessageType(nas.MsgTypePDUSessionReleaseComplete)
+	m.GsmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
 
 	pduSessionReleaseComplete := nasMessage.NewPDUSessionReleaseComplete(0)
 	pduSessionReleaseComplete.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
@@ -114,6 +120,7 @@ func GetPduSessionModificationRequest(pduSessionId uint8) (nasPdu []byte) {
 	m := nas.NewMessage()
 	m.GsmMessage = nas.NewGsmMessage()
 	m.GsmHeader.SetMessageType(nas.MsgTypePDUSessionModificationRequest)
+	m.GsmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
 
 	pduSessionModificationRequest := nasMessage.NewPDUSessionModificationRequest(0)
 	pduSessionModificationRequest.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
@@ -138,6 +145,7 @@ func GetPduSessionModificationComplete(pduSessionId uint8) (nasPdu []byte) {
 	m := nas.NewMessage()
 	m.GsmMessage = nas.NewGsmMessage()
 	m.GsmHeader.SetMessageType(nas.MsgTypePDUSessionModificationComplete)
+	m.GsmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)
 
 	pduSessionModificationComplete := nasMessage.NewPDUSessionModificationComplete(0)
 	pduSessionModificationComplete.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSSessionManagementMessage)

@@ -26,6 +26,7 @@ func getRegistrationComplete(sorTransparentContainer []uint8) (nasPdu []byte) {
 	m := nas.NewMessage()
 	m.GmmMessage = nas.NewGmmMessage()
 	m.GmmHeader.SetMessageType(nas.MsgTypeRegistrationComplete)
+	m.GmmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
 
 	registrationComplete := nasMessage.NewRegistrationComplete(0)
 	registrationComplete.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)

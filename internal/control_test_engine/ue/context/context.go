@@ -88,6 +88,7 @@ type SECURITY struct {
 	AuthenticationSubs models.AuthenticationSubscription
 	Suci               nasType.MobileIdentity5GS
 	Guti               [4]byte
+	NgKsi              uint8
 }
 
 func (ue *UEContext) NewRanUeContext(msin string,
@@ -206,6 +207,9 @@ func (ue *UEContext) NewRanUeContext(msin string,
 	// added initial state for SM(INACTIVE)
 	ue.SetStateSM_PDU_SESSION_INACTIVE()
 
+	// default ngKsi to 7 (no key available)
+	ue.UeSecurity.NgKsi = 7
+
 	RegisterUE(ue)
 }
 
@@ -223,6 +227,14 @@ func (ue *UEContext) GetMsin() string {
 
 func (ue *UEContext) GetSupi() string {
 	return ue.UeSecurity.Supi
+}
+
+func (ue *UEContext) GetNgKsi() uint8 {
+	return ue.UeSecurity.NgKsi
+}
+
+func (ue *UEContext) SetNgKsi(ngKsi uint8) {
+	ue.UeSecurity.NgKsi = ngKsi
 }
 
 func (ue *UEContext) SetStateSM_PDU_SESSION_INACTIVE() {

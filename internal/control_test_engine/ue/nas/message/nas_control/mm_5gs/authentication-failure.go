@@ -13,6 +13,7 @@ func AuthenticationFailure(cause, eapMsg string, paramAutn []byte) (nasPdu []byt
 	m := nas.NewMessage()
 	m.GmmMessage = nas.NewGmmMessage()
 	m.GmmHeader.SetMessageType(nas.MsgTypeAuthenticationFailure)
+	m.GmmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
 
 	authenticationFailure := nasMessage.NewAuthenticationFailure(0)
 	authenticationFailure.ExtendedProtocolDiscriminator.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)

@@ -35,6 +35,7 @@ func getUlNasTransport_PduSessionEstablishmentRequest(pduSessionId uint8, reques
 	m := nas.NewMessage()
 	m.GmmMessage = nas.NewGmmMessage()
 	m.GmmHeader.SetMessageType(nas.MsgTypeULNASTransport)
+	m.GmmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
 
 	ulNasTransport := nasMessage.NewULNASTransport(0)
 	ulNasTransport.SpareHalfOctetAndSecurityHeaderType.SetSecurityHeaderType(nas.SecurityHeaderTypePlainNas)
@@ -104,6 +105,7 @@ func getUlNasTransport_PduSessionReleaseRequest(pduSessionId uint8) (nasPdu []by
 	m := nas.NewMessage()
 	m.GmmMessage = nas.NewGmmMessage()
 	m.GmmHeader.SetMessageType(nas.MsgTypeULNASTransport)
+	m.GmmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
 
 	ulNasTransport := nasMessage.NewULNASTransport(0)
 	ulNasTransport.SpareHalfOctetAndSecurityHeaderType.SetSecurityHeaderType(nas.SecurityHeaderTypePlainNas)
@@ -148,6 +150,7 @@ func getUlNasTransport_PduSessionReleaseComplete(pduSessionId uint8) (nasPdu []b
 	m := nas.NewMessage()
 	m.GmmMessage = nas.NewGmmMessage()
 	m.GmmHeader.SetMessageType(nas.MsgTypeULNASTransport)
+	m.GmmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
 
 	ulNasTransport := nasMessage.NewULNASTransport(0)
 	ulNasTransport.SpareHalfOctetAndSecurityHeaderType.SetSecurityHeaderType(nas.SecurityHeaderTypePlainNas)
@@ -192,6 +195,7 @@ func getUlNasTransport_PduSessionModificationRequest(pduSessionId uint8) (nasPdu
 	m := nas.NewMessage()
 	m.GmmMessage = nas.NewGmmMessage()
 	m.GmmHeader.SetMessageType(nas.MsgTypeULNASTransport)
+	m.GmmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
 
 	ulNasTransport := nasMessage.NewULNASTransport(0)
 	ulNasTransport.SpareHalfOctetAndSecurityHeaderType.SetSecurityHeaderType(nas.SecurityHeaderTypePlainNas)
@@ -236,6 +240,7 @@ func getUlNasTransport_PduSessionModificationComplete(pduSessionId uint8) (nasPd
 	m := nas.NewMessage()
 	m.GmmMessage = nas.NewGmmMessage()
 	m.GmmHeader.SetMessageType(nas.MsgTypeULNASTransport)
+	m.GmmHeader.SetExtendedProtocolDiscriminator(nasMessage.Epd5GSMobilityManagementMessage)
 
 	ulNasTransport := nasMessage.NewULNASTransport(0)
 	ulNasTransport.SpareHalfOctetAndSecurityHeaderType.SetSecurityHeaderType(nas.SecurityHeaderTypePlainNas)

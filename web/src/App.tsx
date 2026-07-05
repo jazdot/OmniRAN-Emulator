@@ -793,6 +793,7 @@ export default function App() {
   const [authConfirmPassword, setAuthConfirmPassword] = useState<string>('');
   const [authError, setAuthError] = useState<string>('');
   const [authLoading, setAuthLoading] = useState<boolean>(false);
+  const [showPassword, setShowPassword] = useState<boolean>(false);
 
   // User list states (for user administration)
   const [usersList, setUsersList] = useState<any[]>([]);
@@ -3736,9 +3737,18 @@ export default function App() {
           </div>
 
           <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Secure Password (min 8 chars)</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Secure Password (min 8 chars)</label>
+              <button 
+                type="button" 
+                onClick={() => setShowPassword(!showPassword)}
+                style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '11px', cursor: 'pointer', padding: 0 }}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
             <input 
-              type="password" 
+              type={showPassword ? "text" : "password"} 
               className="form-input" 
               value={authPassword} 
               onChange={e => setAuthPassword(e.target.value)} 
@@ -3751,7 +3761,7 @@ export default function App() {
           <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Confirm Password</label>
             <input 
-              type="password" 
+              type={showPassword ? "text" : "password"} 
               className="form-input" 
               value={authConfirmPassword} 
               onChange={e => setAuthConfirmPassword(e.target.value)} 
@@ -3805,9 +3815,18 @@ export default function App() {
           </div>
 
           <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Password</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Password</label>
+              <button 
+                type="button" 
+                onClick={() => setShowPassword(!showPassword)}
+                style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '11px', cursor: 'pointer', padding: 0 }}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
             <input 
-              type="password" 
+              type={showPassword ? "text" : "password"} 
               className="form-input" 
               value={authPassword} 
               onChange={e => setAuthPassword(e.target.value)} 
@@ -8083,9 +8102,18 @@ export default function App() {
                   </div>
 
                   <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Access Password</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Access Password</label>
+                      <button 
+                        type="button" 
+                        onClick={() => setShowPassword(!showPassword)}
+                        style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '11px', cursor: 'pointer', padding: 0 }}
+                      >
+                        {showPassword ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
                     <input
-                      type="password"
+                      type={showPassword ? "text" : "password"}
                       className="form-input"
                       value={newUserPassword}
                       onChange={e => setNewUserPassword(e.target.value)}
@@ -9069,9 +9097,18 @@ export default function App() {
 
             <form onSubmit={handleUpdatePassword} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Current Password *</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Current Password *</label>
+                  <button 
+                    type="button" 
+                    onClick={() => setShowPassword(!showPassword)}
+                    style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '11px', cursor: 'pointer', padding: 0 }}
+                  >
+                    {showPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
                 <input 
-                  type="password" 
+                  type={showPassword ? "text" : "password"} 
                   className="form-input" 
                   value={oldPassword} 
                   onChange={e => setOldPassword(e.target.value)} 
@@ -9084,7 +9121,7 @@ export default function App() {
               <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>New Password (min 8 chars) *</label>
                 <input 
-                  type="password" 
+                  type={showPassword ? "text" : "password"} 
                   className="form-input" 
                   value={newPasswordVal} 
                   onChange={e => setNewPasswordVal(e.target.value)} 

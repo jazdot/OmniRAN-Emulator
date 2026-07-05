@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
+	"syscall"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -129,6 +131,17 @@ func startSessionJanitor() {
 
 // StartServer starts the Go HTTP backend and serves the embedded Web UI.
 func StartServer(host string, port int) error {
+	// Setup graceful signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		logrus.Info("[WEB] Shutdown signal received. Executing cleanup...")
+		CleanUpAll()
+		CleanUpPcap()
+		os.Exit(0)
+	}()
+
 	startSessionJanitor()
 	// Clean up stale socket files on startup
 	if files, err := filepath.Glob("/tmp/gnb_*.sock"); err == nil {
@@ -1827,7 +1840,7 @@ func loadUsers() error {
 	return nil
 }
 
-func saveUsers() error {
+func saveUsersLocked() error {
 	var uList []User
 	for _, u := range users {
 		uList = append(uList, u)
@@ -1839,6 +1852,12 @@ func saveUsers() error {
 		return err
 	}
 	return os.WriteFile(usersFile, data, 0600)
+}
+
+func saveUsers() error {
+	usersMu.Lock()
+	defer usersMu.Unlock()
+	return saveUsersLocked()
 }
 
 // Authentication Middlewares
@@ -2003,7 +2022,7 @@ func handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	users[req.Username] = adminUser
-	if err := saveUsers(); err != nil {
+	if err := saveUsersLocked(); err != nil {
 		http.Error(w, "Failed to save user database", http.StatusInternalServerError)
 		return
 	}
@@ -2152,7 +2171,7 @@ func handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		Role:         req.Role,
 	}
 
-	if err := saveUsers(); err != nil {
+	if err := saveUsersLocked(); err != nil {
 		http.Error(w, "Failed to save user database", http.StatusInternalServerError)
 		return
 	}
@@ -2190,7 +2209,7 @@ func handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	delete(users, req.Username)
-	if err := saveUsers(); err != nil {
+	if err := saveUsersLocked(); err != nil {
 		http.Error(w, "Failed to save user database", http.StatusInternalServerError)
 		return
 	}
@@ -2239,7 +2258,7 @@ func handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	users[req.Username] = u
-	if err := saveUsers(); err != nil {
+	if err := saveUsersLocked(); err != nil {
 		http.Error(w, "Failed to save user database", http.StatusInternalServerError)
 		return
 	}
@@ -2452,7 +2471,7 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	u.Salt = hex.EncodeToString(salt)
 
 	users[session.Username] = u
-	if err := saveUsers(); err != nil {
+	if err := saveUsersLocked(); err != nil {
 		http.Error(w, "Failed to save user database", http.StatusInternalServerError)
 		return
 	}

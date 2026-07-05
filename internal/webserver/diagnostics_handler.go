@@ -1991,3 +1991,18 @@ func handleParseLogs(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(events)
 }
 
+// CleanUpPcap stops any active packet capture session and releases descriptors.
+func CleanUpPcap() {
+	pcapMgr.mu.Lock()
+	defer pcapMgr.mu.Unlock()
+	if pcapMgr.isCapturing {
+		close(pcapMgr.stopChan)
+		syscall.Close(pcapMgr.socketFd)
+		pcapMgr.file.Sync()
+		pcapMgr.file.Close()
+		pcapMgr.isCapturing = false
+		logrus.Infof("[CLEANUP] Gracefully stopped active packet capture file %s", pcapMgr.fileName)
+	}
+}
+
+
