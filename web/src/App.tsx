@@ -774,8 +774,18 @@ export default function App() {
     const saved = localStorage.getItem('theme');
     return (saved === 'dark' || saved === 'light') ? saved : 'light';
   });
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity' | 'fleet' | 'diagnostics' | 'docs' | 'users'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'scenarios' | 'config' | 'logs' | 'connectivity' | 'fleet' | 'diagnostics' | 'docs' | 'users' | 'agent'>('dashboard');
   const [selectedNode, setSelectedNode] = useState<'ue' | 'gnb' | 'amf' | 'upf' | 'dn' | 'uu-link' | 'n2-link' | 'n3-link' | 'n6-link' | null>('ue');
+
+  // Self-Healing Agent states
+  const [agentEnabled, setAgentEnabled] = useState<boolean>(true);
+  const [healedHistory, setHealedHistory] = useState<any[]>([]);
+  const [manualLogText, setManualLogText] = useState<string>('');
+  const [manualAnalysisResult, setManualAnalysisResult] = useState<any | null>(null);
+  const [manualAnalysisLoading, setManualAnalysisLoading] = useState<boolean>(false);
+  const [geminiApiKey, setGeminiApiKey] = useState<string>('');
+  const [showApiKey, setShowApiKey] = useState<boolean>(false);
+  const [apiKeySaved, setApiKeySaved] = useState<boolean>(false);
   
   // Security / Authentication states
   const [sessionToken, setSessionToken] = useState<string>(() => sessionStorage.getItem('session_token') || '');
@@ -1118,6 +1128,108 @@ export default function App() {
       console.error('Failed to delete scenario:', err);
     }
   };
+
+  const fetchAgentSettings = async () => {
+    try {
+      const res = await fetch('/api/agent/settings', {
+        headers: { 'Authorization': `Bearer ${sessionToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAgentEnabled(data.enabled);
+        setGeminiApiKey(data.geminiApiKey || '');
+      }
+    } catch (err) {
+      console.error('Failed to fetch agent settings:', err);
+    }
+  };
+
+  const updateAgentSettings = async (enabled: boolean, apiKey?: string) => {
+    try {
+      const res = await fetch('/api/agent/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: JSON.stringify({ 
+          enabled, 
+          geminiApiKey: apiKey !== undefined ? apiKey : geminiApiKey 
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAgentEnabled(data.enabled);
+        setGeminiApiKey(data.geminiApiKey || '');
+        if (apiKey !== undefined) {
+          setApiKeySaved(true);
+          setTimeout(() => setApiKeySaved(false), 3000);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to update agent settings:', err);
+    }
+  };
+
+  const fetchHealedHistory = async () => {
+    try {
+      const res = await fetch('/api/agent/history', {
+        headers: { 'Authorization': `Bearer ${sessionToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setHealedHistory(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch healed history:', err);
+    }
+  };
+
+  const clearHealedHistory = async () => {
+    try {
+      const res = await fetch('/api/agent/clear', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${sessionToken}` }
+      });
+      if (res.ok) {
+        setHealedHistory([]);
+      }
+    } catch (err) {
+      console.error('Failed to clear healed history:', err);
+    }
+  };
+
+  const analyzeManualLog = async () => {
+    if (!manualLogText.trim()) return;
+    setManualAnalysisLoading(true);
+    try {
+      const res = await fetch('/api/agent/heal-manual', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: JSON.stringify({ logText: manualLogText }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setManualAnalysisResult(data);
+      }
+    } catch (err) {
+      console.error('Failed to analyze log trace:', err);
+    } finally {
+      setManualAnalysisLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'agent') {
+      fetchAgentSettings();
+      fetchHealedHistory();
+      const interval = setInterval(fetchHealedHistory, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab === 'users') {
@@ -3920,6 +4032,13 @@ export default function App() {
             <FileText />
             <span>Documentation</span>
           </li>
+          <li
+            className={`nav-item ${activeTab === 'agent' ? 'active' : ''}`}
+            onClick={() => setActiveTab('agent')}
+          >
+            <Cpu />
+            <span>Self-Healing Agent</span>
+          </li>
           {currentUser?.role === 'admin' && (
             <li
               className={`nav-item ${activeTab === 'users' ? 'active' : ''}`}
@@ -4024,6 +4143,7 @@ export default function App() {
               {activeTab === 'diagnostics' && 'Diagnostics & Captures'}
               {activeTab === 'docs' && 'Technical Documentation'}
               {activeTab === 'users' && 'User Administration'}
+              {activeTab === 'agent' && 'Self-Healing Protocol Agent'}
             </h1>
           </div>
 
@@ -8146,6 +8266,288 @@ export default function App() {
                 </form>
               </div>
 
+            </div>
+          </div>
+        )}
+
+        {/* ─── Self-Healing Protocol Agent Tab ─────────────────────────── */}
+        {activeTab === 'agent' && (
+          <div className="view-body fade-in">
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px', maxWidth: '1200px', margin: '0 auto' }}>
+              
+              {/* Left Column: Active Issues History & Control Switch */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                
+                {/* Control Switch Card */}
+                <div className="card" style={{ padding: '24px', position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <Cpu className="text-blue" size={22} />
+                        Self-Healing Protocol Agent
+                      </h3>
+                      <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>
+                        Cross-references GNodeB/UE protocol failures with 3GPP standards to dynamically heal contexts in memory.
+                      </p>
+                    </div>
+                    
+                    {/* Toggle Switch */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <span style={{
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        color: agentEnabled ? '#10b981' : 'var(--text-secondary)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em'
+                      }}>
+                        {agentEnabled ? 'Active' : 'Paused'}
+                      </span>
+                      <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '48px', height: '26px' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={agentEnabled} 
+                          onChange={(e) => updateAgentSettings(e.target.checked)} 
+                          style={{ opacity: 0, width: 0, height: 0 }}
+                        />
+                        <span className="slider round" style={{
+                          position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                          backgroundColor: agentEnabled ? '#10b981' : '#4b5563',
+                          transition: '.4s', borderRadius: '34px',
+                          boxShadow: agentEnabled ? '0 0 10px rgba(16, 185, 129, 0.4)' : 'none'
+                        }}>
+                          <span style={{
+                            position: 'absolute', content: '""', height: '18px', width: '18px', left: '4px', bottom: '4px',
+                            backgroundColor: 'white', transition: '.4s', borderRadius: '50%',
+                            transform: agentEnabled ? 'translateX(22px)' : 'none'
+                          }} />
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {agentEnabled && (
+                    <div style={{ 
+                      marginTop: '16px', 
+                      padding: '10px 12px', 
+                      background: 'rgba(16, 185, 129, 0.1)', 
+                      border: '1px solid rgba(16, 185, 129, 0.2)', 
+                      borderRadius: '6px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '12px',
+                      color: '#10b981'
+                    }}>
+                      <div className="pulse-green" style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
+                      Agent is actively intercepting control plane events and matching against 3GPP TS 38.413 (NGAP) and TS 24.501 (NAS).
+                    </div>
+                  )}
+                </div>
+
+                {/* Resolved History Card */}
+                <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', minHeight: '400px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                    <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Activity className="text-green" size={20} />
+                      Healed Issues History
+                    </h3>
+                    {healedHistory.length > 0 && (
+                      <button 
+                        className="btn btn-outline" 
+                        onClick={clearHealedHistory}
+                        style={{ padding: '4px 10px', fontSize: '11px', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                      >
+                        Clear Logs
+                      </button>
+                    )}
+                  </div>
+
+                  {healedHistory.length === 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', flexGrow: 1, color: 'var(--text-secondary)' }}>
+                      <Cpu size={40} style={{ opacity: 0.3 }} />
+                      <span style={{ fontSize: '13px' }}>No protocol errors or auto-healing actions logged yet.</span>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '550px', overflowY: 'auto', paddingRight: '4px' }}>
+                      {healedHistory.map((issue) => (
+                        <div key={issue.id} className="card" style={{ 
+                          padding: '16px', 
+                          background: 'var(--bg-input)', 
+                          border: '1px solid var(--border-color)',
+                          borderLeft: `4px solid ${issue.status === 'Healed' ? '#10b981' : '#f59e0b'}`,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '10px'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--text-primary)' }}>
+                                {issue.messageType}
+                              </span>
+                              <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                                {new Date(issue.timestamp).toLocaleString()}
+                              </span>
+                            </div>
+                            <span style={{ 
+                              fontSize: '11px', 
+                              fontWeight: 'bold', 
+                              padding: '2px 8px', 
+                              borderRadius: '4px',
+                              background: issue.status === 'Healed' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                              color: issue.status === 'Healed' ? '#10b981' : '#f59e0b'
+                            }}>
+                              {issue.status}
+                            </span>
+                          </div>
+
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                              <strong style={{ color: '#ef4444' }}>Error:</strong>
+                              <code style={{ background: 'rgba(239, 68, 68, 0.1)', padding: '2px 4px', borderRadius: '4px', fontFamily: 'monospace', color: '#f87171' }}>
+                                {issue.errorMsg}
+                              </code>
+                            </div>
+                            
+                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center', marginTop: '4px' }}>
+                              <strong style={{ color: 'var(--text-primary)' }}>3GPP Ref:</strong>
+                              <span style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', padding: '2px 6px', borderRadius: '4px', fontSize: '11px' }}>
+                                {issue.tsRef}
+                              </span>
+                            </div>
+                          </div>
+
+                          {issue.analysis && (
+                            <div style={{ fontSize: '12px', background: 'var(--bg-card)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                              <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>Analysis</div>
+                              <div style={{ color: 'var(--text-secondary)', lineHeight: '1.4' }}>{issue.analysis}</div>
+                            </div>
+                          )}
+
+                          {issue.healingAction && (
+                            <div style={{ fontSize: '12px', background: 'rgba(16, 185, 129, 0.08)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.15)' }}>
+                              <div style={{ fontWeight: 600, color: '#10b981', marginBottom: '4px' }}>Healing Action Applied</div>
+                              <div style={{ color: 'var(--text-secondary)', lineHeight: '1.4' }}>{issue.healingAction}</div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: AI Config & Manual 3GPP Log Analyzer Sandbox */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                
+                {/* Gemini AI Config Card */}
+                <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                    <Key className="text-blue" size={20} />
+                    Gemini AI Integration (Optional)
+                  </h3>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                    Entering a Gemini API Key enables deep, AI-powered compliance explanations and spec citations for detected failures. Without a key, the agent falls back to local heuristic rules.
+                  </p>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Gemini API Key</label>
+                      <button 
+                        type="button" 
+                        onClick={() => setShowApiKey(!showApiKey)}
+                        style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '11px', cursor: 'pointer', padding: 0 }}
+                      >
+                        {showApiKey ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <input
+                        type={showApiKey ? "text" : "password"}
+                        className="form-input"
+                        style={{ flexGrow: 1 }}
+                        value={geminiApiKey}
+                        onChange={e => setGeminiApiKey(e.target.value)}
+                        placeholder="Paste your Gemini API key here..."
+                      />
+                      <button
+                        className="btn btn-primary"
+                        style={{ padding: '8px 16px', fontWeight: 'bold' }}
+                        onClick={() => updateAgentSettings(agentEnabled, geminiApiKey)}
+                      >
+                        Save
+                      </button>
+                    </div>
+                    {apiKeySaved && (
+                      <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 600 }}>
+                        ✓ API Key configuration updated successfully!
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Manual 3GPP Log Analyzer Sandbox */}
+                <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                    <Search className="text-blue" size={20} />
+                    3GPP Log Analyzer Sandbox
+                  </h3>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                    Paste raw trace errors or cause codes (e.g. from free5GC, Open5GS, or SCTP sockets) to cross-reference them with 3GPP spec compliance standards.
+                  </p>
+
+                  <textarea
+                    className="form-input"
+                    style={{
+                      width: '100%',
+                      height: '140px',
+                      fontFamily: 'monospace',
+                      fontSize: '12px',
+                      background: 'var(--bg-input)',
+                      border: '1px solid var(--border-color)',
+                      color: 'var(--text-primary)',
+                      padding: '12px',
+                      borderRadius: '8px',
+                      resize: 'vertical'
+                    }}
+                    placeholder="Paste error logs here... (e.g., 'SCTP connection closed unexpectedly' or 'Protocol Cause 0: transfer-syntax-error' or 'gmm-cause: 5GMM-status 0x1b')"
+                    value={manualLogText}
+                    onChange={(e) => setManualLogText(e.target.value)}
+                  />
+
+                  <button
+                    className="btn btn-primary"
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px' }}
+                    onClick={analyzeManualLog}
+                    disabled={manualAnalysisLoading || !manualLogText.trim()}
+                  >
+                    {manualAnalysisLoading ? 'Analyzing Spec compliance...' : 'Query 3GPP Specifications'}
+                  </button>
+
+                  {manualAnalysisResult && (
+                    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '8px', padding: '16px', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
+                        <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--text-primary)' }}>Analysis Report</span>
+                        <span style={{ fontSize: '11px', background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', padding: '2px 8px', borderRadius: '4px', fontWeight: 'bold' }}>
+                          {manualAnalysisResult.tsRef}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '10px', lineHeight: '1.5' }}>
+                        <div>
+                          <strong style={{ color: 'var(--text-primary)', display: 'block', marginBottom: '4px' }}>3GPP Compliance Analysis:</strong>
+                          {manualAnalysisResult.analysis}
+                        </div>
+
+                        <div style={{ background: 'var(--bg-card)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                          <strong style={{ color: '#10b981', display: 'block', marginBottom: '4px' }}>Recommended Resolution:</strong>
+                          {manualAnalysisResult.healingAction}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+              </div>
             </div>
           </div>
         )}

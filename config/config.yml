@@ -34,7 +34,7 @@ ue:
     sd: ""
   pdusessions: []
 amfif:
-  ip: 127.0.0.1
+  ip: 127.0.0.18
   port: 38412
 logs:
   level: 6

@@ -8,7 +8,7 @@
       "amf": "8000",
       "sqn": "000000000000",
       "dnn": "internet",
-      "pduSessionType": "IPv4v6",
+      "pduSessionType": "IPv4",
       "registrationType": "initial",
       "hplmn": {
         "mcc": "999",
@@ -54,7 +54,7 @@
       "dataPort": 2152,
       "linkType": "unix",
       "linkPort": 9488,
-      "amfIp": "127.0.0.1",
+      "amfIp": "127.0.0.18",
       "amfPort": 38412
     },
     {
@@ -105,7 +105,7 @@
       "dataPort": 2153,
       "linkType": "unix",
       "linkPort": 9526,
-      "amfIp": "127.0.0.1",
+      "amfIp": "127.0.0.18",
       "amfPort": 38412
     }
   ]

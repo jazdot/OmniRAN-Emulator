@@ -1,12 +1,14 @@
 package trigger
 
 import (
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/interface_management"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/pdu_session_management"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/ngap_control/ue_context_management"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb/ngap/message/sender"
+	"OmniRAN-Emulator/config"
 )
 
 func SendPduSessionResourceSetupResponse(ue *context.GNBUe, gnb *context.GNBContext, pduSessionId int64) {
@@ -15,7 +17,11 @@ func SendPduSessionResourceSetupResponse(ue *context.GNBUe, gnb *context.GNBCont
 	gnbIp := gnb.GetGnbIpByData()
 	ngapMsg, err := pdu_session_management.PDUSessionResourceSetupResponse(ue, gnbIp, pduSessionId)
 	if err != nil {
-		log.Fatal("[GNB][NGAP] Error sending PDU Session Resource Setup Response.")
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("PDUSessionResourceSetupResponse", "Error building PDUSessionResourceSetupResponse")
+		}
+		log.Error("[GNB][NGAP] Error sending PDU Session Resource Setup Response.")
+		return
 	}
 
 	ue.SetStateReady()
@@ -24,7 +30,11 @@ func SendPduSessionResourceSetupResponse(ue *context.GNBUe, gnb *context.GNBCont
 	conn := ue.GetSCTP()
 	err = sender.SendToAmF(ngapMsg, conn)
 	if err != nil {
-		log.Fatal("[GNB][AMF] Error sending PDU Session Resource Setup Response.: ", err)
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("PDUSessionResourceSetupResponse", fmt.Sprintf("Error sending PDUSessionResourceSetupResponse: %v", err))
+		}
+		log.Error("[GNB][AMF] Error sending PDU Session Resource Setup Response.: ", err)
+		return
 	}
 }
 
@@ -34,14 +44,22 @@ func SendInitialContextSetupResponse(ue *context.GNBUe, gnb *context.GNBContext)
 	gnbIp := gnb.GetGnbIpByData()
 	ngapMsg, err := ue_context_management.InitialContextSetupResponse(ue, gnbIp)
 	if err != nil {
-		log.Fatal("[GNB][NGAP] Error sending Initial Context Setup Response")
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("InitialContextSetupResponse", "Error building InitialContextSetupResponse")
+		}
+		log.Error("[GNB][NGAP] Error sending Initial Context Setup Response")
+		return
 	}
 
 	// Send Initial Context Setup Response.
 	conn := ue.GetSCTP()
 	err = sender.SendToAmF(ngapMsg, conn)
 	if err != nil {
-		log.Fatal("[GNB][AMF] Error sending Initial Context Setup Response: ", err)
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("InitialContextSetupResponse", fmt.Sprintf("Error sending InitialContextSetupResponse: %v", err))
+		}
+		log.Error("[GNB][AMF] Error sending Initial Context Setup Response: ", err)
+		return
 	}
 }
 

@@ -34,22 +34,31 @@ func HandlerDownlinkNasTransport(gnb *context.GNBContext, message *ngapType.NGAP
 
 		case ngapType.ProtocolIEIDAMFUENGAPID:
 			if ies.Value.AMFUENGAPID == nil {
-				log.Fatal("[GNB][NGAP] AMF UE NGAP ID is missing")
-				// TODO SEND ERROR INDICATION
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("DownlinkNasTransport", "AMF UE NGAP ID is missing")
+				}
+				log.Error("[GNB][NGAP] AMF UE NGAP ID is missing")
+				return
 			}
 			amfUeId = ies.Value.AMFUENGAPID.Value
 
 		case ngapType.ProtocolIEIDRANUENGAPID:
 			if ies.Value.RANUENGAPID == nil {
-				log.Fatal("[GNB][NGAP] RAN UE NGAP ID is missing")
-				// TODO SEND ERROR INDICATION
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("DownlinkNasTransport", "RAN UE NGAP ID is missing")
+				}
+				log.Error("[GNB][NGAP] RAN UE NGAP ID is missing")
+				return
 			}
 			ranUeId = ies.Value.RANUENGAPID.Value
 
 		case ngapType.ProtocolIEIDNASPDU:
 			if ies.Value.NASPDU == nil {
-				log.Fatal("[GNB][NGAP] NAS PDU is missing")
-				// TODO SEND ERROR INDICATION
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("DownlinkNasTransport", "NAS PDU is missing")
+				}
+				log.Error("[GNB][NGAP] NAS PDU is missing")
+				return
 			}
 			messageNas = ies.Value.NASPDU.Value
 		}
@@ -58,8 +67,11 @@ func HandlerDownlinkNasTransport(gnb *context.GNBContext, message *ngapType.NGAP
 	// check RanUeId and get UE.
 	ue, err := gnb.GetGnbUe(ranUeId)
 	if err != nil || ue == nil {
-		log.Fatal("[GNB][NGAP] RAN UE NGAP ID is incorrect")
-		// TODO SEND ERROR INDICATION
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("DownlinkNasTransport", "RAN UE NGAP ID is incorrect")
+		}
+		log.Error("[GNB][NGAP] RAN UE NGAP ID is incorrect")
+		return
 	}
 
 	// update AMF UE id.
@@ -67,7 +79,11 @@ func HandlerDownlinkNasTransport(gnb *context.GNBContext, message *ngapType.NGAP
 		ue.SetAmfUeId(amfUeId)
 	} else {
 		if ue.GetAmfUeId() != amfUeId {
-			log.Fatal("[GNB][NGAP] AMF UE NGAP ID is incorrect")
+			if config.ProtocolErrorHook != nil {
+				config.ProtocolErrorHook("DownlinkNasTransport", "AMF UE NGAP ID is incorrect")
+			}
+			log.Error("[GNB][NGAP] AMF UE NGAP ID is incorrect")
+			return
 		}
 	}
 
@@ -95,21 +111,31 @@ func HandlerInitialContextSetupRequest(gnb *context.GNBContext, message *ngapTyp
 		switch ies.Id.Value {
 		case ngapType.ProtocolIEIDPDUSessionResourceSetupListCxtReq:
 			if ies.Value.PDUSessionResourceSetupListCxtReq == nil {
-				log.Fatal("[GNB][NGAP] PDU Session Resource Setup List Cxt Req is missing")
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("InitialContextSetupRequest", "PDU Session Resource Setup List Cxt Req is missing")
+				}
+				log.Error("[GNB][NGAP] PDU Session Resource Setup List Cxt Req is missing")
+				return
 			}
 			pduSessionListIE = ies.Value.PDUSessionResourceSetupListCxtReq
 
 		case ngapType.ProtocolIEIDAMFUENGAPID:
 			if ies.Value.AMFUENGAPID == nil {
-				log.Fatal("[GNB][NGAP] AMF UE NGAP ID is missing")
-				// TODO SEND ERROR INDICATION
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("InitialContextSetupRequest", "AMF UE NGAP ID is missing")
+				}
+				log.Error("[GNB][NGAP] AMF UE NGAP ID is missing")
+				return
 			}
 			amfUeId = ies.Value.AMFUENGAPID.Value
 
 		case ngapType.ProtocolIEIDRANUENGAPID:
 			if ies.Value.RANUENGAPID == nil {
-				log.Fatal("[GNB][NGAP] RAN UE NGAP ID is missing")
-				// TODO SEND ERROR INDICATION
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("InitialContextSetupRequest", "RAN UE NGAP ID is missing")
+				}
+				log.Error("[GNB][NGAP] RAN UE NGAP ID is missing")
+				return
 			}
 			ranUeId = ies.Value.RANUENGAPID.Value
 
@@ -123,18 +149,30 @@ func HandlerInitialContextSetupRequest(gnb *context.GNBContext, message *ngapTyp
 		case ngapType.ProtocolIEIDSecurityKey:
 			// TODO using for create new security context between GNB and UE.
 			if ies.Value.SecurityKey == nil {
-				log.Fatal("[GNB][NGAP] Security-Key is missing")
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("InitialContextSetupRequest", "Security-Key is missing")
+				}
+				log.Error("[GNB][NGAP] Security-Key is missing")
+				return
 			}
 			// securityKey = ies.Value.SecurityKey.Value.Bytes
 
 		case ngapType.ProtocolIEIDGUAMI:
 			if ies.Value.GUAMI == nil {
-				log.Fatal("[GNB][NGAP] GUAMI is missing")
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("InitialContextSetupRequest", "GUAMI is missing")
+				}
+				log.Error("[GNB][NGAP] GUAMI is missing")
+				return
 			}
 
 		case ngapType.ProtocolIEIDAllowedNSSAI:
 			if ies.Value.AllowedNSSAI == nil {
-				log.Fatal("[GNB][NGAP] Allowed NSSAI is missing")
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("InitialContextSetupRequest", "Allowed NSSAI is missing")
+				}
+				log.Error("[GNB][NGAP] Allowed NSSAI is missing")
+				return
 			}
 
 			valor := len(ies.Value.AllowedNSSAI.List)
@@ -180,7 +218,11 @@ func HandlerInitialContextSetupRequest(gnb *context.GNBContext, message *ngapTyp
 			// TODO using for create new security context between UE and GNB.
 			// TODO algorithms for create new security context between UE and GNB.
 			if ies.Value.UESecurityCapabilities == nil {
-				log.Fatal("[GNB][NGAP] UE Security Capabilities is missing")
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("InitialContextSetupRequest", "UE Security Capabilities is missing")
+				}
+				log.Error("[GNB][NGAP] UE Security Capabilities is missing")
+				return
 			}
 		}
 
@@ -189,14 +231,20 @@ func HandlerInitialContextSetupRequest(gnb *context.GNBContext, message *ngapTyp
 	// check RanUeId and get UE.
 	ue, err := gnb.GetGnbUe(ranUeId)
 	if err != nil || ue == nil {
-		log.Fatal("[GNB][NGAP] RAN UE NGAP ID is incorrect")
-		// TODO SEND ERROR INDICATION
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("InitialContextSetupRequest", "RAN UE NGAP ID is incorrect")
+		}
+		log.Error("[GNB][NGAP] RAN UE NGAP ID is incorrect")
+		return
 	}
 
 	// check if AMF UE id.
 	if ue.GetAmfUeId() != amfUeId {
-		log.Fatal("[GNB][NGAP] AMF UE NGAP ID is incorrect")
-		// TODO SEND ERROR INDICATION
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("InitialContextSetupRequest", "AMF UE NGAP ID is incorrect")
+		}
+		log.Error("[GNB][NGAP] AMF UE NGAP ID is incorrect")
+		return
 	}
 
 	// create UE context.
@@ -331,22 +379,33 @@ func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *nga
 		case ngapType.ProtocolIEIDAMFUENGAPID:
 
 			if ies.Value.AMFUENGAPID == nil {
-				log.Fatal("[GNB][NGAP] AMF UE ID is missing")
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("PDUSessionResourceSetupRequest", "AMF UE ID is missing")
+				}
+				log.Error("[GNB][NGAP] AMF UE ID is missing")
+				return
 			}
 			amfUeId = ies.Value.AMFUENGAPID.Value
 
 		case ngapType.ProtocolIEIDRANUENGAPID:
 
 			if ies.Value.RANUENGAPID == nil {
-				log.Fatal("[GNB][NGAP] RAN UE ID is missing")
-				// TODO SEND ERROR INDICATION
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("PDUSessionResourceSetupRequest", "RAN UE ID is missing")
+				}
+				log.Error("[GNB][NGAP] RAN UE ID is missing")
+				return
 			}
 			ranUeId = ies.Value.RANUENGAPID.Value
 
 		case ngapType.ProtocolIEIDPDUSessionResourceSetupListSUReq:
 
 			if ies.Value.PDUSessionResourceSetupListSUReq == nil {
-				log.Fatal("[GNB][NGAP] PDU SESSION RESOURCE SETUP LIST SU REQ is missing")
+				if config.ProtocolErrorHook != nil {
+					config.ProtocolErrorHook("PDUSessionResourceSetupRequest", "PDU SESSION RESOURCE SETUP LIST SU REQ is missing")
+				}
+				log.Error("[GNB][NGAP] PDU SESSION RESOURCE SETUP LIST SU REQ is missing")
+				return
 			}
 			pDUSessionResourceSetupList := ies.Value.PDUSessionResourceSetupListSUReq
 
@@ -356,7 +415,11 @@ func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *nga
 				if item.PDUSessionNASPDU != nil {
 					messageNas = item.PDUSessionNASPDU.Value
 				} else {
-					log.Fatal("[GNB][NGAP] NAS PDU is missing")
+					if config.ProtocolErrorHook != nil {
+						config.ProtocolErrorHook("PDUSessionResourceSetupRequest", "NAS PDU is missing")
+					}
+					log.Error("[GNB][NGAP] NAS PDU is missing")
+					return
 				}
 
 				// check pdu session id and nssai information for create a PDU Session.
@@ -410,7 +473,11 @@ func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *nga
 						log.Info("[GNB][NGAP] Error in decode Pdu Session Resource Setup Request Transfer")
 					}
 				} else {
-					log.Fatal("[GNB][NGAP] Error in Pdu Session Resource Setup Request, Pdu Session Resource Setup Request Transfer is missing")
+					if config.ProtocolErrorHook != nil {
+						config.ProtocolErrorHook("PDUSessionResourceSetupRequest", "Pdu Session Resource Setup Request Transfer is missing")
+					}
+					log.Error("[GNB][NGAP] Error in Pdu Session Resource Setup Request, Pdu Session Resource Setup Request Transfer is missing")
+					return
 				}
 
 			}
@@ -420,14 +487,20 @@ func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *nga
 	// check RanUeId and get UE.
 	ue, err := gnb.GetGnbUe(ranUeId)
 	if err != nil || ue == nil {
-		log.Fatal("[GNB][NGAP] Error in Pdu Session Resource Setup Request. UE was not found in GNB POOL")
-		// TODO SEND ERROR INDICATION
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("PDUSessionResourceSetupRequest", "UE was not found in GNB POOL")
+		}
+		log.Error("[GNB][NGAP] Error in Pdu Session Resource Setup Request. UE was not found in GNB POOL")
+		return
 	}
 
 	// check if AMF UE id.
 	if ue.GetAmfUeId() != amfUeId {
-		log.Fatal("[GNB][NGAP] Error in Pdu Session Resource Setup Request. Problem in AMF UE ID from CORE")
-		// TODO SEND ERROR INDICATION
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("PDUSessionResourceSetupRequest", "Problem in AMF UE ID from CORE")
+		}
+		log.Error("[GNB][NGAP] Error in Pdu Session Resource Setup Request. Problem in AMF UE ID from CORE")
+		return
 	}
 
 	// allocate downlink TEID and IP for this PDU Session
@@ -650,8 +723,12 @@ func HandlerNgSetupResponse(amf *context.GNBAmf, gnb *context.GNBContext, messag
 	}
 
 	if err {
-		log.Fatal("[GNB][AMF] AMF is inactive")
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("NGSetupResponse", "AMF is inactive")
+		}
+		log.Error("[GNB][AMF] AMF is inactive")
 		amf.SetStateInactive()
+		return
 	} else {
 		amf.SetStateActive()
 		log.Info("[GNB][AMF] AMF Name: ", amf.GetAmfName())

@@ -261,3 +261,7 @@ func (c *Config) Validate() error {
 // PcapHook is a global callback for injecting simulated control plane packets into active PCAP recordings.
 var PcapHook func(srcIp, dstIp string, srcPort, dstPort uint16, proto uint8, payload []byte)
 
+// ProtocolErrorHook is a global callback for registering protocol error events with the self-healing agent.
+var ProtocolErrorHook func(msgType string, errStr string)
+
+

@@ -143,6 +143,7 @@ func StartServer(host string, port int) error {
 	}()
 
 	startSessionJanitor()
+	config.ProtocolErrorHook = RegisterIssueStr
 	// Clean up stale socket files on startup
 	if files, err := filepath.Glob("/tmp/gnb_*.sock"); err == nil {
 		for _, f := range files {
@@ -239,6 +240,13 @@ func StartServer(host string, port int) error {
 	mux.HandleFunc("/api/diagnostics/logs/history", withAuth(handleGetLogsHistory))
 	mux.HandleFunc("/api/diagnostics/logs/parse", withAuth(handleParseLogs))
 	mux.HandleFunc("/api/docs", withAuth(handleDocs))
+	
+	// Self-Healing Agent API Routes (Wrapped in Authentication middleware)
+	mux.HandleFunc("/api/agent/settings", withAuth(handleAgentSettings))
+	mux.HandleFunc("/api/agent/history", withAuth(handleAgentHistory))
+	mux.HandleFunc("/api/agent/clear", withAuth(handleAgentClear))
+	mux.HandleFunc("/api/agent/heal-manual", withAuth(handleAgentHealManual))
+
 
 	// Embedded static React files
 	assetsFS, err := fs.Sub(web.Assets, "dist")
@@ -2478,3 +2486,84 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "password_changed"})
 }
+
+// ─── Self-Healing Agent API Handlers ──────────────────────────────────────────
+
+func handleAgentSettings(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		keyMasked := ""
+		if GetGeminiApiKey() != "" {
+			keyMasked = "••••••••"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"enabled":      IsAgentEnabled(),
+			"geminiApiKey": keyMasked,
+		})
+		return
+	}
+	if r.Method == http.MethodPost {
+		var req struct {
+			Enabled      bool   `json:"enabled"`
+			GeminiApiKey string `json:"geminiApiKey"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+		if err := SetAgentSettings(req.Enabled, req.GeminiApiKey); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		keyMasked := ""
+		if GetGeminiApiKey() != "" {
+			keyMasked = "••••••••"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"enabled":      IsAgentEnabled(),
+			"geminiApiKey": keyMasked,
+		})
+		return
+	}
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func handleAgentHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(GetHealedHistory())
+}
+
+func handleAgentClear(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := ClearHealedHistory(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "history_cleared"})
+}
+
+func handleAgentHealManual(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		LogText string `json:"logText"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	issue := AnalyzeManualLog(req.LogText)
+	_ = json.NewEncoder(w).Encode(issue)
+}
+

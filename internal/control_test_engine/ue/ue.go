@@ -63,7 +63,11 @@ func RegistrationUe(conf config.Config, id uint8, wg *sync.WaitGroup) {
 	// starting communication with GNB and listen.
 	err := service.InitConn(ue)
 	if err != nil {
-		log.Fatal("Error in", err)
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("RegistrationUe", fmt.Sprintf("InitConn failed: %v", err))
+		}
+		log.Error("Error in", err)
+		return
 	} else {
 		log.Info("[UE] UNIX/NAS service is running")
 		// wg.Add(1)
@@ -129,7 +133,11 @@ func RegistrationUeMonitor(conf config.Config,
 	// starting communication with GNB and listen.
 	err := service.InitConn(ue)
 	if err != nil {
-		log.Fatal("Error in", err)
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("RegistrationUeMonitor", fmt.Sprintf("InitConn failed: %v", err))
+		}
+		log.Error("Error in", err)
+		return
 	} else {
 		log.Info("[UE] UNIX/NAS service is running")
 		// wg.Add(1)

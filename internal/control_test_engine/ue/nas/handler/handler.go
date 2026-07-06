@@ -7,6 +7,7 @@ import (
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/nas_control"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/nas_control/mm_5gs"
 	"OmniRAN-Emulator/internal/control_test_engine/ue/nas/message/sender"
+	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/lib/nas"
 	"OmniRAN-Emulator/lib/nas/nasMessage"
 	"time"
@@ -90,7 +91,11 @@ func HandlerSecurityModeCommand(ue *context.UEContext, message *nas.Message) {
 	// getting NAS Security Mode Complete.
 	securityModeComplete, err := mm_5gs.SecurityModeComplete(ue, rinmr)
 	if err != nil {
-		log.Fatal("[UE][NAS] Error sending Security Mode Complete: ", err)
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("SecurityModeComplete", fmt.Sprintf("Error building Security Mode Complete: %v", err))
+		}
+		log.Error("[UE][NAS] Error sending Security Mode Complete: ", err)
+		return
 	}
 
 	// sending to GNB
@@ -127,7 +132,11 @@ func HandlerRegistrationAccept(ue *context.UEContext, message *nas.Message) {
 	// getting NAS registration complete.
 	registrationComplete, err := mm_5gs.RegistrationComplete(ue)
 	if err != nil {
-		log.Fatal("[UE][NAS] Error sending Registration Complete: ", err)
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("RegistrationComplete", fmt.Sprintf("Error building Registration Complete: %v", err))
+		}
+		log.Error("[UE][NAS] Error sending Registration Complete: ", err)
+		return
 	}
 
 	// sending to GNB
@@ -140,7 +149,11 @@ func HandlerRegistrationAccept(ue *context.UEContext, message *nas.Message) {
 	defaultPduSessionId := ue.GetPduSesssionId()
 	ulNasTransport, err := mm_5gs.UlNasTransport(ue, defaultPduSessionId, nasMessage.ULNASTransportRequestTypeInitialRequest)
 	if err != nil {
-		log.Fatal("[UE][NAS] Error sending ul nas transport and pdu session establishment request: ", err)
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("UlNasTransport", fmt.Sprintf("Error building UlNasTransport: %v", err))
+		}
+		log.Error("[UE][NAS] Error sending ul nas transport and pdu session establishment request: ", err)
+		return
 	}
 
 	// change the state of this session to pending.

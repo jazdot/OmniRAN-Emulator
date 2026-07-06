@@ -2,6 +2,7 @@ package gnb
 
 import (
 	stdctx "context"
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	"OmniRAN-Emulator/config"
 	gnbContext "OmniRAN-Emulator/internal/control_test_engine/gnb/context"
@@ -44,7 +45,11 @@ func InitGnb(conf config.Config, wg *sync.WaitGroup) {
 
 	// start communication with AMF(SCTP).
 	if err := serviceNgap.InitConn(amf, gnb); err != nil {
-		log.Fatal("Error in", err)
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("InitGnb", fmt.Sprintf("SCTP/NGAP InitConn failed: %v", err))
+		}
+		log.Error("Error in ", err)
+		return
 	} else {
 		log.Info("[GNB] SCTP/NGAP service is running")
 		// wg.Add(1)
@@ -52,8 +57,13 @@ func InitGnb(conf config.Config, wg *sync.WaitGroup) {
 
 	// start communication with UE (server UNIX sockets).
 	if err := serviceNas.InitServer(gnb); err != nil {
-		log.Fatal("Error in ", err)
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("InitGnb", fmt.Sprintf("UNIX/NAS InitServer failed: %v", err))
+		}
+		log.Error("Error in ", err)
+		return
 	} else {
+
 		log.Info("[GNB] UNIX/NAS service is running")
 	}
 

@@ -15,8 +15,8 @@ func DispatchNas(ue *context.UEContext, message []byte) {
 
 	// check if message is null.
 	if message == nil {
-		// TODO return error
-		log.Fatal("[UE][NAS] NAS message is nil")
+		log.Error("[UE][NAS] NAS message is nil")
+		return
 	}
 
 	// decode NAS message.
