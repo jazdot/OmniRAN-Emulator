@@ -10,3 +10,5 @@ go_sdk.tar.gz
 *.log
 config/config.local.yml
 config/users.json
+config/agent_settings.json
+config/healed_issues.json
