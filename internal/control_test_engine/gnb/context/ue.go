@@ -12,10 +12,10 @@ import (
 const Initialized = 0x00
 const Ongoing = 0x01
 const Ready = 0x02
-
 type GNBUe struct {
 	ranUeNgapId          int64          // Identifier for UE in GNB Context.
 	amfUeNgapId          int64          // Identifier for UE in AMF Context.
+	sourceAmfUeNgapId    int64          // Source AMF UE NGAP ID for Handover context mapping
 	amfId                int64          // Identifier for AMF in UE/GNB Context.
 	state                int            // State of UE in NAS/GNB Context.
 	sctpConnection       *sctp.SCTPConn // Sctp association in using by the UE.
@@ -376,6 +376,14 @@ func (ue *GNBUe) SetAmfUeId(amfUeId int64) {
 		binary.BigEndian.PutUint64(buf[2:10], uint64(amfUeId))
 		_, _ = ue.unixSocketConnection.Write(buf)
 	}
+}
+
+func (ue *GNBUe) GetSourceAmfUeId() int64 {
+	return ue.sourceAmfUeNgapId
+}
+
+func (ue *GNBUe) SetSourceAmfUeId(id int64) {
+	ue.sourceAmfUeNgapId = id
 }
 
 func (p *PDUSession) GetUplinkTeid() uint32 {

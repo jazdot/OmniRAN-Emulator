@@ -1,6 +1,7 @@
 package ue_mobility_management
 
 import (
+	"encoding/binary"
 	"OmniRAN-Emulator/lib/aper"
 	"OmniRAN-Emulator/lib/ngap"
 	importModels "OmniRAN-Emulator/lib/openapi/models"
@@ -115,9 +116,12 @@ func BuildHandoverRequired(ranUeNgapID int64, amfUeNgapID int64, targetMcc, targ
 	pduList.List = append(pduList.List, pduItem)
 	handoverRequiredIEs.List = append(handoverRequiredIEs.List, ie)
 
-	// SourceToTargetTransparentContainer
 	var container ngapType.SourceNGRANNodeToTargetNGRANNodeTransparentContainer
-	container.RRCContainer.Value = []byte{0x05, 0x06} // mock RRC bytes
+	rrcBytes := make([]byte, 10)
+	rrcBytes[0] = 0x05
+	rrcBytes[1] = 0x06
+	binary.BigEndian.PutUint64(rrcBytes[2:10], uint64(amfUeNgapID))
+	container.RRCContainer.Value = rrcBytes
 
 	container.TargetCellID.Present = ngapType.NGRANCGIPresentNRCGI
 	container.TargetCellID.NRCGI = new(ngapType.NRCGI)

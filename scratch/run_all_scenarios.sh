@@ -4,6 +4,8 @@ SCENARIOS=(
   "periodic-reg"
   "mobility-reg"
   "emergency-reg"
+  "handover"
+  "xn-handover"
   "pdu-lifecycle"
   "full-lifecycle"
   "deregister"

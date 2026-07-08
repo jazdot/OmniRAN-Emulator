@@ -939,6 +939,7 @@ func HandlerHandoverRequest(gnb *context.GNBContext, message *ngapType.NGAPPDU) 
 	var amfUeId int64
 	var pduSessionId uint8 = 1
 	var qosId int64 = 1
+	var sourceAmfUeId int64 = -1
 
 	valueMessage := message.InitiatingMessage.Value.HandoverRequest
 	if valueMessage == nil {
@@ -957,6 +958,20 @@ func HandlerHandoverRequest(gnb *context.GNBContext, message *ngapType.NGAPPDU) 
 					pduSessionId = uint8(item.PDUSessionID.Value)
 				}
 			}
+		case ngapType.ProtocolIEIDSourceToTargetTransparentContainer:
+			if ies.Value.SourceToTargetTransparentContainer != nil {
+				var container ngapType.SourceNGRANNodeToTargetNGRANNodeTransparentContainer
+				err := aper.UnmarshalWithParams(ies.Value.SourceToTargetTransparentContainer.Value, &container, "valueExt")
+				if err == nil {
+					rrcVal := container.RRCContainer.Value
+					if len(rrcVal) >= 10 && rrcVal[0] == 0x05 && rrcVal[1] == 0x06 {
+						sourceAmfUeId = int64(binary.BigEndian.Uint64(rrcVal[2:10]))
+						log.Infof("[GNB-Target] Extracted Source AMF UE ID: %d from transparent container", sourceAmfUeId)
+					}
+				} else {
+					log.Warnf("[GNB-Target] Failed to unmarshal SourceToTargetTransparentContainer: %v", err)
+				}
+			}
 		}
 	}
 
@@ -969,6 +984,9 @@ func HandlerHandoverRequest(gnb *context.GNBContext, message *ngapType.NGAPPDU) 
 		return
 	}
 	ue.SetAmfUeId(amfUeId)
+	if sourceAmfUeId != -1 {
+		ue.SetSourceAmfUeId(sourceAmfUeId)
+	}
 	ue.SetStateOngoing()
 
 	// Setup default PDU session info on Target
