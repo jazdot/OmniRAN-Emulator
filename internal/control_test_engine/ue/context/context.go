@@ -127,8 +127,10 @@ func (ue *UEContext) NewRanUeContext(msin string,
 	// initialize map
 	ue.PduSessions = make(map[uint8]*PDUSession)
 
+	const defaultPduSessionId uint8 = 1
+
 	// added PDU Session id
-	ue.PduSession.Id = id
+	ue.PduSession.Id = defaultPduSessionId
 
 	// added network slice
 	ue.PduSession.Snssai.Sd = sd
@@ -149,8 +151,8 @@ func (ue *UEContext) NewRanUeContext(msin string,
 	ue.PduSession.State = SM5G_PDU_SESSION_INACTIVE
 
 	// Add default PDU session to the map
-	ue.PduSessions[id] = &PDUSession{
-		Id:             id,
+	ue.PduSessions[defaultPduSessionId] = &PDUSession{
+		Id:             defaultPduSessionId,
 		Dnn:            dnn,
 		PduSessionType: ue.PduSession.PduSessionType,
 		Snssai:         ue.PduSession.Snssai,
@@ -164,7 +166,7 @@ func (ue *UEContext) NewRanUeContext(msin string,
 		if sessId == 0 {
 			continue
 		}
-		if sessId == id {
+		if sessId == defaultPduSessionId {
 			continue // avoid overwriting the default
 		}
 		sess := &PDUSession{
@@ -356,7 +358,7 @@ func (ue *UEContext) GetGnbIp(pduSessionId uint8) net.IP {
 }
 
 func (ue *UEContext) GetPduSesssionId() uint8 {
-	return ue.id
+	return 1
 }
 
 func (ue *UEContext) deriveSNN() string {

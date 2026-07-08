@@ -50,7 +50,7 @@
       "sliceSd": "",
       "controlIp": "127.0.0.1",
       "controlPort": 9487,
-      "dataIp": "127.0.0.8",
+      "dataIp": "127.0.0.1",
       "dataPort": 2152,
       "linkType": "unix",
       "linkPort": 9488,

@@ -1,0 +1,10 @@
+[
+  {
+    "sst": 1,
+    "sd": "",
+    "maxThroughput": 100,
+    "baselineLatency": 10,
+    "baselineLoss": 0,
+    "congested": false
+  }
+]
