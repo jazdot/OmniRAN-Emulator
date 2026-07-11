@@ -294,7 +294,7 @@ func HandlerInitialContextSetupRequest(gnb *context.GNBContext, message *ngapTyp
 						}
 					}
 				} else {
-					log.Info("[GNB][NGAP] Error in decode Pdu Session Resource Setup Request Transfer in CxtReq")
+					log.Infof("[GNB][NGAP] Error in decode Pdu Session Resource Setup Request Transfer in CxtReq: %v", err)
 				}
 			}
 
@@ -470,7 +470,7 @@ func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *nga
 							}
 						}
 					} else {
-						log.Info("[GNB][NGAP] Error in decode Pdu Session Resource Setup Request Transfer")
+						log.Infof("[GNB][NGAP] Error in decode Pdu Session Resource Setup Request Transfer: %v", err)
 					}
 				} else {
 					if config.ProtocolErrorHook != nil {
@@ -525,11 +525,15 @@ func HandlerPduSessionResourceSetupRequest(gnb *context.GNBContext, message *nga
 		log.Info("[GNB][NGAP][UE] Downlink Teid: ", teidDown)
 		log.Info("[GNB][NGAP][UE] Non-Dynamic-5QI: ", fiveQi)
 		log.Info("[GNB][NGAP][UE] Priority Level ARP: ", priArp)
-		log.Info("[GNB][NGAP][UE] UPF Address: ", fmt.Sprintf("%d.%d.%d.%d", upfAddress[0], upfAddress[1], upfAddress[2], upfAddress[3]), " :2152")
+		if len(upfAddress) >= 4 {
+			log.Info("[GNB][NGAP][UE] UPF Address: ", fmt.Sprintf("%d.%d.%d.%d", upfAddress[0], upfAddress[1], upfAddress[2], upfAddress[3]), " :2152")
+		} else {
+			log.Info("[GNB][NGAP][UE] UPF Address: not informed")
+		}
 	}
 
 	// get UPF ip.
-	if gnb.GetUpfIp() == "" {
+	if gnb.GetUpfIp() == "" && len(upfAddress) >= 4 {
 		upfIp := fmt.Sprintf("%d.%d.%d.%d", upfAddress[0], upfAddress[1], upfAddress[2], upfAddress[3])
 		gnb.SetUpfIp(upfIp)
 	}

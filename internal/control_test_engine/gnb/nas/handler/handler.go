@@ -391,30 +391,32 @@ func handlePathSwitchTrigger(ue *context.GNBUe, message []byte, gnb *context.GNB
 		}
 
 		// Mock AMF Path Switch Response Loop
-		go func(targetGnb *context.GNBContext, targetRanUeId int64, amfUeId int64, pduSessionId uint8) {
-			// Wait for PathSwitchRequest to be sent
-			time.Sleep(50 * time.Millisecond)
+		if gnb.GetN2() == nil {
+			go func(targetGnb *context.GNBContext, targetRanUeId int64, amfUeId int64, pduSessionId uint8) {
+				// Wait for PathSwitchRequest to be sent
+				time.Sleep(50 * time.Millisecond)
 
-			// 1. Simulate AMF sending PathSwitchRequestAcknowledge to Target GNodeB
-			upfIp := net.ParseIP("127.0.0.1").To4() // dummy UPF IP
-			ulTeid := binary.BigEndian.AppendUint32(nil, uint32(targetRanUeId)) // dummy uplink teid
-			
-			ackBytes, err := ue_mobility_management.GetPathSwitchRequestAcknowledge(targetRanUeId, amfUeId, pduSessionId, upfIp, ulTeid)
-			if err == nil {
-				// Inject into PCAP (AMF -> Target GNodeB N2 SCTP)
-				if config.PcapHook != nil {
-					config.PcapHook(targetGnb.GetActiveAmfIp(), targetGnb.GetGnbIp(), 38412, uint16(targetGnb.GetGnbPort()), 132, ackBytes)
-				}
-				time.Sleep(10 * time.Millisecond)
-
-				// Decode and call HandlerPathSwitchRequestAcknowledge on Target GNodeB
-				ackPdu, err := ngap.Decoder(ackBytes)
+				// 1. Simulate AMF sending PathSwitchRequestAcknowledge to Target GNodeB
+				upfIp := net.ParseIP("127.0.0.1").To4() // dummy UPF IP
+				ulTeid := binary.BigEndian.AppendUint32(nil, uint32(targetRanUeId)) // dummy uplink teid
+				
+				ackBytes, err := ue_mobility_management.GetPathSwitchRequestAcknowledge(targetRanUeId, amfUeId, pduSessionId, upfIp, ulTeid)
 				if err == nil {
-					log.Infof("[MockAMF] Dispatching simulated PATH SWITCH REQUEST ACKNOWLEDGE to Target GNodeB")
-					ngapHandler.HandlerPathSwitchRequestAcknowledge(targetGnb, ackPdu)
+					// Inject into PCAP (AMF -> Target GNodeB N2 SCTP)
+					if config.PcapHook != nil {
+						config.PcapHook(targetGnb.GetActiveAmfIp(), targetGnb.GetGnbIp(), 38412, uint16(targetGnb.GetGnbPort()), 132, ackBytes)
+					}
+					time.Sleep(10 * time.Millisecond)
+
+					// Decode and call HandlerPathSwitchRequestAcknowledge on Target GNodeB
+					ackPdu, err := ngap.Decoder(ackBytes)
+					if err == nil {
+						log.Infof("[MockAMF] Dispatching simulated PATH SWITCH REQUEST ACKNOWLEDGE to Target GNodeB")
+						ngapHandler.HandlerPathSwitchRequestAcknowledge(targetGnb, ackPdu)
+					}
 				}
-			}
-		}(gnb, ue.GetRanUeId(), amfUeId, pduSessionId)
+			}(gnb, ue.GetRanUeId(), amfUeId, pduSessionId)
+		}
 
 		return true
 	}

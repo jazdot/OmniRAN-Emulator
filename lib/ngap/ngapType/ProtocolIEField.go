@@ -2218,7 +2218,7 @@ type PDUSessionResourceSetupRequestTransferIEsValue struct {
 	Present                           int
 	PDUSessionAggregateMaximumBitRate *PDUSessionAggregateMaximumBitRate `aper:"valueExt,referenceFieldValue:130"`
 	ULNGUUPTNLInformation             *UPTransportLayerInformation       `aper:"referenceFieldValue:139,valueLB:0,valueUB:1"`
-	AdditionalULNGUUPTNLInformation   *UPTransportLayerInformation       `aper:"referenceFieldValue:126,valueLB:0,valueUB:1"`
+	AdditionalULNGUUPTNLInformation   *UPTransportLayerInformationList   `aper:"referenceFieldValue:126"`
 	DataForwardingNotPossible         *DataForwardingNotPossible         `aper:"referenceFieldValue:127"`
 	PDUSessionType                    *PDUSessionType                    `aper:"referenceFieldValue:134"`
 	SecurityIndication                *SecurityIndication                `aper:"valueExt,referenceFieldValue:138"`
