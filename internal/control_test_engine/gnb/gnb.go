@@ -271,6 +271,12 @@ func InitGnbFleet(conf config.Config, ctx stdctx.Context, gnbSocketPath string) 
 	g := &gnbContext.GNBContext{}
 
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Errorf("[GNB-FLEET][PANIC] Recovered from gNB runtime panic: %v", rec)
+				errCh <- fmt.Errorf("gNB runtime panic: %v", rec)
+			}
+		}()
 		defer close(errCh)
 
 		// Override socket path if provided and using unix link type

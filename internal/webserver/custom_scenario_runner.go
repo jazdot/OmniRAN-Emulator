@@ -617,6 +617,91 @@ func (s *CustomRunnerState) Run(scen CustomScenario) {
 				}
 				time.Sleep(100 * time.Millisecond)
 
+			case "wait_pdu_state":
+				ueIdVal, _ := step.Params["ueId"].(float64)
+				ueId := uint8(ueIdVal)
+				sessIdVal, _ := step.Params["pduSessionId"].(float64)
+				sessId := uint8(sessIdVal)
+				if sessId == 0 {
+					sessId = 1
+				}
+				targetStateStr, _ := step.Params["state"].(string)
+				timeoutSec, _ := step.Params["timeout"].(float64)
+				if timeoutSec == 0 {
+					timeoutSec = 15
+				}
+
+				targetState := ueContext.SM5G_PDU_SESSION_ACTIVE
+				if targetStateStr == "INACTIVE" || targetStateStr == "SM5G_PDU_SESSION_INACTIVE" {
+					targetState = ueContext.SM5G_PDU_SESSION_INACTIVE
+				}
+
+				s.AddLog(fmt.Sprintf("Waiting for UE %d PDU Session %d to reach state %s...", ueId, sessId, targetStateStr))
+
+				s.mu.RLock()
+				u, exists := s.activeUes[ueId]
+				s.mu.RUnlock()
+
+				if !exists {
+					s.SetError(fmt.Sprintf("UE %d not found in active context", ueId))
+					return
+				}
+
+				deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
+				matched := false
+				for time.Now().Before(deadline) {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+					sess := u.GetPduSession(sessId)
+					if sess != nil && sess.State == targetState {
+						matched = true
+						break
+					}
+					time.Sleep(100 * time.Millisecond)
+				}
+
+				if !matched {
+					s.SetError(fmt.Sprintf("Timeout: UE %d PDU Session %d failed to reach state %s", ueId, sessId, targetStateStr))
+					return
+				}
+				s.AddLog(fmt.Sprintf("UE %d PDU Session %d reached state %s.", ueId, sessId, targetStateStr))
+
+			case "assert_ue_count":
+				expectedCountVal, _ := step.Params["count"].(float64)
+				expectedCount := int(expectedCountVal)
+				actualCount := len(ueContext.GetAllActiveUEs())
+				if actualCount != expectedCount {
+					s.SetError(fmt.Sprintf("Assertion failed: expected %d active UEs, but found %d", expectedCount, actualCount))
+					return
+				}
+				s.AddLog(fmt.Sprintf("Assertion passed: active UE count is %d", actualCount))
+
+			case "stop_ue":
+				ueIdVal, _ := step.Params["ueId"].(float64)
+				ueId := uint8(ueIdVal)
+				s.mu.Lock()
+				if u, ok := s.activeUes[ueId]; ok {
+					u.Terminate()
+					delete(s.activeUes, ueId)
+					s.AddLog(fmt.Sprintf("UE %d terminated and context released", ueId))
+				} else {
+					s.AddLog(fmt.Sprintf("UE %d not found in runner context", ueId))
+				}
+				s.mu.Unlock()
+
+			case "stop_gnb":
+				gnbProfile, _ := step.Params["profileName"].(string)
+				if gnbProfile != "" {
+					if err := StopGNBProfile(gnbProfile); err != nil {
+						s.AddLog(fmt.Sprintf("Stop gNB %s warning: %v", gnbProfile, err))
+					} else {
+						s.AddLog(fmt.Sprintf("Stopped gNB profile '%s'", gnbProfile))
+					}
+				}
+
 			case "sleep":
 				seconds, _ := step.Params["seconds"].(float64)
 				if seconds == 0 {

@@ -82,6 +82,17 @@ func LaunchGNBProfile(profileName string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	gCtx, errCh := gnb.InitGnbFleet(cfg, ctx, socketPath)
 
+	// Wait briefly to catch immediate startup errors (e.g. connection refused, socket bind failure)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			cancel()
+			return fmt.Errorf("gNB '%s' launch failed: %w", profileName, err)
+		}
+	case <-time.After(600 * time.Millisecond):
+		// gNB started with no immediate transport error
+	}
+
 	inst := &RunningGNBInstance{
 		ProfileName: profileName,
 		GnbId:       prof.GnbId,
@@ -288,13 +299,33 @@ func LaunchUEFromProfile(profileName string, targetGnbProfile string) (uint8, er
 		return 0, fmt.Errorf("failed to connect UE %d to gNB: %w", ueID, err)
 	}
 
-	// Trigger initial registration in background
-	go func() {
-		trigger.InitRegistration(u)
-		logrus.Infof("[FLEET][UE %d] Registration procedure initiated (SUPI: %s)", ueID, u.GetSupi())
-	}()
+	// Trigger initial registration
+	trigger.InitRegistration(u)
+	logrus.Infof("[FLEET][UE %d] Registration procedure initiated (SUPI: %s)", ueID, u.GetSupi())
 
-	logrus.Infof("[FLEET] Launched UE profile '%s' as UE ID %d (SUPI: %s)", profileName, ueID, u.GetSupi())
+	// Wait up to 2.5s to verify 5GMM registration outcome
+	startWait := time.Now()
+	for time.Since(startWait) < 2500*time.Millisecond {
+		if u.GetStateMM() == 0x01 { // 5GMM-REGISTERED
+			break
+		}
+		if u.GetMMError() != "" {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if u.GetStateMM() != 0x01 {
+		errMsg := u.GetMMError()
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("AMF 5G Core (%s:%d) did not respond to 5GMM Registration Request (Timeout)", cfg.AMF.Ip, cfg.AMF.Port)
+		}
+		u.Terminate()
+		ueContext.UnregisterUE(ueID)
+		return 0, fmt.Errorf("UE %d Registration Failed: %s", ueID, errMsg)
+	}
+
+	logrus.Infof("[FLEET] Successfully launched UE profile '%s' as UE ID %d (SUPI: %s)", profileName, ueID, u.GetSupi())
 	return ueID, nil
 }
 

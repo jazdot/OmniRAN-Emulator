@@ -778,7 +778,9 @@ func handleScenarioRun(w http.ResponseWriter, r *http.Request) {
 }
 
 type PingRequest struct {
-	Host string `json:"host"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"` // "icmp", "tcp", "udp", "sctp"
 }
 
 type PingResponse struct {
@@ -799,20 +801,50 @@ func handlePingTest(w http.ResponseWriter, r *http.Request) {
 	if host == "" {
 		host = config.Data.AMF.Ip
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	
-	// Perform ping check (ping -c 3 <host>)
-	cmd := exec.Command("ping", "-c", "3", "-W", "2", host)
-	out, err := cmd.CombinedOutput()
-	
-	resp := PingResponse{
-		Output:  string(out),
-		Success: err == nil,
+	if host == "" {
+		host = "127.0.0.1"
 	}
 
-	if err != nil && len(resp.Output) == 0 {
-		resp.Output = fmt.Sprintf("Ping execution failed: %v", err)
+	w.Header().Set("Content-Type", "application/json")
+
+	proto := strings.ToLower(req.Protocol)
+	if proto == "" {
+		proto = "icmp"
+	}
+
+	var resp PingResponse
+
+	if proto != "icmp" && req.Port > 0 {
+		start := time.Now()
+		addr := fmt.Sprintf("%s:%d", host, req.Port)
+		dialProto := "tcp"
+		if proto == "udp" {
+			dialProto = "udp"
+		}
+
+		conn, err := net.DialTimeout(dialProto, addr, 2*time.Second)
+		latency := time.Since(start)
+		if err == nil {
+			_ = conn.Close()
+			resp.Success = true
+			resp.Output = fmt.Sprintf("SUCCESS: Connected to %s (%s port %d) in %v\nProtocol: %s\nStatus: REACHABLE", addr, strings.ToUpper(proto), req.Port, latency, strings.ToUpper(proto))
+		} else {
+			resp.Success = false
+			resp.Output = fmt.Sprintf("FAILED: Could not reach %s (%s port %d)\nError: %v", addr, strings.ToUpper(proto), req.Port, err)
+		}
+	} else {
+		// Perform ICMP ping check (ping -c 3 <host>)
+		cmd := exec.Command("ping", "-c", "3", "-W", "2", host)
+		out, err := cmd.CombinedOutput()
+
+		resp = PingResponse{
+			Output:  string(out),
+			Success: err == nil,
+		}
+
+		if err != nil && len(resp.Output) == 0 {
+			resp.Output = fmt.Sprintf("Ping execution failed: %v", err)
+		}
 	}
 
 	_ = json.NewEncoder(w).Encode(resp)
@@ -1898,6 +1930,13 @@ func authenticate(r *http.Request) (*SessionInfo, error) {
 
 func withAuth(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				logrus.Errorf("[WEB][PANIC] Recovered from handler panic: %v", rec)
+				http.Error(w, fmt.Sprintf("Internal Server Error (Panic Recovered): %v", rec), http.StatusInternalServerError)
+			}
+		}()
+
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
@@ -1919,6 +1958,13 @@ func withAuth(handler http.HandlerFunc) http.HandlerFunc {
 
 func withAdminAuth(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				logrus.Errorf("[WEB][PANIC] Recovered from admin handler panic: %v", rec)
+				http.Error(w, fmt.Sprintf("Internal Server Error (Panic Recovered): %v", rec), http.StatusInternalServerError)
+			}
+		}()
+
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")

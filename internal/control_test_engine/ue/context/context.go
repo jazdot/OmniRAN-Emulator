@@ -4,6 +4,11 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"net"
+	"reflect"
+	"regexp"
+	"strings"
+	"sync"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"OmniRAN-Emulator/config"
@@ -13,10 +18,6 @@ import (
 	"OmniRAN-Emulator/lib/nas/nasType"
 	"OmniRAN-Emulator/lib/nas/security"
 	"OmniRAN-Emulator/lib/openapi/models"
-	"net"
-	"reflect"
-	"regexp"
-	"sync"
 )
 
 // 5GMM main states in the UE.
@@ -49,7 +50,16 @@ type UEContext struct {
 	gnbSocketPath string
 	gnbId          string
 	gnbProfileName string
+	mmErr          string
 	OnRedirection  func(ue *UEContext)
+}
+
+func (ue *UEContext) SetMMError(err string) {
+	ue.mmErr = err
+}
+
+func (ue *UEContext) GetMMError() string {
+	return ue.mmErr
 }
 
 type Amf struct {
@@ -374,16 +384,36 @@ func (ue *UEContext) deriveSNN() string {
 }
 
 func (ue *UEContext) GetMccAndMncInOctets() []byte {
+	mccStr := strings.TrimSpace(ue.UeSecurity.mcc)
+	mncStr := strings.TrimSpace(ue.UeSecurity.mnc)
 
-	// reverse mcc and mnc
-	mcc := reverse(ue.UeSecurity.mcc)
-	mnc := reverse(ue.UeSecurity.mnc)
+	if len(mccStr) == 0 {
+		mccStr = "001"
+	}
+	for len(mccStr) < 3 {
+		mccStr = "0" + mccStr
+	}
+	if len(mccStr) > 3 {
+		mccStr = mccStr[:3]
+	}
 
-	// include mcc and mnc in octets
+	if len(mncStr) == 0 {
+		mncStr = "01"
+	}
+	if len(mncStr) == 1 {
+		mncStr = "0" + mncStr
+	}
+	if len(mncStr) > 3 {
+		mncStr = mncStr[:3]
+	}
+
+	mcc := reverse(mccStr)
+	mnc := reverse(mncStr)
+
 	oct5 := mcc[1:3]
 	var oct6 string
 	var oct7 string
-	if len(ue.UeSecurity.mnc) == 2 {
+	if len(mncStr) == 2 {
 		oct6 = "f" + string(mcc[0])
 		oct7 = mnc
 	} else {
@@ -391,10 +421,10 @@ func (ue *UEContext) GetMccAndMncInOctets() []byte {
 		oct7 = mnc[1:3]
 	}
 
-	// changed for bytes.
 	resu, err := hex.DecodeString(oct5 + oct6 + oct7)
 	if err != nil {
-		fmt.Println(err)
+		log.Errorf("[UE] Error decoding PLMN hex: %v", err)
+		return []byte{0x00, 0xf1, 0x10}
 	}
 
 	return resu

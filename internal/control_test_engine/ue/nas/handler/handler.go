@@ -268,9 +268,68 @@ func HandlerConfigurationUpdateCommand(ue *context.UEContext, message *nas.Messa
 	log.Info("[UE][NAS] Configuration Update Complete sent back to network")
 }
 
+func Get5GMMCauseDesc(cause uint8) string {
+	switch cause {
+	case 3:
+		return "Illegal UE"
+	case 6:
+		return "Illegal ME"
+	case 7:
+		return "5GS services not allowed"
+	case 9:
+		return "UE identity cannot be derived by network"
+	case 10:
+		return "Implicitly deregistered"
+	case 11:
+		return "PLMN not allowed"
+	case 12:
+		return "Tracking area not allowed"
+	case 13:
+		return "Roaming not allowed in this tracking area"
+	case 15:
+		return "No suitable cells in tracking area"
+	case 20:
+		return "MAC failure / Authentication failure"
+	case 21:
+		return "Synch failure"
+	case 22:
+		return "Congestion / Core busy"
+	case 27:
+		return "N1 mode not allowed"
+	case 28:
+		return "Restricted service area"
+	case 31:
+		return "Redirection to EPC required"
+	case 65:
+		return "Maximum number of PDU sessions reached"
+	case 73:
+		return "Serving network not authorized"
+	case 95:
+		return "Semantically incorrect message"
+	case 96:
+		return "Invalid mandatory information"
+	case 97:
+		return "Message type non-existent or not implemented"
+	case 98:
+		return "Message type not compatible with protocol state"
+	case 99:
+		return "Information element non-existent or not implemented"
+	case 100:
+		return "Conditional IE error"
+	case 101:
+		return "Message not compatible with protocol state"
+	case 111:
+		return "Protocol error, unspecified"
+	default:
+		return fmt.Sprintf("5GMM Cause #%d", cause)
+	}
+}
+
 func HandlerRegistrationReject(ue *context.UEContext, message *nas.Message) {
 	cause := message.RegistrationReject.Cause5GMM.GetCauseValue()
-	log.Warnf("[UE][NAS] Registration Reject received, GMM Cause: %d", cause)
+	desc := Get5GMMCauseDesc(cause)
+	log.Warnf("[UE][NAS] Registration Reject received, GMM Cause %d: %s", cause, desc)
+	ue.SetMMError(fmt.Sprintf("Registration Rejected by AMF: 5GMM Cause #%d (%s)", cause, desc))
 	ue.SetStateMM_DEREGISTERED()
 	ue.SetStateSM_PDU_SESSION_INACTIVE()
 }
@@ -282,12 +341,15 @@ func HandlerServiceAccept(ue *context.UEContext, message *nas.Message) {
 
 func HandlerServiceReject(ue *context.UEContext, message *nas.Message) {
 	cause := message.ServiceReject.Cause5GMM.GetCauseValue()
-	log.Warnf("[UE][NAS] Service Reject received, GMM Cause: %d", cause)
+	desc := Get5GMMCauseDesc(cause)
+	log.Warnf("[UE][NAS] Service Reject received, GMM Cause %d: %s", cause, desc)
+	ue.SetMMError(fmt.Sprintf("Service Rejected by AMF: 5GMM Cause #%d (%s)", cause, desc))
 	ue.SetStateMM_DEREGISTERED()
 	ue.SetStateSM_PDU_SESSION_INACTIVE()
 }
 
 func HandlerStatus5GMM(ue *context.UEContext, message *nas.Message) {
 	cause := message.Status5GMM.Cause5GMM.GetCauseValue()
-	log.Warnf("[UE][NAS] 5GMM Status message received. Cause: %d", cause)
+	desc := Get5GMMCauseDesc(cause)
+	log.Warnf("[UE][NAS] 5GMM Status message received. Cause %d: %s", cause, desc)
 }

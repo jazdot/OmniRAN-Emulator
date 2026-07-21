@@ -3,12 +3,13 @@ package context
 import (
 	"encoding/hex"
 	"fmt"
+	"net"
+	"strings"
+	"sync"
 	"github.com/ishidawataru/sctp"
 	log "github.com/sirupsen/logrus"
 	gtpv1 "github.com/wmnsk/go-gtp/v1"
 	"golang.org/x/net/ipv4"
-	"net"
-	"sync"
 )
 
 var (
@@ -534,16 +535,36 @@ func (gnb *GNBContext) getMccAndMnc() (string, string) {
 }
 
 func (gnb *GNBContext) GetMccAndMncInOctets() []byte {
+	mccStr := strings.TrimSpace(gnb.controlInfo.mcc)
+	mncStr := strings.TrimSpace(gnb.controlInfo.mnc)
 
-	// reverse mcc and mnc
-	mcc := reverse(gnb.controlInfo.mcc)
-	mnc := reverse(gnb.controlInfo.mnc)
+	if len(mccStr) == 0 {
+		mccStr = "001"
+	}
+	for len(mccStr) < 3 {
+		mccStr = "0" + mccStr
+	}
+	if len(mccStr) > 3 {
+		mccStr = mccStr[:3]
+	}
 
-	// include mcc and mnc in octets
+	if len(mncStr) == 0 {
+		mncStr = "01"
+	}
+	if len(mncStr) == 1 {
+		mncStr = "0" + mncStr
+	}
+	if len(mncStr) > 3 {
+		mncStr = mncStr[:3]
+	}
+
+	mcc := reverse(mccStr)
+	mnc := reverse(mncStr)
+
 	oct5 := mcc[1:3]
 	var oct6 string
 	var oct7 string
-	if len(gnb.controlInfo.mnc) == 2 {
+	if len(mncStr) == 2 {
 		oct6 = "f" + string(mcc[0])
 		oct7 = mnc
 	} else {
@@ -551,10 +572,10 @@ func (gnb *GNBContext) GetMccAndMncInOctets() []byte {
 		oct7 = mnc[1:3]
 	}
 
-	// changed for bytes.
 	resu, err := hex.DecodeString(oct5 + oct6 + oct7)
 	if err != nil {
-		fmt.Println(err)
+		log.Errorf("[GNB] Error decoding PLMN hex: %v", err)
+		return []byte{0x00, 0xf1, 0x10}
 	}
 
 	return resu

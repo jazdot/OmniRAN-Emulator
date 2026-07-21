@@ -29,7 +29,11 @@ import {
   Lock,
   UserPlus,
   LogOut,
-  Key
+  Key,
+  Smartphone,
+  CheckCircle2,
+  RotateCcw,
+  Square
 } from 'lucide-react';
 
 // API base path (works with relative path when served by Go, or proxied in dev)
@@ -231,6 +235,8 @@ interface ConfigData {
     SliceSupportList: { Sst: string; Sd: string };
     LinkType: string;
     LinkPort: number;
+    PagingDRX?: string;
+    CellId?: number;
   };
   Ue: {
     Msin: string;
@@ -1957,7 +1963,9 @@ export default function App() {
 
 
   // Connectivity Test State
-  const [pingHost, setPingHost] = useState('');
+  const [pingHost, setPingHost] = useState('127.0.0.1');
+  const [pingPort, setPingPort] = useState<number>(38412);
+  const [pingProtocol, setPingProtocol] = useState<string>('icmp');
   const [pingResult, setPingResult] = useState('');
   const [pingRunning, setPingRunning] = useState(false);
   const [checks, setChecks] = useState({
@@ -3653,22 +3661,22 @@ export default function App() {
     };
   }, [activeTab]);
 
-  // Run ping test
+  // Run multi-protocol probe / ping test
   const executePing = async () => {
     if (pingRunning) return;
     setPingRunning(true);
-    setPingResult('Sending ICMP Echo requests...');
+    setPingResult(`Initiating ${pingProtocol.toUpperCase()} probe to ${pingHost}${pingProtocol !== 'icmp' ? ':' + pingPort : ''}...`);
     try {
       const res = await fetch(`${API_BASE}/ping`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ host: pingHost })
+        body: JSON.stringify({ host: pingHost, port: pingPort, protocol: pingProtocol })
       });
       if (res.ok) {
         const data = await res.json();
         setPingResult(data.output);
       } else {
-        setPingResult('Ping request failed.');
+        setPingResult('Probe request failed.');
       }
     } catch (err) {
       setPingResult(`Error: ${err}`);
@@ -3680,11 +3688,12 @@ export default function App() {
   // Handle configuration update
   const handleConfigChange = (path: string, value: any) => {
     if (!configData) return;
-    const newCfg = { ...configData };
+    const newCfg = JSON.parse(JSON.stringify(configData));
     const parts = path.split('.');
     
     let current: any = newCfg;
     for (let i = 0; i < parts.length - 1; i++) {
+      if (!current[parts[i]]) current[parts[i]] = {};
       current = current[parts[i]];
     }
     current[parts[parts.length - 1]] = value;
@@ -3692,8 +3701,41 @@ export default function App() {
     setConfigData(newCfg);
   };
 
-  const saveConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const resetConfigToDefaults = () => {
+    if (!confirm("Reset all system configuration settings to factory 3GPP defaults?")) return;
+    const defaultConfig: ConfigData = {
+      GNodeB: {
+        ControlIF: { Ip: '127.0.0.1', Port: 9487 },
+        DataIF: { Ip: '127.0.0.1', Port: 2152 },
+        PlmnList: { Mcc: '999', Mnc: '70', Tac: '000001', GnbId: '000001' },
+        SliceSupportList: { Sst: '01', Sd: '' },
+        LinkType: 'unix',
+        LinkPort: 9488,
+        PagingDRX: 'v32',
+        CellId: 1
+      },
+      Ue: {
+        Msin: '0000000001',
+        Key: '8b415a7fe54e61039d9b69c4403d22e2',
+        Opc: 'c9e8763286b5b9ffbdf56e1297d0887b',
+        Amf: '8000',
+        Sqn: '000000000000',
+        Dnn: 'internet',
+        PduSessionType: 'IPv4',
+        RegistrationType: 'InitialRegistration',
+        Hplmn: { Mcc: '999', Mnc: '70' },
+        Snssai: { Sst: 1, Sd: '' },
+        PduSessions: null
+      },
+      AMF: { Ip: '127.0.0.1', Port: 38412 },
+      Logs: { Level: 4 }
+    };
+    setConfigData(defaultConfig);
+    alert('Configuration reset to defaults. Click SAVE CONFIGURATION to persist to disk.');
+  };
+
+  const saveConfig = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!configData) return;
 
     try {
@@ -3703,7 +3745,7 @@ export default function App() {
         body: JSON.stringify(configData)
       });
       if (res.ok) {
-        alert('Configuration saved successfully! Ready to apply on next scenario execution.');
+        alert('Configuration saved successfully! Persisted to config/config.yml.');
         fetchStatus();
       } else {
         const text = await res.text();
@@ -6147,69 +6189,344 @@ export default function App() {
           </div>
         )}
 
+        {/* ─── Full Control System Configuration Tab ───────────────────────── */}
         {activeTab === 'config' && (
-          <div className="view-body fade-in">
+          <div className="view-body fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            
+            {/* Header Description Banner */}
+            <div className="card" style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(139, 92, 246, 0.04) 100%)', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Sliders size={18} style={{ color: 'var(--color-primary)' }} /> System Parameter & 3GPP Specification Control
+                  </h3>
+                  <p style={{ margin: '6px 0 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
+                    Configure target 5G Core AMF connection parameters, default gNodeB cell identity & interfaces, default UE subscriber credentials & authentication vectors, and active 3GPP release standards.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={resetConfigToDefaults}>
+                    <RotateCcw size={14} /> Reset Defaults
+                  </button>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => saveConfig()}>
+                    <CheckCircle2 size={14} /> Save Configuration
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {configData ? (
-              <form onSubmit={saveConfig} className="card config-layout">
-                {/* Left Side: AMF Core Connection */}
-                <div className="config-section">
-                  <h3 className="panel-title" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+              <form onSubmit={saveConfig} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '20px' }}>
+                
+                {/* 1. 5G Core Target Connection */}
+                <div className="card">
+                  <h3 className="panel-title" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginBottom: '14px', color: '#8b5cf6' }}>
                     <Server size={18} /> 5G Core (AMF) Target Connection
                   </h3>
-                  
-                  <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px' }}>
-                    Configure the target 5G Core Network Access and Mobility Management Function (AMF) address. GNodeBs in the fleet will bind and attempt N2 SCTP association with this target.
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px' }}>
+                    Target AMF IP address and SCTP port. gNodeBs launched in standalone or fleet mode will initiate NGAP N2 association with this endpoint.
                   </p>
 
-                  <div className="form-group">
-                    <label>AMF IP Address</label>
+                  <div className="form-group" style={{ marginBottom: '12px' }}>
+                    <label>AMF Target IP Address *</label>
                     <input
                       type="text"
+                      className="form-input font-mono"
                       value={configData.AMF?.Ip || '127.0.0.1'}
                       onChange={(e) => handleConfigChange('AMF.Ip', e.target.value)}
+                      placeholder="127.0.0.1"
                     />
                   </div>
 
                   <div className="form-group">
-                    <label>AMF Port (NGAP/SCTP)</label>
+                    <label>AMF SCTP Port *</label>
                     <input
                       type="number"
+                      className="form-input font-mono"
                       value={configData.AMF?.Port || 38412}
                       onChange={(e) => handleConfigChange('AMF.Port', parseInt(e.target.value) || 38412)}
                     />
                   </div>
                 </div>
 
-                {/* Right Side: Logging & Verbosity */}
-                <div className="config-section">
-                  <h3 className="panel-title" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
-                    <Terminal size={18} /> Logging & Verbosity
+                {/* 2. Default gNodeB Cell & RAN Parameters */}
+                <div className="card">
+                  <h3 className="panel-title" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginBottom: '14px', color: '#6366f1' }}>
+                    <Radio size={18} /> Default gNodeB Cell & RAN Parameters
                   </h3>
-
-                  <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '10px' }}>
-                    Adjust the emulator logging level. System logs, RAN signaling events, and network packets will be filtered according to this verbosity setting.
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px' }}>
+                    Default RAN cell parameters used when starting gNodeBs without an explicit fleet profile override.
                   </p>
 
-                  <div className="form-group">
-                    <label>Logging Level</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div className="form-group">
+                      <label>gNodeB ID (Hex) *</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.GNodeB?.PlmnList?.GnbId || '000001'}
+                        onChange={(e) => handleConfigChange('GNodeB.PlmnList.GnbId', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>TAC (Tracking Area Code) *</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.GNodeB?.PlmnList?.Tac || '000001'}
+                        onChange={(e) => handleConfigChange('GNodeB.PlmnList.Tac', e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div className="form-group">
+                      <label>MCC (Country Code)</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.GNodeB?.PlmnList?.Mcc || '999'}
+                        onChange={(e) => handleConfigChange('GNodeB.PlmnList.Mcc', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>MNC (Network Code)</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.GNodeB?.PlmnList?.Mnc || '70'}
+                        onChange={(e) => handleConfigChange('GNodeB.PlmnList.Mnc', e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div className="form-group">
+                      <label>Slice SST (e.g. 01)</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.GNodeB?.SliceSupportList?.Sst || '01'}
+                        onChange={(e) => handleConfigChange('GNodeB.SliceSupportList.Sst', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Slice SD (Hex)</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.GNodeB?.SliceSupportList?.Sd || ''}
+                        onChange={(e) => handleConfigChange('GNodeB.SliceSupportList.Sd', e.target.value)}
+                        placeholder="Optional e.g. 010203"
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div className="form-group">
+                      <label>Control IF IP</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.GNodeB?.ControlIF?.Ip || '127.0.0.1'}
+                        onChange={(e) => handleConfigChange('GNodeB.ControlIF.Ip', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Control Port</label>
+                      <input
+                        type="number"
+                        className="form-input font-mono"
+                        value={configData.GNodeB?.ControlIF?.Port || 9487}
+                        onChange={(e) => handleConfigChange('GNodeB.ControlIF.Port', parseInt(e.target.value) || 9487)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div className="form-group">
+                      <label>Inter-gNB Link Mode</label>
+                      <select
+                        className="form-input"
+                        value={configData.GNodeB?.LinkType || 'unix'}
+                        onChange={(e) => handleConfigChange('GNodeB.LinkType', e.target.value)}
+                      >
+                        <option value="unix">UNIX Socket (/tmp/gnb.sock)</option>
+                        <option value="tcp">TCP Socket Network Port</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Inter-gNB Link Port</label>
+                      <input
+                        type="number"
+                        className="form-input font-mono"
+                        value={configData.GNodeB?.LinkPort || 9488}
+                        onChange={(e) => handleConfigChange('GNodeB.LinkPort', parseInt(e.target.value) || 9488)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Default UE Subscriber Credentials */}
+                <div className="card">
+                  <h3 className="panel-title" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginBottom: '14px', color: '#10b981' }}>
+                    <Smartphone size={18} /> Default UE Subscriber & Auth Credentials
+                  </h3>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px' }}>
+                    Default 3GPP USIM Milenage authentication vectors and registration parameters for emulated UEs.
+                  </p>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div className="form-group">
+                      <label>MSIN (10-digit IMSI suffix) *</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.Ue?.Msin || '0000000001'}
+                        onChange={(e) => handleConfigChange('Ue.Msin', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Default DNN *</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.Ue?.Dnn || 'internet'}
+                        onChange={(e) => handleConfigChange('Ue.Dnn', e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div className="form-group">
+                      <label>Secret Key K (Hex 32) *</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.Ue?.Key || ''}
+                        onChange={(e) => handleConfigChange('Ue.Key', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>OPc / OP (Hex 32) *</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.Ue?.Opc || ''}
+                        onChange={(e) => handleConfigChange('Ue.Opc', e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div className="form-group">
+                      <label>AMF Field (Hex 4)</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.Ue?.Amf || '8000'}
+                        onChange={(e) => handleConfigChange('Ue.Amf', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>SQN (Hex 12)</label>
+                      <input
+                        type="text"
+                        className="form-input font-mono"
+                        value={configData.Ue?.Sqn || '000000000000'}
+                        onChange={(e) => handleConfigChange('Ue.Sqn', e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div className="form-group">
+                      <label>PDU Session Type</label>
+                      <select
+                        className="form-input"
+                        value={configData.Ue?.PduSessionType || 'IPv4'}
+                        onChange={(e) => handleConfigChange('Ue.PduSessionType', e.target.value)}
+                      >
+                        <option value="IPv4">IPv4</option>
+                        <option value="IPv6">IPv6</option>
+                        <option value="IPv4v6">IPv4v6 Dual Stack</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Registration Type</label>
+                      <select
+                        className="form-input"
+                        value={configData.Ue?.RegistrationType || 'InitialRegistration'}
+                        onChange={(e) => handleConfigChange('Ue.RegistrationType', e.target.value)}
+                      >
+                        <option value="InitialRegistration">Initial Registration</option>
+                        <option value="EmergencyRegistration">Emergency Registration</option>
+                        <option value="MobilityRegistration">Mobility Registration</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. 3GPP Specification & Release Control Engine */}
+                <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+                  <h3 className="panel-title" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', marginBottom: '14px', color: '#06b6d4' }}>
+                    <Layers size={18} /> 3GPP Release Engine & Protocol Level
+                  </h3>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px' }}>
+                    Dynamically switch active 3GPP release standards. Adjusts RRC Cause values, transparent container structures, and NAS IE formats.
+                  </p>
+
+                  <div className="form-group" style={{ marginBottom: '16px' }}>
+                    <label>Active 3GPP Release Standard</label>
                     <select
-                      value={configData.Logs?.Level || 4}
-                      onChange={(e) => handleConfigChange('Logs.Level', parseInt(e.target.value) || 4)}
+                      className="form-input"
+                      style={{ fontSize: '14px', fontWeight: 'bold', padding: '10px' }}
+                      value={activeRelease}
+                      onChange={(e) => updateRelease(e.target.value)}
                     >
-                      <option value={5}>DEBUG (Verbose)</option>
-                      <option value={4}>INFO (Standard)</option>
-                      <option value={3}>WARNING (Important warnings)</option>
-                      <option value={2}>ERROR (Failures only)</option>
-                      <option value={6}>TRACE (Deep packet decoding)</option>
+                      <option value="15">Release 15/16 (Baseline 5G NR eMBB)</option>
+                      <option value="17">Release 17 (RedCap / NTN Satellite - mt-Access Cause)</option>
+                      <option value="18">Release 18 (UAV / Flight Priority - highPriorityAccess)</option>
+                      <option value="19">Release 19 (AI / Ambient IoT Sensing - mo-VoiceCall)</option>
                     </select>
                   </div>
 
-                  <div style={{ marginTop: 'auto', display: 'flex', gap: '10px' }}>
-                    <button type="submit" className="btn btn-primary">
-                      SAVE CONFIGURATION
+                  <div style={{ background: 'var(--bg-input)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <CheckCircle2 size={14} style={{ color: 'var(--color-primary)' }} /> Release {activeRelease} Mode Active
+                    </div>
+                    {activeRelease === '15' && 'Standard RRC mo-Signalling establishment cause. Full 3GPP TS 38.413 baseline compliant.'}
+                    {activeRelease === '17' && 'RRC mt-Access cause for RedCap (Reduced Capability) & Non-Terrestrial Network satellite links.'}
+                    {activeRelease === '18' && 'RRC highPriorityAccess cause for mission-critical UAV drone flight priority & slicing.'}
+                    {activeRelease === '19' && 'RRC mo-VoiceCall & sensing context IEs for AI-driven Ambient IoT / ISAC channel telemetry.'}
+                  </div>
+
+                  <h3 className="panel-title" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px', margin: '20px 0 14px 0', color: '#eab308' }}>
+                    <Terminal size={18} /> Logging & Verbosity
+                  </h3>
+
+                  <div className="form-group">
+                    <label>Logging Verbosity Level</label>
+                    <select
+                      className="form-input"
+                      value={configData.Logs?.Level || 4}
+                      onChange={(e) => handleConfigChange('Logs.Level', parseInt(e.target.value) || 4)}
+                    >
+                      <option value={6}>TRACE (6 - Deep APER & NAS Byte Decoding)</option>
+                      <option value={5}>DEBUG (5 - Detailed Protocol Flow)</option>
+                      <option value={4}>INFO (4 - Standard Operational Events)</option>
+                      <option value={3}>WARNING (3 - Protocol Warnings Only)</option>
+                      <option value={2}>ERROR (2 - Failures Only)</option>
+                    </select>
+                  </div>
+
+                  <div style={{ marginTop: 'auto', paddingTop: '20px', display: 'flex', gap: '10px' }}>
+                    <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '12px' }}>
+                      <CheckCircle2 size={16} /> SAVE SYSTEM CONFIGURATION
                     </button>
                   </div>
                 </div>
+
               </form>
             ) : (
               <div className="card" style={{ textAlign: 'center', padding: '40px' }}>
@@ -6316,54 +6633,59 @@ export default function App() {
           </div>
         )}
 
+        {/* ─── Multi-Protocol Connectivity & Diagnostics Control Tab ───────── */}
         {activeTab === 'connectivity' && (
-          <div className="view-body fade-in">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '24px' }}>
+          <div className="view-body fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            
+            {/* Top Grid: Health Checklist + Interactive Multi-Protocol Probe */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', gap: '20px' }}>
               
-              {/* Left Column: Diagnostics Check */}
-              <div className="card">
-                <h3 className="panel-title" style={{ marginBottom: '16px' }}>
-                  <Network size={18} /> Network Diagnostics
-                </h3>
-                <div className="check-list">
-                  <div className="check-item">
-                    <div className="check-item-info">
-                      <Server size={16} />
-                      <span className="check-item-title">AMF IP Core Reachability</span>
+              {/* Card 1: Network Environment & Health Diagnostics */}
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div>
+                  <h3 className="panel-title" style={{ marginBottom: '14px', color: '#3b82f6' }}>
+                    <Network size={18} /> Network Environment Diagnostics
+                  </h3>
+                  <div className="check-list">
+                    <div className="check-item">
+                      <div className="check-item-info">
+                        <Server size={16} />
+                        <span className="check-item-title">AMF IP Core Reachability</span>
+                      </div>
+                      <span className={`check-item-status ${checks.amfReachability}`}>
+                        {checks.amfReachability === 'success' ? 'REACHABLE' : checks.amfReachability === 'checking' ? 'CHECKING...' : 'CORE UNREACHABLE'}
+                      </span>
                     </div>
-                    <span className={`check-item-status ${checks.amfReachability}`}>
-                      {checks.amfReachability === 'success' ? 'REACHABLE' : checks.amfReachability === 'checking' ? 'CHECKING...' : 'CORE UNREACHABLE'}
-                    </span>
-                  </div>
 
-                  <div className="check-item">
-                    <div className="check-item-info">
-                      <Network size={16} />
-                      <span className="check-item-title">SCTP Kernel Module</span>
+                    <div className="check-item">
+                      <div className="check-item-info">
+                        <Network size={16} />
+                        <span className="check-item-title">SCTP Protocol Kernel Module</span>
+                      </div>
+                      <span className={`check-item-status ${checks.sctpModule}`}>
+                        {checks.sctpModule === 'success' ? 'LOADED' : 'WARNING (MODPROBE)'}
+                      </span>
                     </div>
-                    <span className={`check-item-status ${checks.sctpModule}`}>
-                      {checks.sctpModule === 'success' ? 'LOADED' : 'WARNING (MAY NEED MODPROBE)'}
-                    </span>
-                  </div>
 
-                  <div className="check-item">
-                    <div className="check-item-info">
-                      <Globe size={16} />
-                      <span className="check-item-title">IPIP User Plane Module</span>
+                    <div className="check-item">
+                      <div className="check-item-info">
+                        <Globe size={16} />
+                        <span className="check-item-title">GTP-U / IPIP Tunneling Module</span>
+                      </div>
+                      <span className={`check-item-status ${checks.ipipModule}`}>
+                        {checks.ipipModule === 'success' ? 'LOADED' : 'WARNING (MODPROBE)'}
+                      </span>
                     </div>
-                    <span className={`check-item-status ${checks.ipipModule}`}>
-                      {checks.ipipModule === 'success' ? 'LOADED' : 'WARNING (MAY NEED MODPROBE)'}
-                    </span>
-                  </div>
 
-                  <div className="check-item">
-                    <div className="check-item-info">
-                      <Trash2 size={16} />
-                      <span className="check-item-title">UNIX Socket Clean state</span>
+                    <div className="check-item">
+                      <div className="check-item-info">
+                        <Trash2 size={16} />
+                        <span className="check-item-title">UNIX Domain Socket State</span>
+                      </div>
+                      <span className={`check-item-status ${checks.socketsClean}`}>
+                        {checks.socketsClean === 'success' ? 'READY (SOCKETS CLEAR)' : 'ACTIVE SESSION'}
+                      </span>
                     </div>
-                    <span className={`check-item-status ${checks.socketsClean}`}>
-                      {checks.socketsClean === 'success' ? 'READY (SOCKETS CLEAR)' : 'ACTIVE SESSION'}
-                    </span>
                   </div>
                 </div>
                 
@@ -6377,42 +6699,211 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Right Column: Dynamic ping CLI */}
-              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <h3 className="panel-title">
-                  <Terminal size={18} /> Interactive Core ICMP Ping Tester
+              {/* Card 2: Multi-Protocol Socket & Service Probe */}
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <h3 className="panel-title" style={{ color: '#8b5cf6' }}>
+                  <Terminal size={18} /> Multi-Protocol Socket & Service Probe
                 </h3>
 
-                <div className="form-group">
-                  <label>Target Host IP (Core Node IP)</label>
-                  <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '10px' }}>
+                  <div className="form-group">
+                    <label>Target Host IP</label>
                     <input
                       type="text"
+                      className="form-input font-mono"
                       value={pingHost}
                       onChange={(e) => setPingHost(e.target.value)}
-                      style={{ flexGrow: 1 }}
-                      placeholder="e.g. 127.0.0.1"
+                      placeholder="127.0.0.1"
                     />
-                    <button
-                      id="runPingButton"
-                      className="btn btn-primary"
-                      style={{ width: 'auto', whiteSpace: 'nowrap' }}
-                      disabled={pingRunning}
-                      onClick={executePing}
+                  </div>
+                  <div className="form-group">
+                    <label>Port</label>
+                    <input
+                      type="number"
+                      className="form-input font-mono"
+                      value={pingPort}
+                      onChange={(e) => setPingPort(parseInt(e.target.value) || 38412)}
+                      placeholder="38412"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Protocol</label>
+                    <select
+                      className="form-input"
+                      value={pingProtocol}
+                      onChange={(e) => setPingProtocol(e.target.value)}
                     >
-                      {pingRunning ? 'PINGING...' : 'RUN PING TEST'}
-                    </button>
+                      <option value="icmp">ICMP Ping</option>
+                      <option value="tcp">TCP Socket</option>
+                      <option value="sctp">SCTP (NGAP)</option>
+                      <option value="udp">UDP (GTP/PFCP)</option>
+                    </select>
                   </div>
                 </div>
 
-                <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: '200px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text-secondary)', marginBottom: '6px' }}>Terminal Output</label>
-                  <div className="ping-result-box" style={{ flexGrow: 1 }}>
-                    {pingResult || 'Click "Run Ping Test" to evaluate network connectivity to the target 5G Core Node.'}
+                {/* Preset Target Quick Buttons */}
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', alignSelf: 'center', marginRight: '4px' }}>Presets:</span>
+                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => { setPingHost(configData?.AMF?.Ip || '127.0.0.1'); setPingPort(38412); setPingProtocol('sctp'); }}>AMF NGAP (38412)</button>
+                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => { setPingHost('127.0.0.8'); setPingPort(8805); setPingProtocol('udp'); }}>UPF PFCP (8805)</button>
+                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => { setPingHost('127.0.0.1'); setPingPort(2152); setPingProtocol('udp'); }}>GTP-U (2152)</button>
+                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => { setPingHost('127.0.0.10'); setPingPort(8000); setPingProtocol('tcp'); }}>NRF SBI (8000)</button>
+                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => { setPingHost('127.0.0.1'); setPingPort(5000); setPingProtocol('tcp'); }}>Core WebUI (5000)</button>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ whiteSpace: 'nowrap' }}
+                    disabled={pingRunning}
+                    onClick={executePing}
+                  >
+                    {pingRunning ? 'PROBING...' : 'RUN SOCKET PROBE'}
+                  </button>
+                </div>
+
+                <div style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: '140px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-secondary)', marginBottom: '4px' }}>Probe Result Console</label>
+                  <div className="ping-result-box" style={{ flexGrow: 1, fontSize: '12px' }}>
+                    {pingResult || 'Select a protocol preset or enter target IP:Port and click "RUN SOCKET PROBE" to evaluate service reachability.'}
                   </div>
                 </div>
               </div>
             </div>
+
+            {/* Bottom Grid: Network Interfaces & Live Traffic Capture Control */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+              
+              {/* Card 3: Network Interfaces & Route Inspector */}
+              <div className="card">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                  <h3 className="panel-title" style={{ margin: 0, color: '#10b981' }}>
+                    <Network size={18} /> Network Interface & Route Inspector
+                  </h3>
+                  <button type="button" className="btn btn-xs btn-ghost" onClick={fetchPcapInterfaces}>
+                    <RefreshCw size={12} /> Refresh
+                  </button>
+                </div>
+
+                <div style={{ overflowX: 'auto', maxHeight: '220px', overflowY: 'auto' }}>
+                  <table className="fleet-table" style={{ fontSize: '12px' }}>
+                    <thead>
+                      <tr>
+                        <th>Interface</th>
+                        <th>IP Address</th>
+                        <th>Interface Flags</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pcapInterfaces.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+                            Click Refresh to query system network interfaces.
+                          </td>
+                        </tr>
+                      ) : (
+                        pcapInterfaces.map((iface, idx) => {
+                          const isUp = iface.flags ? iface.flags.includes('up') : true;
+                          return (
+                            <tr key={idx}>
+                              <td className="font-semibold" style={{ color: 'var(--color-primary)' }}>{iface.name}</td>
+                              <td className="font-mono">{iface.ipAddresses?.join(', ') || 'Unassigned'}</td>
+                              <td className="font-mono" style={{ color: 'var(--text-muted)' }}>{iface.flags || 'up'}</td>
+                              <td>
+                                <span className="fleet-tag" style={{ background: isUp ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)', color: isUp ? '#22c55e' : '#ef4444', margin: 0 }}>
+                                  {isUp ? 'UP' : 'DOWN'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Card 4: Quick Packet Capture Control */}
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                    <h3 className="panel-title" style={{ margin: 0, color: '#06b6d4' }}>
+                      <Activity size={18} /> Packet Capture Control
+                    </h3>
+                    <span className="fleet-tag" style={{ background: activeCaptureStatus?.isCapturing ? 'rgba(239, 68, 68, 0.15)' : 'rgba(100, 116, 139, 0.15)', color: activeCaptureStatus?.isCapturing ? '#ef4444' : 'var(--text-muted)', margin: 0 }}>
+                      {activeCaptureStatus?.isCapturing ? '🔴 CAPTURING LIVE' : 'IDLE'}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                    <div className="form-group">
+                      <label>Capture Interface</label>
+                      <select
+                        className="form-input"
+                        value={pcapInterface}
+                        onChange={(e) => setPcapInterface(e.target.value)}
+                      >
+                        <option value="any">any (All Interfaces)</option>
+                        <option value="lo">lo (Loopback)</option>
+                        {pcapInterfaces.filter(i => i.name !== 'any' && i.name !== 'lo').map(i => (
+                          <option key={i.name} value={i.name}>{i.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label>Protocol Filter</label>
+                      <select
+                        className="form-input"
+                        value={pcapProtocol}
+                        onChange={(e) => setPcapProtocol(e.target.value)}
+                      >
+                        <option value="all">ALL 5G Traffic</option>
+                        <option value="ngap">NGAP (SCTP 38412)</option>
+                        <option value="gtp-u">GTP-U (UDP 2152)</option>
+                        <option value="pfcp">PFCP (UDP 8805)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Capture Output Filename</label>
+                    <input
+                      type="text"
+                      className="form-input font-mono"
+                      value={pcapFileName}
+                      onChange={(e) => setPcapFileName(e.target.value)}
+                      placeholder="capture.pcap"
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
+                  {activeCaptureStatus?.isCapturing ? (
+                    <button
+                      className="btn btn-secondary"
+                      style={{ width: '100%', color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
+                      onClick={stopPcapCapture}
+                      disabled={isStoppingPcap}
+                    >
+                      <Square size={14} /> STOP PACKET CAPTURE
+                    </button>
+                  ) : (
+                    <button
+                      className="btn btn-primary"
+                      style={{ width: '100%' }}
+                      onClick={startPcapCapture}
+                      disabled={isStartingPcap}
+                    >
+                      <Play size={14} /> START PACKET CAPTURE
+                    </button>
+                  )}
+                </div>
+              </div>
+
+            </div>
+
           </div>
         )}
 
