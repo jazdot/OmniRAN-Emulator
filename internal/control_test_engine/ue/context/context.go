@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"OmniRAN-Emulator/config"
@@ -90,6 +91,7 @@ type PDUSession struct {
 	ruleTun        []netlink.Rule
 	State          int
 	Error          string
+	RequestedAt    time.Time
 }
 
 type SECURITY struct {
@@ -269,6 +271,16 @@ func (ue *UEContext) SetStateSM_PDU_SESSION_ACTIVE() {
 
 func (ue *UEContext) SetStateSM_PDU_SESSION_PENDING() {
 	ue.StateSM = SM5G_PDU_SESSION_ACTIVE_PENDING
+}
+
+func (ue *UEContext) SetPduSessionPending(id uint8) {
+	ue.StateSM = SM5G_PDU_SESSION_ACTIVE_PENDING
+	sess := ue.GetPduSession(id)
+	if sess != nil {
+		sess.State = SM5G_PDU_SESSION_ACTIVE_PENDING
+		sess.RequestedAt = time.Now()
+		sess.Error = ""
+	}
 }
 
 func (ue *UEContext) SetStateMM_DEREGISTERED_INITIATED() {

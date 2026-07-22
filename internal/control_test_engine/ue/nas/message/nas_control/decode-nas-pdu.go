@@ -21,15 +21,32 @@ func GetNasPduFromDownlink(msg *ngapType.DownlinkNASTransport) (m *nas.Message) 
 }
 
 func GetNasPduFromPduAccept(dlNas *nas.Message) (m *nas.Message) {
+	if dlNas == nil || dlNas.DLNASTransport == nil {
+		return nil
+	}
 
 	// get payload container from DL NAS.
 	payload := dlNas.DLNASTransport.GetPayloadContainerContents()
-	m = new(nas.Message)
-	err := m.PlainNasDecode(&payload)
-	if err != nil {
+	if len(payload) == 0 {
 		return nil
 	}
-	return
+
+	m = new(nas.Message)
+	err := m.PlainNasDecode(&payload)
+	if err == nil && m.GsmHeader.GetMessageType() != 0 {
+		return m
+	}
+
+	// If plain NAS decode failed or message type is empty, check for 7-byte security header (e.g. 0x7E ...)
+	if len(payload) > 7 && payload[0] == 0x7e {
+		stripped := payload[7:]
+		m2 := new(nas.Message)
+		if err2 := m2.PlainNasDecode(&stripped); err2 == nil && m2.GsmHeader.GetMessageType() != 0 {
+			return m2
+		}
+	}
+
+	return nil
 }
 
 func GetNasPduFromDlNas(msg *ngapType.PDUSessionResourceSetupRequest) (m *nas.Message) {

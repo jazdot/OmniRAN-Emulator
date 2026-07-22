@@ -157,7 +157,7 @@ func HandlerRegistrationAccept(ue *context.UEContext, message *nas.Message) {
 	}
 
 	// change the state of this session to pending.
-	ue.GetPduSession(defaultPduSessionId).State = context.SM5G_PDU_SESSION_ACTIVE_PENDING
+	ue.SetPduSessionPending(defaultPduSessionId)
 
 	// sending to GNB
 	sender.SendToGnb(ue, ulNasTransport)
@@ -233,7 +233,15 @@ func HandlerDlNasTransportPduaccept(ue *context.UEContext, message *nas.Message)
 	//getting PDU Session establishment accept or release.
 	payloadContainer := nas_control.GetNasPduFromPduAccept(message)
 	if payloadContainer == nil {
-		log.Error("[UE][NAS] Error: payloadContainer is nil in PDU Accept/Release")
+		errMsg := "PDU Session Rejected by Core: DL NAS Transport payload container (5GSM) unparseable or rejected by SMF/AMF."
+		log.Warnf("[UE][NAS] %s", errMsg)
+		for _, sess := range ue.PduSessions {
+			if sess.State == context.SM5G_PDU_SESSION_ACTIVE_PENDING {
+				sess.State = context.SM5G_PDU_SESSION_INACTIVE
+				sess.Error = errMsg
+			}
+		}
+		ue.SetSMError(errMsg)
 		return
 	}
 	
@@ -259,7 +267,7 @@ func HandlerDlNasTransportPduaccept(ue *context.UEContext, message *nas.Message)
 		pduSessionId := payloadContainer.PDUSessionEstablishmentReject.PDUSessionID.GetPDUSessionID()
 		cause := payloadContainer.PDUSessionEstablishmentReject.Cause5GSM.GetCauseValue()
 		desc := Get5GSMCauseDesc(cause)
-		errMsg := fmt.Sprintf("PDU Session #%d Rejected by SMF: 5GSM Cause #%d (%s)", pduSessionId, cause, desc)
+		errMsg := fmt.Sprintf("PDU Session #%d Rejected by 5G Core (SMF/AMF): 5GSM Cause #%d (%s)", pduSessionId, cause, desc)
 		log.Warnf("[UE][NAS] %s", errMsg)
 
 		sess := ue.GetPduSession(pduSessionId)
@@ -433,5 +441,13 @@ func HandlerServiceReject(ue *context.UEContext, message *nas.Message) {
 func HandlerStatus5GMM(ue *context.UEContext, message *nas.Message) {
 	cause := message.Status5GMM.Cause5GMM.GetCauseValue()
 	desc := Get5GMMCauseDesc(cause)
-	log.Warnf("[UE][NAS] 5GMM Status message received. Cause %d: %s", cause, desc)
+	errMsg := fmt.Sprintf("5GMM Status Message from Core: 5GMM Cause #%d (%s)", cause, desc)
+	log.Warnf("[UE][NAS] %s", errMsg)
+	ue.SetMMError(errMsg)
+	for _, sess := range ue.PduSessions {
+		if sess.State == context.SM5G_PDU_SESSION_ACTIVE_PENDING {
+			sess.State = context.SM5G_PDU_SESSION_INACTIVE
+			sess.Error = fmt.Sprintf("PDU Session #%d Rejected by AMF via 5GMM Status: Cause #%d (%s)", sess.Id, cause, desc)
+		}
+	}
 }

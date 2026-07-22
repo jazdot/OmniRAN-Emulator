@@ -1938,6 +1938,8 @@ export default function App() {
   const [videoQuality, setVideoQuality] = useState('1080p');
   const [vonrCallee, setVonrCallee] = useState('echo');
   const [vonrActiveCall, setVonrActiveCall] = useState<any>(null);
+  const [imsMode, setImsMode] = useState<'internal' | 'external'>('internal');
+  const [pcscfIp, setPcscfIp] = useState('127.0.0.1:5060');
   const [audioMuted, setAudioMuted] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
@@ -3125,7 +3127,7 @@ export default function App() {
       const res = await fetch(`${API_BASE}/ue/vonr/dial`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callerId, calleeId: vonrCallee })
+        body: JSON.stringify({ callerId, calleeId: vonrCallee, imsMode, pcscfIp })
       });
       if (res.ok) {
         const data = await res.json();
@@ -4594,17 +4596,29 @@ export default function App() {
                                 {activeUe.pduSessions && activeUe.pduSessions.length > 0 ? (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
                                     {activeUe.pduSessions.map(s => {
-                                      const isActive = s.stateDesc?.includes('ACTIVE');
+                                      const isFailed = !!s.error;
+                                      const isActive = !isFailed && s.stateDesc?.includes('ACTIVE') && !s.stateDesc?.includes('PENDING');
+                                      const isPending = !isFailed && s.stateDesc?.includes('PENDING');
                                       return (
                                         <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '6px', width: '100%' }}>
                                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', width: '100%' }}>
                                             <span style={{ color: 'var(--color-info)' }}>PDU #{s.id} ({s.dnn}):</span>
                                             <span className="font-mono ml-auto" style={{ marginRight: '6px' }}>{s.ueIp || '—'}</span>
-                                            <span className={`fleet-state-badge sm ${isActive ? 'registered' : 'pending'}`}>{s.stateDesc}</span>
+                                            <span className={`fleet-state-badge sm ${isActive ? 'registered' : isFailed ? 'danger' : 'warning'}`}>
+                                              {isFailed ? 'REJECTED' : s.stateDesc}
+                                            </span>
                                           </div>
+                                          {isPending && (
+                                            <div style={{ fontSize: '10px', color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)', padding: '4px 6px', borderRadius: '4px', marginTop: '2px' }}>
+                                              ⏳ Awaiting 5GSM PDU Session Establishment Accept / Resource Setup Request from 5G Core...
+                                            </div>
+                                          )}
                                           {s.error && (
-                                            <div style={{ fontSize: '10px', color: '#f87171', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '4px 6px', borderRadius: '4px', marginTop: '2px' }}>
-                                              ⚠️ Cause: {s.error}
+                                            <div style={{ fontSize: '10px', color: '#f87171', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '6px 8px', borderRadius: '4px', marginTop: '2px', lineHeight: '1.4' }}>
+                                              <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <AlertTriangle size={12} /> 3GPP PDU Session Reject Diagnostic:
+                                              </div>
+                                              <div style={{ marginTop: '2px', fontWeight: '500' }}>{s.error}</div>
                                             </div>
                                           )}
                                           {isActive && (
@@ -4832,6 +4846,35 @@ export default function App() {
                                   <Phone size={12} /> VoNR SIP Phone Dialer
                                 </h5>
                                 
+                                {/* IMS Mode Selector */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px', background: 'rgba(15, 23, 42, 0.6)', padding: '6px 8px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--text-muted)' }}>IMS Signaling Mode:</span>
+                                    <select 
+                                      value={imsMode} 
+                                      onChange={(e) => setImsMode(e.target.value as any)} 
+                                      disabled={isCallActive}
+                                      style={{ padding: '2px 4px', borderRadius: '3px', background: '#0b0f19', border: '1px solid var(--border-color)', color: imsMode === 'external' ? '#60a5fa' : '#34d399', fontSize: '10px', fontWeight: 'bold' }}
+                                    >
+                                      <option value="internal">⚡ Internal Standalone (OmniRAN Emulated P-CSCF)</option>
+                                      <option value="external">🌐 External IMS Core (Pass-Through via 5G Core N5/Rx)</option>
+                                    </select>
+                                  </div>
+                                  {imsMode === 'external' && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                                      <span style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>P-CSCF IP:Port:</span>
+                                      <input 
+                                        type="text" 
+                                        value={pcscfIp} 
+                                        onChange={(e) => setPcscfIp(e.target.value)} 
+                                        disabled={isCallActive}
+                                        placeholder="10.200.200.1:5060"
+                                        style={{ flex: 1, padding: '2px 4px', borderRadius: '3px', background: '#0b0f19', border: '1px solid var(--border-color)', color: '#ffffff', fontSize: '10px', fontFamily: 'monospace' }}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+
                                 <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
                                   <select 
                                     value={vonrCallee} 
@@ -4899,6 +4942,9 @@ export default function App() {
                                       </div>
                                       <div style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '4px' }}>
                                         Target: {activeCall.calleeId === 'echo' ? 'SIP Voice Echo (UDP :5004<->:5005)' : `UE-${activeCall.calleeId}`}
+                                      </div>
+                                      <div style={{ fontSize: '9px', color: '#60a5fa', fontFamily: 'monospace', marginTop: '2px', background: 'rgba(96,165,250,0.08)', padding: '2px 4px', borderRadius: '3px' }}>
+                                        Path: {activeCall.signalingPath || (imsMode === 'external' ? `External IMS (P-CSCF ${pcscfIp} via 5G Core N5/Rx)` : 'Internal Standalone Engine (OmniRAN Emulated P-CSCF)')}
                                       </div>
                                       {activeCall.status === 'connected' && (
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
@@ -5518,22 +5564,31 @@ export default function App() {
                             </td>
                             <td style={{ padding: '10px' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                {ue.pduSessions && ue.pduSessions.map((pdu: any) => (
-                                  <div key={pdu.id} style={{ fontSize: '12px', fontFamily: 'monospace' }}>
-                                    <span style={{ color: 'var(--color-info)' }}>PDU #{pdu.id} ({pdu.dnn}):</span> {pdu.ueIp || 'Pending...'}
-                                    <span style={{ 
-                                      marginLeft: '6px',
-                                      padding: '1px 4px', 
-                                      borderRadius: '3px', 
-                                      fontSize: '9px', 
-                                      fontWeight: 'bold', 
-                                      background: pdu.state === 8 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)', 
-                                      color: pdu.state === 8 ? 'var(--color-success)' : 'var(--color-warning)' 
-                                    }}>
-                                      {pdu.stateDesc}
-                                    </span>
-                                  </div>
-                                ))}
+                                {ue.pduSessions && ue.pduSessions.map((pdu: any) => {
+                                  const isPduError = !!pdu.error;
+                                  const isPduActive = !isPduError && (pdu.state === 8 || (pdu.stateDesc?.includes('ACTIVE') && !pdu.stateDesc?.includes('PENDING')));
+                                  return (
+                                    <div key={pdu.id} style={{ fontSize: '12px', fontFamily: 'monospace' }}>
+                                      <span style={{ color: 'var(--color-info)' }}>PDU #{pdu.id} ({pdu.dnn}):</span> {pdu.ueIp || (isPduError ? 'Rejected' : 'Pending...')}
+                                      <span style={{ 
+                                        marginLeft: '6px',
+                                        padding: '1px 4px', 
+                                        borderRadius: '3px', 
+                                        fontSize: '9px', 
+                                        fontWeight: 'bold', 
+                                        background: isPduActive ? 'rgba(16, 185, 129, 0.12)' : isPduError ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.12)', 
+                                        color: isPduActive ? 'var(--color-success)' : isPduError ? '#f87171' : 'var(--color-warning)' 
+                                      }}>
+                                        {isPduError ? 'REJECTED' : pdu.stateDesc}
+                                      </span>
+                                      {pdu.error && (
+                                        <div style={{ fontSize: '10px', color: '#f87171', marginTop: '2px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '3px 6px', borderRadius: '3px', whiteSpace: 'normal', fontFamily: 'sans-serif' }}>
+                                          ⚠️ {pdu.error}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </td>
                             <td style={{ padding: '10px', textAlign: 'right' }}>
@@ -7190,21 +7245,27 @@ export default function App() {
                               )}
                               {u.pduSessions?.length > 0 && (
                                 <div className="fleet-pdu-list">
-                                  {u.pduSessions.map((s: any) => (
-                                    <div key={s.id} style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '2px' }}>
-                                      <div className="fleet-pdu-item">
-                                        <span>PDU-{s.id}</span>
-                                        <code>{s.ueIp || '—'}</code>
-                                        <span className="fleet-tag">{s.dnn}</span>
-                                        <span className={`fleet-state-badge sm ${s.stateDesc?.includes('ACTIVE') ? 'registered' : 'pending'}`}>{s.stateDesc}</span>
-                                      </div>
-                                      {s.error && (
-                                        <div style={{ fontSize: '9px', color: '#f87171', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '2px 4px', borderRadius: '3px' }}>
-                                          ⚠️ {s.error}
+                                  {u.pduSessions.map((s: any) => {
+                                    const isPduError = !!s.error;
+                                    const isPduActive = !isPduError && s.stateDesc?.includes('ACTIVE') && !s.stateDesc?.includes('PENDING');
+                                    return (
+                                      <div key={s.id} style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '2px' }}>
+                                        <div className="fleet-pdu-item">
+                                          <span>PDU-{s.id}</span>
+                                          <code>{s.ueIp || '—'}</code>
+                                          <span className="fleet-tag">{s.dnn}</span>
+                                          <span className={`fleet-state-badge sm ${isPduActive ? 'registered' : isPduError ? 'danger' : 'pending'}`}>
+                                            {isPduError ? 'REJECTED' : s.stateDesc}
+                                          </span>
                                         </div>
-                                      )}
-                                    </div>
-                                  ))}
+                                        {s.error && (
+                                          <div style={{ fontSize: '9px', color: '#f87171', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '4px 6px', borderRadius: '3px', marginTop: '2px', lineHeight: '1.3' }}>
+                                            ⚠️ {s.error}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>

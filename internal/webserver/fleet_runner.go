@@ -355,6 +355,13 @@ func GetFleetRunningSummary() FleetRunningSummary {
 
 		pduSessions := make([]PDUSessionStatus, 0)
 		for _, sess := range u.PduSessions {
+			// Evaluate PDU session establishment timeout
+			if sess.State == ueContext.SM5G_PDU_SESSION_ACTIVE_PENDING && !sess.RequestedAt.IsZero() && time.Since(sess.RequestedAt) > 4*time.Second {
+				sess.State = ueContext.SM5G_PDU_SESSION_INACTIVE
+				sess.Error = fmt.Sprintf("PDU Session #%d Establishment Timed Out: AMF/SMF Core network did not send PDUSessionResourceSetupRequest or 5GSM Accept within 4s. Verify Core DNN ('%s'), S-NSSAI (SST: %d, SD: %s), UPF N4 tunnel, or gNB N3 GTP interface (2152).", sess.Id, sess.Dnn, sess.Snssai.Sst, sess.Snssai.Sd)
+				u.SetSMError(sess.Error)
+			}
+
 			pduSessions = append(pduSessions, PDUSessionStatus{
 				ID:             sess.Id,
 				UeIP:           u.GetIp(sess.Id),

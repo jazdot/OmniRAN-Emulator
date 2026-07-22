@@ -2,10 +2,11 @@ package service
 
 import (
 	"fmt"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/ipv4"
-	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 	"net"
+	"golang.org/x/net/ipv4"
+	log "github.com/sirupsen/logrus"
+	"OmniRAN-Emulator/config"
+	"OmniRAN-Emulator/internal/control_test_engine/gnb/context"
 )
 
 func InitGatewayGnb(gnb *context.GNBContext) error {
@@ -71,7 +72,11 @@ func processingData(ue *context.GNBUe, gnb *context.GNBContext, srcIp string, pa
 	// get GTP/UDP connection.
 	conn := gnb.GetN3Plane()
 	if conn == nil {
-		log.Info("[GNB][GTP] N3 GTP/UDP is not setting")
+		errMsg := fmt.Sprintf("[GNB][GTP] N3 GTP/UDP user-plane socket is not active on gNodeB %s. User-plane data forwarding to UPF (2152) requires N3 tunnel setup.", gnb.GetGnbId())
+		log.Warn(errMsg)
+		if config.ProtocolErrorHook != nil {
+			config.ProtocolErrorHook("N3GTP", errMsg)
+		}
 		return
 	}
 

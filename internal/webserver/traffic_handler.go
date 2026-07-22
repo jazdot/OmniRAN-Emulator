@@ -45,6 +45,8 @@ type ActiveCall struct {
 	CallerID      uint8     `json:"callerId"`
 	CalleeID      string    `json:"calleeId"` // UE ID or "echo"
 	Status        string    `json:"status"`   // "dialing", "ringing", "connected", "disconnected"
+	ImsMode       string    `json:"imsMode"`  // "internal" or "external"
+	SignalingPath string    `json:"signalingPath"`
 	CallDuration  int       `json:"callDuration"`
 	PacketsSent   int64     `json:"packetsSent"`
 	PacketsRecv   int64     `json:"packetsRecv"`
@@ -53,7 +55,7 @@ type ActiveCall struct {
 	PacketLossPct float64   `json:"packetLossPct"`
 	MosScore      float64   `json:"mosScore"`
 	SipLogs       []string  `json:"sipLogs"`
-	StartedAt     time.Time
+	StartedAt     time.Time `json:"startedAt"`
 	cancel        context.CancelFunc
 	mu            sync.Mutex
 }
@@ -385,6 +387,8 @@ func runStreamSimulation(ctx context.Context, s *ActiveStream) {
 type UEVonrDialRequest struct {
 	CallerID uint8  `json:"callerId"`
 	CalleeID string `json:"calleeId"` // "echo" or another UE ID (e.g. "102")
+	ImsMode  string `json:"imsMode"`  // "internal" or "external"
+	PcscfIp  string `json:"pcscfIp"`  // e.g. "10.200.200.1:5060"
 }
 
 var (
@@ -569,13 +573,24 @@ func handleUEVonrDial(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	sigPath := "Internal Standalone Engine (OmniRAN SIP Emulation)"
+	if req.ImsMode == "external" {
+		pcscf := req.PcscfIp
+		if pcscf == "" {
+			pcscf = "127.0.0.1:5060"
+		}
+		sigPath = fmt.Sprintf("External IMS Core (P-CSCF %s via 5G Core N5/Rx)", pcscf)
+	}
+
 	c := &ActiveCall{
-		CallerID:  req.CallerID,
-		CalleeID:  req.CalleeID,
-		Status:    "dialing",
-		SipLogs:   []string{"[SIP] Sending SIP INVITE to Voice Core..."},
-		StartedAt: time.Now(),
-		cancel:    cancel,
+		CallerID:      req.CallerID,
+		CalleeID:      req.CalleeID,
+		Status:        "dialing",
+		ImsMode:       req.ImsMode,
+		SignalingPath: sigPath,
+		SipLogs:       []string{fmt.Sprintf("[SIP] Initiating SIP INVITE via %s...", sigPath)},
+		StartedAt:     time.Now(),
+		cancel:        cancel,
 	}
 	activeCalls[req.CallerID] = c
 
