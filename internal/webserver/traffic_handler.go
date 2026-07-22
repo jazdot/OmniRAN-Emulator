@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"net"
 	"net/http"
@@ -149,29 +150,17 @@ func handleUEPing(w http.ResponseWriter, r *http.Request) {
 	ifName := fmt.Sprintf("uetun%d", req.UeID)
 	logrus.Infof("[WEB][TRAFFIC] Ping requested on UE %d (%s) to host %s", req.UeID, ifName, host)
 
-	// Try running a real ping bound to the interface
+	// Execute real ping bound to interface
 	cmd := exec.Command("ping", "-I", ifName, "-c", "4", "-W", "2", host)
 	out, err := cmd.CombinedOutput()
 
-	resp := UEPingResponse{}
+	resp := UEPingResponse{Mode: "real"}
 	if err == nil {
 		resp.Success = true
 		resp.Output = string(out)
-		resp.Mode = "real"
 	} else {
-		// Fallback to simulated ping to make it failproof in mock/disconnected setups
-		resp.Success = true
-		resp.Mode = "simulated"
-		resp.Output = fmt.Sprintf("PING %s (%s) from uetun%d: 56(84) bytes of data.\n"+
-			"64 bytes from %s: icmp_seq=1 ttl=64 time=14.5 ms\n"+
-			"64 bytes from %s: icmp_seq=2 ttl=64 time=16.1 ms\n"+
-			"64 bytes from %s: icmp_seq=3 ttl=64 time=15.0 ms\n"+
-			"64 bytes from %s: icmp_seq=4 ttl=64 time=15.4 ms\n\n"+
-			"--- %s ping statistics ---\n"+
-			"4 packets transmitted, 4 received, 0%% packet loss, time 3004ms\n"+
-			"rtt min/avg/max/mdev = 14.502/15.250/16.120/0.590 ms\n"+
-			"(Core simulation mode fallback: Real ping execution failed)",
-			host, host, req.UeID, host, host, host, host, host)
+		resp.Success = false
+		resp.Output = fmt.Sprintf("Ping Execution Failed on %s: %v\nOutput:\n%s", ifName, err, string(out))
 	}
 
 	_ = json.NewEncoder(w).Encode(resp)
@@ -225,12 +214,14 @@ func handleUEHttp(w http.ResponseWriter, r *http.Request) {
 	logrus.Infof("[WEB][TRAFFIC] HTTP Fetch on UE %d (IP: %s) to URL: %s", req.UeID, ueIp, url)
 
 	start := time.Now()
-	resp := UEHttpFetchResponse{}
+	resp := UEHttpFetchResponse{Mode: "real"}
 
 	// Setup Dialer bound to the UE's IP
-	localAddr := &net.TCPAddr{
-		IP: net.ParseIP(ueIp),
+	localAddr := &net.TCPAddr{}
+	if ueIp != "" && ueIp != "N/A" {
+		localAddr.IP = net.ParseIP(ueIp)
 	}
+
 	dialer := &net.Dialer{
 		LocalAddr: localAddr,
 		Timeout:   4 * time.Second,
@@ -248,7 +239,7 @@ func handleUEHttp(w http.ResponseWriter, r *http.Request) {
 		defer httpResp.Body.Close()
 		elapsed := time.Since(start).Milliseconds()
 
-		// Read some of the body
+		// Read body
 		bodyBuf := make([]byte, 1020)
 		n, _ := httpResp.Body.Read(bodyBuf)
 		bodyStr := string(bodyBuf[:n])
@@ -267,20 +258,13 @@ func handleUEHttp(w http.ResponseWriter, r *http.Request) {
 		resp.Headers = headerBuilder.String()
 		resp.Body = bodyStr
 		resp.TimeMs = elapsed
-		resp.Mode = "real"
 	} else {
-		// Fallback to simulated HTTP fetch
-		elapsed := rand.Int63n(150) + 80
-		resp.Success = true
-		resp.StatusCode = 200
-		resp.Headers = "Date: " + time.Now().Format(time.RFC1123) + "\n" +
-			"Server: Omni5G-Edge-Gateway/v1.0.1\n" +
-			"Content-Type: text/html; charset=UTF-8\n" +
-			"Content-Length: 354\n" +
-			"Connection: close"
-		resp.Body = fmt.Sprintf("<!DOCTYPE html>\n<html>\n<head>\n  <title>Omni5G Core Edge Simulator</title>\n</head>\n<body>\n  <h1>Welcome to example website!</h1>\n  <p>This page was fetched cleanly via the simulated user-plane network data path of <strong>UE-%d</strong> (Interface: <em>uetun%d</em>).</p>\n  <p>Core network simulation mode: fallback mock enabled.</p>\n</body>\n</html>", req.UeID, req.UeID)
+		elapsed := time.Since(start).Milliseconds()
+		resp.Success = false
+		resp.StatusCode = 0
+		resp.Headers = "HTTP Connection Failed"
+		resp.Body = fmt.Sprintf("HTTP Fetch Failed on UE %d (%s): %v", req.UeID, ueIp, err)
 		resp.TimeMs = elapsed
-		resp.Mode = "simulated"
 	}
 
 	_ = json.NewEncoder(w).Encode(resp)
@@ -442,6 +426,8 @@ func startVoiceEchoServer() {
 }
 
 func startRealRtpLoop(ctx context.Context, c *ActiveCall, localIP, remoteIP string, localPort, remotePort int, appendLog func(string)) {
+	startVoiceEchoServer()
+
 	lAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", localIP, localPort))
 	if err != nil {
 		appendLog(fmt.Sprintf("RTP UDP local address resolve error: %v", err))
@@ -476,7 +462,7 @@ func startRealRtpLoop(ctx context.Context, c *ActiveCall, localIP, remoteIP stri
 					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 						continue
 					}
-					return // Socket closed or error, exit receiver
+					return
 				}
 				if n >= 20 {
 					c.mu.Lock()
@@ -486,16 +472,19 @@ func startRealRtpLoop(ctx context.Context, c *ActiveCall, localIP, remoteIP stri
 					sentNano := int64(binary.BigEndian.Uint64(buf[12:20]))
 					if sentNano > 0 {
 						rttMs := float64(time.Now().UnixNano()-sentNano) / 1e6
-						if rttMs > 0 && rttMs < 5000 {
-							// Update Jitter (RFC 3550 style estimate)
+						if rttMs >= 0 && rttMs < 5000 {
 							if c.LatencyMs > 0 {
 								diff := rttMs - c.LatencyMs
 								if diff < 0 {
 									diff = -diff
 								}
 								c.JitterMs = c.JitterMs + (diff-c.JitterMs)/16.0
+							} else {
+								c.LatencyMs = rttMs
 							}
-							c.LatencyMs = rttMs
+							if rttMs > 0 {
+								c.LatencyMs = rttMs
+							}
 						}
 					}
 					c.mu.Unlock()
@@ -504,15 +493,18 @@ func startRealRtpLoop(ctx context.Context, c *ActiveCall, localIP, remoteIP stri
 		}
 	}()
 
-	// Start packet sender
-	ticker := time.NewTicker(20 * time.Millisecond) // 50 packets/sec
+	// Start packet sender with real 440 Hz PCM voice audio frame synthesis
+	ticker := time.NewTicker(20 * time.Millisecond) // 50 packets/sec (20ms frames)
 	defer ticker.Stop()
 
-	rtpHeader := make([]byte, 40)
-	rtpHeader[0] = 0x80 // RFC 1889 Version 2
-	rtpHeader[1] = 0x60 // AMR-WB payload type
+	// 12-byte RTP header + 8-byte nano timestamp + 160-byte 8kHz 8-bit PCM audio payload (180 bytes total)
+	rtpPacket := make([]byte, 180)
+	rtpPacket[0] = 0x80 // RFC 1889 Version 2
+	rtpPacket[1] = 0x60 // AMR-WB / G.711 PCMU payload type
 
 	var seq uint16 = 0
+	var sampleIndex int = 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -523,14 +515,22 @@ func startRealRtpLoop(ctx context.Context, c *ActiveCall, localIP, remoteIP stri
 			c.mu.Unlock()
 
 			// Put sequence number (bytes 2-3)
-			binary.BigEndian.PutUint16(rtpHeader[2:4], seq)
+			binary.BigEndian.PutUint16(rtpPacket[2:4], seq)
 			seq++
 
 			// Put timestamp in payload (bytes 12-20)
 			nowNano := time.Now().UnixNano()
-			binary.BigEndian.PutUint64(rtpHeader[12:20], uint64(nowNano))
+			binary.BigEndian.PutUint64(rtpPacket[12:20], uint64(nowNano))
 
-			_, _ = conn.WriteTo(rtpHeader, rAddr)
+			// Synthesize 160 samples (20ms at 8kHz) of real 440 Hz audio waveform in payload (bytes 20-180)
+			for i := 0; i < 160; i++ {
+				t := float64(sampleIndex+i) / 8000.0
+				sampleVal := math.Sin(2.0 * math.Pi * 440.0 * t)
+				rtpPacket[20+i] = byte(128 + int(sampleVal*120.0))
+			}
+			sampleIndex += 160
+
+			_, _ = conn.WriteTo(rtpPacket, rAddr)
 		}
 	}
 }
@@ -608,68 +608,64 @@ func runVonrCallSimulation(ctx context.Context, c *ActiveCall, uCaller *ueContex
 
 	// Determine if we can do real UDP connection
 	callerIP := strings.Split(uCaller.GetFirstActiveIP(), ",")[0]
-	isRealUdpExchange := false
-
 	var localIP, remoteIP string
 	var localPort, remotePort int
 
-	if callerIP != "" {
-		if c.CalleeID == "echo" {
-			localIP = callerIP
-			remoteIP = "127.0.0.2"
-			localPort = 5004
-			remotePort = 5005
-			isRealUdpExchange = true
-			appendLog(fmt.Sprintf("Established real user-plane VoNR voice echo loop: %s:5004 <-> %s:5005", localIP, remoteIP))
-		} else {
-			calleeIdInt, err := strconv.Atoi(c.CalleeID)
-			if err == nil {
-				uCallee := ueContext.GetActiveUE(uint8(calleeIdInt))
-				if uCallee != nil {
-					calleeIP := strings.Split(uCallee.GetFirstActiveIP(), ",")[0]
-					if calleeIP != "" {
-						localIP = callerIP
-						remoteIP = calleeIP
-						localPort = 5004
-						remotePort = 5004
-						isRealUdpExchange = true
-						appendLog(fmt.Sprintf("Established real peer-to-peer VoNR exchange: %s:5004 <-> %s:5004", localIP, remoteIP))
+	if callerIP == "" || callerIP == "N/A" {
+		callerIP = "127.0.0.1"
+	}
 
-						// Set callee status in activeCalls map
-						calleeIDUint := uint8(calleeIdInt)
-						calleeCall := &ActiveCall{
-							CallerID:  calleeIDUint,
-							CalleeID:  fmt.Sprintf("%d", c.CallerID),
-							Status:    "connected",
-							SipLogs: []string{
-								fmt.Sprintf("[%s] Incoming call from UE-%d...", time.Now().Format("15:04:05.000"), c.CallerID),
-								fmt.Sprintf("[%s] SIP/2.0 200 OK (Call Accepted)", time.Now().Format("15:04:05.000")),
-							},
-							StartedAt: c.StartedAt,
-							cancel:    c.cancel, // share cancel
-						}
-
-						callsMu.Lock()
-						activeCalls[calleeIDUint] = calleeCall
-						callsMu.Unlock()
-
-						// Start peer loop for callee in background
-						go startRealRtpLoop(ctx, calleeCall, calleeIP, callerIP, 5004, 5004, func(l string) {
-							calleeCall.mu.Lock()
-							calleeCall.SipLogs = append(calleeCall.SipLogs, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05.000"), l))
-							calleeCall.mu.Unlock()
-						})
-					}
+	if c.CalleeID == "echo" {
+		localIP = callerIP
+		remoteIP = "127.0.0.1"
+		localPort = 5004
+		remotePort = 5005
+		appendLog(fmt.Sprintf("Established real user-plane VoNR voice echo loop: %s:5004 <-> %s:5005", localIP, remoteIP))
+	} else {
+		calleeIdInt, err := strconv.Atoi(c.CalleeID)
+		if err == nil {
+			uCallee := ueContext.GetActiveUE(uint8(calleeIdInt))
+			calleeIP := "127.0.0.1"
+			if uCallee != nil {
+				rawC := strings.Split(uCallee.GetFirstActiveIP(), ",")[0]
+				if rawC != "" && rawC != "N/A" {
+					calleeIP = rawC
 				}
 			}
+			localIP = callerIP
+			remoteIP = calleeIP
+			localPort = 5004
+			remotePort = 5004
+			appendLog(fmt.Sprintf("Established real peer-to-peer VoNR exchange: %s:5004 <-> %s:5004", localIP, remoteIP))
+
+			// Set callee status in activeCalls map
+			calleeIDUint := uint8(calleeIdInt)
+			calleeCall := &ActiveCall{
+				CallerID:  calleeIDUint,
+				CalleeID:  fmt.Sprintf("%d", c.CallerID),
+				Status:    "connected",
+				SipLogs: []string{
+					fmt.Sprintf("[%s] Incoming call from UE-%d...", time.Now().Format("15:04:05.000"), c.CallerID),
+					fmt.Sprintf("[%s] SIP/2.0 200 OK (Call Accepted)", time.Now().Format("15:04:05.000")),
+				},
+				StartedAt: c.StartedAt,
+				cancel:    c.cancel, // share cancel
+			}
+
+			callsMu.Lock()
+			activeCalls[calleeIDUint] = calleeCall
+			callsMu.Unlock()
+
+			// Start peer loop for callee in background
+			go startRealRtpLoop(ctx, calleeCall, calleeIP, callerIP, 5004, 5004, func(l string) {
+				calleeCall.mu.Lock()
+				calleeCall.SipLogs = append(calleeCall.SipLogs, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05.000"), l))
+				calleeCall.mu.Unlock()
+			})
 		}
 	}
 
-	if isRealUdpExchange {
-		go startRealRtpLoop(ctx, c, localIP, remoteIP, localPort, remotePort, appendLog)
-	} else {
-		appendLog("Voice Core NAT Fallback: running RTP loop in simulated media mode")
-	}
+	go startRealRtpLoop(ctx, c, localIP, remoteIP, localPort, remotePort, appendLog)
 
 	// 2. Call Active Loop (updates durations, packet loss, and MOS scores)
 	ticker := time.NewTicker(1 * time.Second)
@@ -698,29 +694,13 @@ func runVonrCallSimulation(ctx context.Context, c *ActiveCall, uCaller *ueContex
 			c.mu.Lock()
 			c.CallDuration = int(time.Since(c.StartedAt).Seconds())
 
-			if !isRealUdpExchange {
-				// Sim mode: increment simulated packets
-				c.PacketsSent += 50
-				c.PacketsRecv += 50
-				c.LatencyMs = 12.0 + rand.Float64()*18.0
-				c.JitterMs = 1.2 + rand.Float64()*4.0
-				c.PacketLossPct = 0.0
-
-				// Occasional simulated network drops to show MOS score changes
-				if rand.Intn(20) == 0 {
-					c.PacketLossPct = 0.5 + rand.Float64()*2.0
-					c.JitterMs += 10
-					c.LatencyMs += 30
+			// Real mode: calculate packet loss from actual RTP socket counters
+			if c.PacketsSent > 0 {
+				loss := 100.0 * float64(c.PacketsSent-c.PacketsRecv) / float64(c.PacketsSent)
+				if loss < 0 {
+					loss = 0
 				}
-			} else {
-				// Real mode: calculate packet loss
-				if c.PacketsSent > 0 {
-					loss := 100.0 * float64(c.PacketsSent-c.PacketsRecv) / float64(c.PacketsSent)
-					if loss < 0 {
-						loss = 0
-					}
-					c.PacketLossPct = loss
-				}
+				c.PacketLossPct = loss
 			}
 
 			// MOS Score Calculation

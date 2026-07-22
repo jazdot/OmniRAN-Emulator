@@ -303,13 +303,16 @@ func LaunchUEFromProfile(profileName string, targetGnbProfile string) (uint8, er
 	trigger.InitRegistration(u)
 	logrus.Infof("[FLEET][UE %d] Registration procedure initiated (SUPI: %s)", ueID, u.GetSupi())
 
-	// Wait up to 2.5s to verify 5GMM registration outcome
+	// Wait up to 3.5s to verify 5GMM registration and PDU Session outcome
 	startWait := time.Now()
-	for time.Since(startWait) < 2500*time.Millisecond {
+	for time.Since(startWait) < 3500*time.Millisecond {
 		if u.GetStateMM() == 0x01 { // 5GMM-REGISTERED
-			break
+			defaultSess := u.GetPduSession(1)
+			if defaultSess != nil && (defaultSess.State == ueContext.SM5G_PDU_SESSION_ACTIVE || defaultSess.Error != "") {
+				break
+			}
 		}
-		if u.GetMMError() != "" {
+		if u.GetMMError() != "" || u.GetSMError() != "" {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -323,6 +326,12 @@ func LaunchUEFromProfile(profileName string, targetGnbProfile string) (uint8, er
 		u.Terminate()
 		ueContext.UnregisterUE(ueID)
 		return 0, fmt.Errorf("UE %d Registration Failed: %s", ueID, errMsg)
+	}
+
+	// Check PDU Session outcome
+	defaultSess := u.GetPduSession(1)
+	if defaultSess != nil && defaultSess.Error != "" {
+		logrus.Warnf("[FLEET] UE %d registered but PDU Session failed: %s", ueID, defaultSess.Error)
 	}
 
 	logrus.Infof("[FLEET] Successfully launched UE profile '%s' as UE ID %d (SUPI: %s)", profileName, ueID, u.GetSupi())
@@ -355,6 +364,7 @@ func GetFleetRunningSummary() FleetRunningSummary {
 				Sd:             sess.Snssai.Sd,
 				State:          sess.State,
 				StateDesc:      ueContext.GetStateSMDesc(sess.State),
+				Error:          sess.Error,
 			})
 		}
 		ueStatuses = append(ueStatuses, UEStatus{
@@ -373,6 +383,8 @@ func GetFleetRunningSummary() FleetRunningSummary {
 			GnbProfileName:   u.GetGnbProfileName(),
 			PduSessions:      pduSessions,
 			ConnectionState:  getUeConnectionState(u),
+			MmError:          u.GetMMError(),
+			SmError:          u.GetSMError(),
 		})
 	}
 	sort.Slice(ueStatuses, func(i, j int) bool {

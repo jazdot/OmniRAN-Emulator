@@ -904,6 +904,8 @@ type UEStatus struct {
 	GnbProfileName   string             `json:"gnbProfileName"`
 	PduSessions      []PDUSessionStatus `json:"pduSessions"`
 	ConnectionState  string             `json:"connectionState"` // "CONNECTED" or "IDLE"
+	MmError          string             `json:"mmError,omitempty"`
+	SmError          string             `json:"smError,omitempty"`
 }
 
 func getUeConnectionState(u *ueContext.UEContext) string {
@@ -941,6 +943,7 @@ type PDUSessionStatus struct {
 	Sd             string `json:"sd"`
 	State          int    `json:"state"`
 	StateDesc      string `json:"stateDesc"`
+	Error          string `json:"error,omitempty"`
 }
 
 type ActionRequest struct {

@@ -51,6 +51,7 @@ type UEContext struct {
 	gnbId          string
 	gnbProfileName string
 	mmErr          string
+	smErr          string
 	OnRedirection  func(ue *UEContext)
 }
 
@@ -60,6 +61,14 @@ func (ue *UEContext) SetMMError(err string) {
 
 func (ue *UEContext) GetMMError() string {
 	return ue.mmErr
+}
+
+func (ue *UEContext) SetSMError(err string) {
+	ue.smErr = err
+}
+
+func (ue *UEContext) GetSMError() string {
+	return ue.smErr
 }
 
 type Amf struct {
@@ -80,6 +89,7 @@ type PDUSession struct {
 	routeTun       []netlink.Route
 	ruleTun        []netlink.Rule
 	State          int
+	Error          string
 }
 
 type SECURITY struct {

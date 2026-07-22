@@ -163,6 +163,71 @@ func HandlerRegistrationAccept(ue *context.UEContext, message *nas.Message) {
 	sender.SendToGnb(ue, ulNasTransport)
 }
 
+func Get5GSMCauseDesc(cause uint8) string {
+	switch cause {
+	case 8:
+		return "Operator determined barring"
+	case 26:
+		return "Insufficient resources"
+	case 27:
+		return "Missing or unknown DNN"
+	case 28:
+		return "Unknown PDU session type"
+	case 29:
+		return "User authentication failed"
+	case 31:
+		return "Request rejected by Serving GW or PDN GW / SMF"
+	case 32:
+		return "Service option not supported"
+	case 33:
+		return "Requested service option not subscribed"
+	case 35:
+		return "PTI already in use"
+	case 38:
+		return "Network failure"
+	case 43:
+		return "Invalid PDU session identity"
+	case 44:
+		return "Semantic error in the TFT operation"
+	case 45:
+		return "Syntactical error in the TFT operation"
+	case 50:
+		return "PDU session type IPv4 only allowed"
+	case 51:
+		return "PDU session type IPv6 only allowed"
+	case 54:
+		return "PDU session does not exist"
+	case 65:
+		return "Maximum number of PDU sessions reached"
+	case 67:
+		return "Insufficient resources for specific slice and DNN"
+	case 68:
+		return "Not supported SST/SD"
+	case 69:
+		return "Maximum number of PDU sessions reached for slice"
+	case 70:
+		return "Insufficient resources for specific slice"
+	case 95:
+		return "Semantically incorrect message"
+	case 96:
+		return "Invalid mandatory information"
+	case 97:
+		return "Message type non-existent or not implemented"
+	case 98:
+		return "Message type not compatible with protocol state"
+	case 99:
+		return "Information element non-existent or not implemented"
+	case 100:
+		return "Conditional IE error"
+	case 101:
+		return "Message not compatible with protocol state"
+	case 111:
+		return "Protocol error, unspecified"
+	default:
+		return fmt.Sprintf("5GSM Cause #%d", cause)
+	}
+}
+
 func HandlerDlNasTransportPduaccept(ue *context.UEContext, message *nas.Message) {
 
 	//getting PDU Session establishment accept or release.
@@ -181,11 +246,28 @@ func HandlerDlNasTransportPduaccept(ue *context.UEContext, message *nas.Message)
 		pduSessionId := payloadContainer.PDUSessionEstablishmentAccept.PDUSessionID.GetPDUSessionID()
 
 		// update PDU Session state to active.
-		ue.GetPduSession(pduSessionId).State = context.SM5G_PDU_SESSION_ACTIVE
+		sess := ue.GetPduSession(pduSessionId)
+		if sess != nil {
+			sess.State = context.SM5G_PDU_SESSION_ACTIVE
+			sess.Error = "" // clear previous errors
+		}
 
 		// get UE ip
 		UeIp := payloadContainer.PDUSessionEstablishmentAccept.GetPDUAddressInformation()
 		ue.SetIp(pduSessionId, UeIp)
+	} else if msgType == nas.MsgTypePDUSessionEstablishmentReject {
+		pduSessionId := payloadContainer.PDUSessionEstablishmentReject.PDUSessionID.GetPDUSessionID()
+		cause := payloadContainer.PDUSessionEstablishmentReject.Cause5GSM.GetCauseValue()
+		desc := Get5GSMCauseDesc(cause)
+		errMsg := fmt.Sprintf("PDU Session #%d Rejected by SMF: 5GSM Cause #%d (%s)", pduSessionId, cause, desc)
+		log.Warnf("[UE][NAS] %s", errMsg)
+
+		sess := ue.GetPduSession(pduSessionId)
+		if sess != nil {
+			sess.State = context.SM5G_PDU_SESSION_INACTIVE
+			sess.Error = errMsg
+		}
+		ue.SetSMError(errMsg)
 	} else if msgType == nas.MsgTypePDUSessionReleaseCommand {
 		log.Info("[UE][NAS] Receiving PDU Session Release Command")
 

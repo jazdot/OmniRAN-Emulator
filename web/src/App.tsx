@@ -303,7 +303,9 @@ interface RunningUE {
   gnbId?: string;
   gnbProfileName?: string;
   amfUeNgapId?: number;
-  pduSessions: { id: number; ueIp: string; dnn: string; stateDesc: string }[];
+  mmError?: string;
+  smError?: string;
+  pduSessions: { id: number; ueIp: string; dnn: string; stateDesc: string; error?: string }[];
 }
 
 interface PcapEvent {
@@ -1936,6 +1938,41 @@ export default function App() {
   const [videoQuality, setVideoQuality] = useState('1080p');
   const [vonrCallee, setVonrCallee] = useState('echo');
   const [vonrActiveCall, setVonrActiveCall] = useState<any>(null);
+  const [audioMuted, setAudioMuted] = useState(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    const isCallConnected = vonrActiveCall?.status === 'connected' || Object.values(trafficStats || {}).some((t: any) => t?.vonrCall?.status === 'connected');
+    if (isCallConnected && !audioMuted) {
+      try {
+        if (!audioCtxRef.current) {
+          const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(440, ctx.currentTime); // 440Hz voice tone
+          gain.gain.setValueAtTime(0.04, ctx.currentTime);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          audioCtxRef.current = ctx;
+        }
+      } catch (e) {
+        console.warn("WebAudio context failed", e);
+      }
+    } else {
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
+    }
+    return () => {
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
+    };
+  }, [vonrActiveCall?.status, trafficStats, audioMuted]);
 
   // Secondary PDU and Handover inputs
   const [newPduId, setNewPduId] = useState(2);
@@ -4500,6 +4537,18 @@ export default function App() {
 
                           {inspectorTab === 'details' && (
                             <div className="inspector-details" style={{ maxHeight: '380px', overflowY: 'auto' }}>
+                              {activeUe.mmError && (
+                                <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px', fontSize: '11px', color: '#f87171', lineHeight: '1.4' }}>
+                                  <strong style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' }}><AlertTriangle size={13} /> 5GMM Registration Error:</strong>
+                                  <div>{activeUe.mmError}</div>
+                                </div>
+                              )}
+                              {activeUe.smError && (
+                                <div style={{ background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px', fontSize: '11px', color: '#fbbf24', lineHeight: '1.4' }}>
+                                  <strong style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' }}><AlertTriangle size={13} /> 5GSM PDU Session Error:</strong>
+                                  <div>{activeUe.smError}</div>
+                                </div>
+                              )}
                               <div className="detail-row">
                                 <span className="detail-label">SUPI</span>
                                 <span className="detail-val font-mono">{activeUe.supi}</span>
@@ -4553,6 +4602,11 @@ export default function App() {
                                             <span className="font-mono ml-auto" style={{ marginRight: '6px' }}>{s.ueIp || '—'}</span>
                                             <span className={`fleet-state-badge sm ${isActive ? 'registered' : 'pending'}`}>{s.stateDesc}</span>
                                           </div>
+                                          {s.error && (
+                                            <div style={{ fontSize: '10px', color: '#f87171', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '4px 6px', borderRadius: '4px', marginTop: '2px' }}>
+                                              ⚠️ Cause: {s.error}
+                                            </div>
+                                          )}
                                           {isActive && (
                                             <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '2px' }}>
                                               <button 
@@ -4813,20 +4867,58 @@ export default function App() {
                                     
                                     {/* Call active stats screen */}
                                     <div className="vonr-status-screen">
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <div className={activeCall.status === 'ringing' || activeCall.status === 'dialing' ? 'vonr-ringing' : ''}>
-                                          <Phone size={14} color={activeCall.status === 'connected' ? '#10b981' : '#f59e0b'} />
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                          <div className={activeCall.status === 'ringing' || activeCall.status === 'dialing' ? 'vonr-ringing' : ''}>
+                                            <Phone size={14} color={activeCall.status === 'connected' ? '#10b981' : '#f59e0b'} />
+                                          </div>
+                                          <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                                            {activeCall.status}
+                                          </span>
                                         </div>
-                                        <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                                          {activeCall.status}
-                                        </span>
+                                        {activeCall.status === 'connected' && (
+                                          <button 
+                                            onClick={() => setAudioMuted(!audioMuted)}
+                                            style={{
+                                              background: audioMuted ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)',
+                                              border: `1px solid ${audioMuted ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'}`,
+                                              color: audioMuted ? '#f87171' : '#34d399',
+                                              padding: '2px 6px',
+                                              borderRadius: '4px',
+                                              fontSize: '10px',
+                                              fontWeight: 'bold',
+                                              cursor: 'pointer',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              gap: '4px'
+                                            }}
+                                          >
+                                            {audioMuted ? '🔇 Muted' : '🔊 Voice Stream Live'}
+                                          </button>
+                                        )}
                                       </div>
-                                      <div style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-                                        Target: {activeCall.calleeId === 'echo' ? 'SIP Voice Echo' : `UE-${activeCall.calleeId}`}
+                                      <div style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '4px' }}>
+                                        Target: {activeCall.calleeId === 'echo' ? 'SIP Voice Echo (UDP :5004<->:5005)' : `UE-${activeCall.calleeId}`}
                                       </div>
                                       {activeCall.status === 'connected' && (
-                                        <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#ffffff', fontFamily: 'monospace', marginTop: '2px' }}>
-                                          {Math.floor(activeCall.callDuration / 60)}:{(activeCall.callDuration % 60).toString().padStart(2, '0')}
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                                          <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#ffffff', fontFamily: 'monospace' }}>
+                                            {Math.floor(activeCall.callDuration / 60)}:{(activeCall.callDuration % 60).toString().padStart(2, '0')}
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '2px', height: '12px' }}>
+                                            {[40, 70, 100, 65, 85, 30, 90, 50].map((h, i) => (
+                                              <div 
+                                                key={i} 
+                                                style={{ 
+                                                  width: '3px', 
+                                                  height: audioMuted ? '2px' : `${h}%`, 
+                                                  background: 'var(--color-success)', 
+                                                  borderRadius: '1px',
+                                                  transition: 'height 0.15s ease' 
+                                                }} 
+                                              />
+                                            ))}
+                                          </div>
                                         </div>
                                       )}
                                     </div>
@@ -7086,14 +7178,31 @@ export default function App() {
                               <div className="fleet-ue-detail"><span>SUPI</span><code>{u.supi}</code></div>
                               <div className="fleet-ue-detail"><span>Connected Cell</span><code>{u.gnbProfileName ? `${u.gnbProfileName} (${u.gnbId || '—'})` : u.gnbControlIp}</code></div>
                               <div className="fleet-ue-detail"><span>SM State</span><code>{u.stateSmDesc}</code></div>
+                              {(u as any).mmError && (
+                                <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '4px', padding: '4px 6px', fontSize: '10px', color: '#f87171', marginTop: '4px' }}>
+                                  ⚠️ 5GMM Error: {(u as any).mmError}
+                                </div>
+                              )}
+                              {(u as any).smError && (
+                                <div style={{ background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '4px', padding: '4px 6px', fontSize: '10px', color: '#fbbf24', marginTop: '4px' }}>
+                                  ⚠️ 5GSM Error: {(u as any).smError}
+                                </div>
+                              )}
                               {u.pduSessions?.length > 0 && (
                                 <div className="fleet-pdu-list">
-                                  {u.pduSessions.map(s => (
-                                    <div key={s.id} className="fleet-pdu-item">
-                                      <span>PDU-{s.id}</span>
-                                      <code>{s.ueIp || '—'}</code>
-                                      <span className="fleet-tag">{s.dnn}</span>
-                                      <span className={`fleet-state-badge sm ${s.stateDesc.includes('ACTIVE') ? 'registered' : 'pending'}`}>{s.stateDesc}</span>
+                                  {u.pduSessions.map((s: any) => (
+                                    <div key={s.id} style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '2px' }}>
+                                      <div className="fleet-pdu-item">
+                                        <span>PDU-{s.id}</span>
+                                        <code>{s.ueIp || '—'}</code>
+                                        <span className="fleet-tag">{s.dnn}</span>
+                                        <span className={`fleet-state-badge sm ${s.stateDesc?.includes('ACTIVE') ? 'registered' : 'pending'}`}>{s.stateDesc}</span>
+                                      </div>
+                                      {s.error && (
+                                        <div style={{ fontSize: '9px', color: '#f87171', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '2px 4px', borderRadius: '3px' }}>
+                                          ⚠️ {s.error}
+                                        </div>
+                                      )}
                                     </div>
                                   ))}
                                 </div>
