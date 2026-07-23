@@ -474,3 +474,87 @@ func CleanUpAll() {
 	runningGNBsMu.Unlock()
 }
 
+type BatchLaunchUERequest struct {
+	BaseProfileName  string `json:"baseProfileName"`
+	Count            int    `json:"count"`
+	TargetGnbProfile string `json:"targetGnbProfile"`
+	StartMsin        string `json:"startMsin,omitempty"`
+}
+
+// BatchLaunchUE creates and connects multiple UEs in a single request.
+func BatchLaunchUE(req BatchLaunchUERequest) ([]uint8, []string, error) {
+	if req.Count <= 0 || req.Count > 100 {
+		return nil, nil, fmt.Errorf("count must be between 1 and 100")
+	}
+
+	prof, ok := config.GetUEProfile(req.BaseProfileName)
+	if !ok {
+		return nil, nil, fmt.Errorf("base UE profile '%s' not found", req.BaseProfileName)
+	}
+
+	var successfulIDs []uint8
+	var errorsList []string
+
+	startMsinInt := 1
+	if req.StartMsin != "" {
+		fmt.Sscanf(req.StartMsin, "%d", &startMsinInt)
+	} else if prof.Msin != "" {
+		fmt.Sscanf(prof.Msin, "%d", &startMsinInt)
+	}
+
+	for i := 0; i < req.Count; i++ {
+		currentMsin := fmt.Sprintf("%010d", startMsinInt+i)
+		tempProfile := prof
+		tempProfile.Name = fmt.Sprintf("%s-batch-%d-%d", prof.Name, time.Now().UnixNano()%1000, i+1)
+		tempProfile.Msin = currentMsin
+
+		_ = config.UpsertUEProfile(tempProfile)
+		ueID, err := LaunchUEFromProfile(tempProfile.Name, req.TargetGnbProfile)
+		_ = config.DeleteUEProfile(tempProfile.Name)
+
+		if err != nil {
+			errorsList = append(errorsList, fmt.Sprintf("UE #%d (MSIN %s) failed: %v", i+1, currentMsin, err))
+		} else {
+			successfulIDs = append(successfulIDs, ueID)
+		}
+	}
+
+	return successfulIDs, errorsList, nil
+}
+
+// QuickStartAllGNBs starts all non-running gNB profiles.
+func QuickStartAllGNBs() (int, []string) {
+	fleet := config.GetFleet()
+	startedCount := 0
+	var errs []string
+
+	for _, prof := range fleet.GNBProfiles {
+		if !IsGNBProfileRunning(prof.Name) {
+			if err := LaunchGNBProfile(prof.Name); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", prof.Name, err))
+			} else {
+				startedCount++
+			}
+		}
+	}
+	return startedCount, errs
+}
+
+// QuickStopAllGNBs stops all running fleet gNBs.
+func QuickStopAllGNBs() int {
+	runningGNBsMu.RLock()
+	names := make([]string, 0, len(runningGNBs))
+	for name := range runningGNBs {
+		names = append(names, name)
+	}
+	runningGNBsMu.RUnlock()
+
+	stopped := 0
+	for _, name := range names {
+		if err := StopGNBProfile(name); err == nil {
+			stopped++
+		}
+	}
+	return stopped
+}
+

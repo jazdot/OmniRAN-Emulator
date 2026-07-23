@@ -225,6 +225,17 @@ func StartServer(host string, port int) error {
 	mux.HandleFunc("/api/fleet/stop/ue", withAuth(handleFleetStopUE))
 	mux.HandleFunc("/api/fleet/stop/gnb/", withAuth(handleFleetStopGNB))
 	mux.HandleFunc("/api/fleet/running", withAuth(handleFleetRunning))
+	mux.HandleFunc("/api/fleet/amf", withAuth(handleFleetAMFProfiles))
+	mux.HandleFunc("/api/fleet/amf/", withAuth(handleFleetAMFProfileDelete))
+	mux.HandleFunc("/api/fleet/slice", withAuth(handleFleetSliceProfiles))
+	mux.HandleFunc("/api/fleet/slice/", withAuth(handleFleetSliceProfileDelete))
+	mux.HandleFunc("/api/fleet/security", withAuth(handleFleetSecurityProfiles))
+	mux.HandleFunc("/api/fleet/security/", withAuth(handleFleetSecurityProfileDelete))
+	mux.HandleFunc("/api/fleet/batch-launch/ue", withAuth(handleFleetBatchLaunchUE))
+	mux.HandleFunc("/api/fleet/action/start-all-gnbs", withAuth(handleFleetStartAllGNBs))
+	mux.HandleFunc("/api/fleet/action/stop-all-gnbs", withAuth(handleFleetStopAllGNBs))
+	mux.HandleFunc("/api/fleet/config/export", withAuth(handleFleetExport))
+	mux.HandleFunc("/api/fleet/config/import", withAuth(handleFleetImport))
 	
 	// Diagnostics / PCAP API Routes (Wrapped in Authentication middleware)
 	mux.HandleFunc("/api/diagnostics/pcap/interfaces", withAuth(handleGetInterfaces))
@@ -1524,6 +1535,190 @@ func handleFleetRunning(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	summary := GetFleetRunningSummary()
 	_ = json.NewEncoder(w).Encode(summary)
+}
+
+func handleFleetAMFProfiles(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	switch r.Method {
+	case http.MethodGet:
+		fleet := config.GetFleet()
+		_ = json.NewEncoder(w).Encode(fleet.AMFProfiles)
+	case http.MethodPost:
+		var p config.AMFProfile
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := config.UpsertAMFProfile(p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleFleetAMFProfileDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := r.URL.Path[len("/api/fleet/amf/"):]
+	if err := config.DeleteAMFProfile(name); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+func handleFleetSliceProfiles(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	switch r.Method {
+	case http.MethodGet:
+		fleet := config.GetFleet()
+		_ = json.NewEncoder(w).Encode(fleet.SliceProfiles)
+	case http.MethodPost:
+		var p config.SliceProfile
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := config.UpsertSliceProfile(p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleFleetSliceProfileDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := r.URL.Path[len("/api/fleet/slice/"):]
+	if err := config.DeleteSliceProfile(name); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+func handleFleetSecurityProfiles(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	switch r.Method {
+	case http.MethodGet:
+		fleet := config.GetFleet()
+		_ = json.NewEncoder(w).Encode(fleet.SecurityProfiles)
+	case http.MethodPost:
+		var p config.SecurityProfile
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := config.UpsertSecurityProfile(p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleFleetSecurityProfileDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := r.URL.Path[len("/api/fleet/security/"):]
+	if err := config.DeleteSecurityProfile(name); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+func handleFleetBatchLaunchUE(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req BatchLaunchUERequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	ids, errs, err := BatchLaunchUE(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"successfulUeIds": ids,
+		"errors":          errs,
+	})
+}
+
+func handleFleetStartAllGNBs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	count, errs := QuickStartAllGNBs()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"startedCount": count,
+		"errors":       errs,
+	})
+}
+
+func handleFleetStopAllGNBs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	stopped := QuickStopAllGNBs()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"stoppedCount": stopped,
+	})
+}
+
+func handleFleetExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=fleet_export.json")
+	fleet := config.GetFleet()
+	_ = json.NewEncoder(w).Encode(fleet)
+}
+
+func handleFleetImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var fc config.FleetConfig
+	if err := json.NewDecoder(r.Body).Decode(&fc); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := config.ImportFleet(fc); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "imported"})
 }
 
 // handleCustomScenarioRun handles POST /api/scenarios/custom/run

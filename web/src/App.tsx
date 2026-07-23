@@ -33,7 +33,9 @@ import {
   Smartphone,
   CheckCircle2,
   RotateCcw,
-  Square
+  Square,
+  Zap,
+  Upload
 } from 'lucide-react';
 
 // API base path (works with relative path when served by Go, or proxied in dev)
@@ -2045,8 +2047,29 @@ export default function App() {
     amfIp: string;
     amfPort: number;
   }
-
-
+  interface AMFProfile {
+    name: string;
+    ip: string;
+    port: number;
+    mcc?: string;
+    mnc?: string;
+    description?: string;
+  }
+  interface SliceProfile {
+    name: string;
+    sst: number;
+    sd: string;
+    category?: string;
+    description?: string;
+  }
+  interface SecurityProfile {
+    name: string;
+    key: string;
+    opc: string;
+    amf: string;
+    sqn: string;
+    description?: string;
+  }
 
   const defaultUEProfile: UEProfile = {
     name: '', msin: '', key: '', opc: '', amf: '8000', sqn: '000000000000',
@@ -2061,13 +2084,28 @@ export default function App() {
 
   const [ueProfiles, setUEProfiles] = useState<UEProfile[]>([]);
   const [gnbProfiles, setGNBProfiles] = useState<GNBProfile[]>([]);
+  const [amfProfiles, setAMFProfiles] = useState<AMFProfile[]>([]);
+  const [sliceProfiles, setSliceProfiles] = useState<SliceProfile[]>([]);
+  const [securityProfiles, setSecurityProfiles] = useState<SecurityProfile[]>([]);
+
   const [showUEForm, setShowUEForm] = useState(false);
   const [showGNBForm, setShowGNBForm] = useState(false);
+  const [showAMFForm, setShowAMFForm] = useState(false);
+  const [showSliceForm, setShowSliceForm] = useState(false);
+  const [showSecurityForm, setShowSecurityForm] = useState(false);
+
   const [editingUE, setEditingUE] = useState<UEProfile>(defaultUEProfile);
   const [editingGNB, setEditingGNB] = useState<GNBProfile>(defaultGNBProfile);
+  const [editingAMF, setEditingAMF] = useState<AMFProfile>({ name: '', ip: '127.0.0.1', port: 38412, mcc: '208', mnc: '93', description: '' });
+  const [editingSlice, setEditingSlice] = useState<SliceProfile>({ name: '', sst: 1, sd: '010203', category: 'eMBB', description: '' });
+  const [editingSecurity, setEditingSecurity] = useState<SecurityProfile>({ name: '', key: '', opc: '', amf: '8000', sqn: '000000000020', description: '' });
+
+  const [batchForm, setBatchForm] = useState({ baseProfileName: '', count: 5, targetGnbProfile: '', startMsin: '0000000001' });
+  const [batchResults, setBatchResults] = useState<{ successfulUeIds: number[]; errors: string[] } | null>(null);
+
   const [fleetRunning, setFleetRunning] = useState<{ runningUes: RunningUE[]; runningGnbs: RunningGNB[] }>({ runningUes: [], runningGnbs: [] });
   const [fleetMsg, setFleetMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-  const [fleetActiveSection, setFleetActiveSection] = useState<'ue' | 'gnb' | 'live'>('ue');
+  const [fleetActiveSection, setFleetActiveSection] = useState<'live' | 'gnb' | 'ue' | 'batch' | 'library'>('live');
   const [ueToLaunch, setUeToLaunch] = useState<string | null>(null);
   const [selectedTargetGnb, setSelectedTargetGnb] = useState<string>('');
 
@@ -2561,13 +2599,167 @@ export default function App() {
 
   const fetchFleetProfiles = async () => {
     try {
-      const [ueRes, gnbRes] = await Promise.all([
+      const [ueRes, gnbRes, amfRes, sliceRes, secRes] = await Promise.all([
         fetch(`${API_BASE}/fleet/ue`),
-        fetch(`${API_BASE}/fleet/gnb`)
+        fetch(`${API_BASE}/fleet/gnb`),
+        fetch(`${API_BASE}/fleet/amf`),
+        fetch(`${API_BASE}/fleet/slice`),
+        fetch(`${API_BASE}/fleet/security`)
       ]);
       if (ueRes.ok) setUEProfiles(await ueRes.json());
       if (gnbRes.ok) setGNBProfiles(await gnbRes.json());
+      if (amfRes.ok) setAMFProfiles(await amfRes.json());
+      if (sliceRes.ok) setSliceProfiles(await sliceRes.json());
+      if (secRes.ok) setSecurityProfiles(await secRes.json());
     } catch {}
+  };
+
+  const saveAMFProfile = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/fleet/amf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingAMF)
+      });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`AMF profile '${editingAMF.name}' saved`, 'success');
+      setShowAMFForm(false);
+      fetchFleetProfiles();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const deleteAMFProfile = async (name: string) => {
+    if (!confirm(`Delete AMF Profile '${name}'?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/fleet/amf/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`AMF Profile '${name}' deleted`, 'success');
+      fetchFleetProfiles();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const saveSliceProfile = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/fleet/slice`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingSlice)
+      });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`Slice profile '${editingSlice.name}' saved`, 'success');
+      setShowSliceForm(false);
+      fetchFleetProfiles();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const deleteSliceProfile = async (name: string) => {
+    if (!confirm(`Delete Slice Profile '${name}'?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/fleet/slice/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`Slice Profile '${name}' deleted`, 'success');
+      fetchFleetProfiles();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const saveSecurityProfile = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/fleet/security`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingSecurity)
+      });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`Security profile '${editingSecurity.name}' saved`, 'success');
+      setShowSecurityForm(false);
+      fetchFleetProfiles();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const deleteSecurityProfile = async (name: string) => {
+    if (!confirm(`Delete Security Profile '${name}'?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/fleet/security/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      showFleetMsg(`Security Profile '${name}' deleted`, 'success');
+      fetchFleetProfiles();
+    } catch (e) { showFleetMsg(`Error: ${e}`, 'error'); }
+  };
+
+  const executeBatchLaunch = async () => {
+    if (!batchForm.baseProfileName) {
+      showFleetMsg('Please select a Base UE Profile first', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/fleet/batch-launch/ue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(batchForm)
+      });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      const data = await res.json();
+      setBatchResults(data);
+      showFleetMsg(`Batch operation complete: ${data.successfulUeIds?.length || 0} UEs launched successfully`, 'success');
+      fetchFleetRunning();
+      setFleetActiveSection('live');
+    } catch (e) { showFleetMsg(`Batch Launch Error: ${e}`, 'error'); }
+  };
+
+  const startAllGNBs = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/fleet/action/start-all-gnbs`, { method: 'POST' });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      const data = await res.json();
+      showFleetMsg(`Started ${data.startedCount} gNodeB cells`, 'success');
+      fetchFleetRunning();
+    } catch (e) { showFleetMsg(`Error starting gNBs: ${e}`, 'error'); }
+  };
+
+  const stopAllGNBs = async () => {
+    if (!confirm('Are you sure you want to stop all running gNodeB cells?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/fleet/action/stop-all-gnbs`, { method: 'POST' });
+      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      const data = await res.json();
+      showFleetMsg(`Stopped ${data.stoppedCount} gNodeB cells`, 'success');
+      fetchFleetRunning();
+    } catch (e) { showFleetMsg(`Error stopping gNBs: ${e}`, 'error'); }
+  };
+
+  const exportFleetConfig = () => {
+    window.open(`${API_BASE}/fleet/config/export`, '_blank');
+  };
+
+  const importFleetConfig = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const jsonContent = JSON.parse(evt.target?.result as string);
+        const res = await fetch(`${API_BASE}/fleet/config/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(jsonContent)
+        });
+        if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+        showFleetMsg('Fleet configuration imported successfully!', 'success');
+        fetchFleetProfiles();
+      } catch (err) {
+        showFleetMsg(`Invalid JSON file: ${err}`, 'error');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const generateRandomHex = (length: number) => {
+    const hex = '0123456789ABCDEF';
+    let res = '';
+    for (let i = 0; i < length; i++) {
+      res += hex.charAt(Math.floor(Math.random() * hex.length));
+    }
+    return res;
   };
 
   const fetchFleetRunning = async () => {
@@ -7065,15 +7257,43 @@ export default function App() {
               </div>
             )}
 
-            {/* Section Tabs */}
-            <div className="fleet-section-tabs">
+            {/* Top Toolbar Quick Actions */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px', background: 'var(--bg-card)', padding: '12px 18px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Zap size={16} className="text-blue" /> Quick Fleet Operations:
+                </span>
+                <button className="btn btn-xs btn-success" onClick={startAllGNBs} title="Start all defined gNB profiles">
+                  ▶ Start All gNBs
+                </button>
+                <button className="btn btn-xs btn-danger" onClick={stopAllGNBs} title="Stop all running gNB instances">
+                  ■ Stop All gNBs
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button className="btn btn-xs btn-ghost" onClick={exportFleetConfig} title="Export entire fleet configuration as JSON">
+                  <Download size={13} /> Export Fleet JSON
+                </button>
+                <label className="btn btn-xs btn-ghost" style={{ cursor: 'pointer', margin: 0 }} title="Import fleet configuration JSON">
+                  <Upload size={13} /> Import Fleet JSON
+                  <input type="file" accept=".json" onChange={importFleetConfig} style={{ display: 'none' }} />
+                </label>
+              </div>
+            </div>
+
+            {/* Sub-Navigation Tabs */}
+            <div className="fleet-section-tabs" style={{ marginBottom: '20px' }}>
               <button
-                className={`fleet-stab ${fleetActiveSection === 'ue' ? 'active' : ''}`}
-                onClick={() => setFleetActiveSection('ue')}
+                className={`fleet-stab ${fleetActiveSection === 'live' ? 'active' : ''}`}
+                onClick={() => { setFleetActiveSection('live'); fetchFleetRunning(); }}
               >
-                <Cpu size={14} /> UE Profiles
-                <span className="fleet-badge">{ueProfiles.length}</span>
+                <Activity size={14} /> Live Fleet Command
+                <span className={`fleet-badge ${(fleetRunning.runningUes?.length || 0) + (fleetRunning.runningGnbs?.length || 0) > 0 ? 'active' : ''}`}>
+                  {(fleetRunning.runningUes?.length || 0) + (fleetRunning.runningGnbs?.length || 0)}
+                </span>
               </button>
+
               <button
                 className={`fleet-stab ${fleetActiveSection === 'gnb' ? 'active' : ''}`}
                 onClick={() => setFleetActiveSection('gnb')}
@@ -7081,131 +7301,38 @@ export default function App() {
                 <Radio size={14} /> gNB Profiles
                 <span className="fleet-badge">{gnbProfiles.length}</span>
               </button>
+
               <button
-                className={`fleet-stab ${fleetActiveSection === 'live' ? 'active' : ''}`}
-                onClick={() => { setFleetActiveSection('live'); fetchFleetRunning(); }}
+                className={`fleet-stab ${fleetActiveSection === 'ue' ? 'active' : ''}`}
+                onClick={() => setFleetActiveSection('ue')}
               >
-                <Activity size={14} /> Live Fleet
-                <span className={`fleet-badge ${(fleetRunning.runningUes?.length || 0) + (fleetRunning.runningGnbs?.length || 0) > 0 ? 'active' : ''}`}>
-                  {(fleetRunning.runningUes?.length || 0) + (fleetRunning.runningGnbs?.length || 0)}
-                </span>
+                <Cpu size={14} /> UE Profiles
+                <span className="fleet-badge">{ueProfiles.length}</span>
+              </button>
+
+              <button
+                className={`fleet-stab ${fleetActiveSection === 'batch' ? 'active' : ''}`}
+                onClick={() => setFleetActiveSection('batch')}
+              >
+                <Zap size={14} /> Batch UE Launcher
+              </button>
+
+              <button
+                className={`fleet-stab ${fleetActiveSection === 'library' ? 'active' : ''}`}
+                onClick={() => setFleetActiveSection('library')}
+              >
+                <Layers size={14} /> Core & Slice Library
+                <span className="fleet-badge">{amfProfiles.length + sliceProfiles.length}</span>
               </button>
             </div>
 
-            {/* ── UE Profiles Section ── */}
-            {fleetActiveSection === 'ue' && (
-              <div className="fleet-panel">
-                <div className="fleet-panel-header">
-                  <h3><Cpu size={16}/> User Equipment Profiles</h3>
-                  <button className="btn btn-primary btn-sm" onClick={() => { setEditingUE(defaultUEProfile); setShowUEForm(true); }}>
-                    + Add UE Profile
-                  </button>
-                </div>
-                <p className="fleet-hint">Save UE identities here. Each profile is persisted in <code>config/fleet.json</code>. Launch as many as needed simultaneously.</p>
-
-                {/* UE Form Overlay moved to root */}
-
-                {/* Target GNB Selection Overlay moved to root */}
-
-                {/* UE Profiles Table */}
-                {ueProfiles.length === 0 ? (
-                  <div className="fleet-empty">No UE profiles yet. Create one to get started.</div>
-                ) : (
-                  <div className="fleet-table-wrapper">
-                    <table className="fleet-table">
-                      <thead>
-                        <tr>
-                          <th>Name</th><th>IMSI</th><th>Key</th><th>DNN</th><th>Slice</th><th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {ueProfiles.map(p => (
-                          <tr key={p.name}>
-                            <td><strong>{p.name}</strong></td>
-                            <td className="mono">{p.hplmn.mcc}{p.hplmn.mnc}{p.msin}</td>
-                            <td className="mono masked">{p.key.substring(0, 8)}···</td>
-                            <td>{p.dnn}</td>
-                            <td>SST:{p.snssai.sst}{p.snssai.sd ? ` SD:${p.snssai.sd}` : ''}</td>
-                            <td>
-                              <div className="fleet-action-btns">
-                                <button className="btn btn-xs btn-success" onClick={() => handleLaunchUEClick(p.name)} title="Launch UE">▶ Launch</button>
-                                <button className="btn btn-xs btn-ghost" onClick={() => duplicateUEProfile(p)} title="Duplicate">Clone</button>
-                                <button className="btn btn-xs btn-ghost" onClick={() => { setEditingUE(p); setShowUEForm(true); }} title="Edit">Edit</button>
-                                <button className="btn btn-xs btn-danger" onClick={() => deleteUEProfile(p.name)} title="Delete">🗑 Delete</button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── gNB Profiles Section ── */}
-            {fleetActiveSection === 'gnb' && (
-              <div className="fleet-panel">
-                <div className="fleet-panel-header">
-                  <h3><Radio size={16}/> gNodeB Profiles</h3>
-                  <button className="btn btn-primary btn-sm" onClick={() => { setEditingGNB(defaultGNBProfile); setShowGNBForm(true); }}>
-                    + Add gNB Profile
-                  </button>
-                </div>
-                <p className="fleet-hint">Each gNB profile launches an independent gNodeB with a unique ID that connects to the 5G Core. Multiple gNBs enable handover scenarios.</p>
-
-                {/* GNB Form Overlay moved to root */}
-
-                {/* GNB Profiles Table */}
-                {gnbProfiles.length === 0 ? (
-                  <div className="fleet-empty">No gNB profiles yet. Create one to launch a virtual gNodeB.</div>
-                ) : (
-                  <div className="fleet-table-wrapper">
-                    <table className="fleet-table">
-                      <thead>
-                        <tr>
-                          <th>Name</th><th>gNB-ID</th><th>PLMN</th><th>AMF Target</th><th>Link</th><th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {gnbProfiles.map(p => (
-                          <tr key={p.name}>
-                            <td><strong>{p.name}</strong></td>
-                            <td className="mono">{p.gnbId}</td>
-                            <td>{p.mcc}-{p.mnc} TAC:{p.tac}</td>
-                            <td className="mono">{p.amfIp}:{p.amfPort}</td>
-                            <td><span className={`fleet-tag ${p.linkType}`}>{p.linkType.toUpperCase()}</span></td>
-                            <td>
-                              <div className="fleet-action-btns">
-                                <button
-                                  className="btn btn-xs btn-success"
-                                  onClick={() => launchGNBProfile(p.name)}
-                                  disabled={fleetRunning.runningGnbs?.some(g => g.profileName === p.name)}
-                                  title={fleetRunning.runningGnbs?.some(g => g.profileName === p.name) ? 'Already running' : 'Launch gNB'}
-                                >
-                                  {fleetRunning.runningGnbs?.some(g => g.profileName === p.name) ? '● Running' : '▶ Launch'}
-                                </button>
-                                <button className="btn btn-xs btn-ghost" onClick={() => duplicateGNBProfile(p)} title="Duplicate">Clone</button>
-                                <button className="btn btn-xs btn-ghost" onClick={() => { setEditingGNB(p); setShowGNBForm(true); }} title="Edit">Edit</button>
-                                <button className="btn btn-xs btn-danger" onClick={() => deleteGNBProfile(p.name)} disabled={fleetRunning.runningGnbs?.some(g => g.profileName === p.name)}>🗑 Delete</button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── Live Fleet Section ── */}
+            {/* ── 1. Live Fleet Section ── */}
             {fleetActiveSection === 'live' && (
               <div className="fleet-panel">
                 <div className="fleet-panel-header">
-                  <h3><Activity size={16}/> Live Fleet Status</h3>
+                  <h3><Activity size={16}/> Live Fleet Status & Mobility Control</h3>
                   <button className="btn btn-ghost btn-sm" onClick={fetchFleetRunning}>
-                    <RefreshCw size={13}/> Refresh
+                    <RefreshCw size={13}/> Refresh Status
                   </button>
                 </div>
 
@@ -7217,7 +7344,7 @@ export default function App() {
                       <span className="fleet-badge ml-2">{fleetRunning.runningUes?.length || 0}</span>
                     </h4>
                     {!fleetRunning.runningUes?.length ? (
-                      <div className="fleet-empty-sm">No active UEs. Launch a UE profile to start.</div>
+                      <div className="fleet-empty-sm">No active UEs. Launch a UE profile or run Batch Launch to start.</div>
                     ) : (
                       <div className="fleet-ue-cards">
                         {fleetRunning.runningUes.map(u => (
@@ -7431,6 +7558,334 @@ export default function App() {
                       </div>
                     </div>
                   )}
+
+                </div>
+              </div>
+            )}
+
+            {/* ── 2. gNB Profiles Section ── */}
+            {fleetActiveSection === 'gnb' && (
+              <div className="fleet-panel">
+                <div className="fleet-panel-header">
+                  <h3><Radio size={16}/> gNodeB Profiles</h3>
+                  <button className="btn btn-primary btn-sm" onClick={() => { setEditingGNB(defaultGNBProfile); setShowGNBForm(true); }}>
+                    + Add gNB Profile
+                  </button>
+                </div>
+                <p className="fleet-hint">Each gNB profile launches an independent gNodeB cell. Select saved 5G Cores or Slices from your Library when configuring a gNB.</p>
+
+                {gnbProfiles.length === 0 ? (
+                  <div className="fleet-empty">No gNB profiles yet. Create one to launch a virtual gNodeB cell.</div>
+                ) : (
+                  <div className="fleet-table-wrapper">
+                    <table className="fleet-table">
+                      <thead>
+                        <tr>
+                          <th>Name</th><th>gNB-ID</th><th>PLMN</th><th>AMF Target Core</th><th>Slice S-NSSAI</th><th>Link</th><th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gnbProfiles.map(p => (
+                          <tr key={p.name}>
+                            <td><strong>{p.name}</strong></td>
+                            <td className="mono">{p.gnbId}</td>
+                            <td>{p.mcc}-{p.mnc} TAC:{p.tac}</td>
+                            <td className="mono">{p.amfIp}:{p.amfPort}</td>
+                            <td>SST:{p.sliceSst}{p.sliceSd ? ` SD:${p.sliceSd}` : ''}</td>
+                            <td><span className={`fleet-tag ${p.linkType}`}>{p.linkType.toUpperCase()}</span></td>
+                            <td>
+                              <div className="fleet-action-btns">
+                                <button
+                                  className="btn btn-xs btn-success"
+                                  onClick={() => launchGNBProfile(p.name)}
+                                  disabled={fleetRunning.runningGnbs?.some(g => g.profileName === p.name)}
+                                  title={fleetRunning.runningGnbs?.some(g => g.profileName === p.name) ? 'Already running' : 'Launch gNB'}
+                                >
+                                  {fleetRunning.runningGnbs?.some(g => g.profileName === p.name) ? '● Running' : '▶ Launch'}
+                                </button>
+                                <button className="btn btn-xs btn-ghost" onClick={() => duplicateGNBProfile(p)} title="Duplicate">Clone</button>
+                                <button className="btn btn-xs btn-ghost" onClick={() => { setEditingGNB(p); setShowGNBForm(true); }} title="Edit">Edit</button>
+                                <button className="btn btn-xs btn-danger" onClick={() => deleteGNBProfile(p.name)} disabled={fleetRunning.runningGnbs?.some(g => g.profileName === p.name)}>🗑 Delete</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── 3. UE Profiles Section ── */}
+            {fleetActiveSection === 'ue' && (
+              <div className="fleet-panel">
+                <div className="fleet-panel-header">
+                  <h3><Cpu size={16}/> User Equipment Profiles</h3>
+                  <button className="btn btn-primary btn-sm" onClick={() => { setEditingUE(defaultUEProfile); setShowUEForm(true); }}>
+                    + Add UE Profile
+                  </button>
+                </div>
+                <p className="fleet-hint">Save UE subscriber identities here. Reuse Security & Slice presets from the Library to speed up profile setup.</p>
+
+                {ueProfiles.length === 0 ? (
+                  <div className="fleet-empty">No UE profiles yet. Create one to get started.</div>
+                ) : (
+                  <div className="fleet-table-wrapper">
+                    <table className="fleet-table">
+                      <thead>
+                        <tr>
+                          <th>Name</th><th>IMSI</th><th>Key</th><th>DNN</th><th>Slice</th><th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ueProfiles.map(p => (
+                          <tr key={p.name}>
+                            <td><strong>{p.name}</strong></td>
+                            <td className="mono">{p.hplmn.mcc}{p.hplmn.mnc}{p.msin}</td>
+                            <td className="mono masked">{p.key.substring(0, 8)}···</td>
+                            <td>{p.dnn}</td>
+                            <td>SST:{p.snssai.sst}{p.snssai.sd ? ` SD:${p.snssai.sd}` : ''}</td>
+                            <td>
+                              <div className="fleet-action-btns">
+                                <button className="btn btn-xs btn-success" onClick={() => handleLaunchUEClick(p.name)} title="Launch UE">▶ Launch</button>
+                                <button className="btn btn-xs btn-ghost" onClick={() => duplicateUEProfile(p)} title="Duplicate">Clone</button>
+                                <button className="btn btn-xs btn-ghost" onClick={() => { setEditingUE(p); setShowUEForm(true); }} title="Edit">Edit</button>
+                                <button className="btn btn-xs btn-danger" onClick={() => deleteUEProfile(p.name)} title="Delete">🗑 Delete</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── 4. Batch UE Launcher Section ── */}
+            {fleetActiveSection === 'batch' && (
+              <div className="fleet-panel">
+                <div className="fleet-panel-header">
+                  <h3><Zap size={16}/> Batch UE Provisioner & Launcher</h3>
+                </div>
+                <p className="fleet-hint">Mass-spawn up to 100 5G UEs simultaneously with auto-incrementing MSINs connected to your desired gNodeB cell.</p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginTop: '16px' }}>
+                  <div className="card" style={{ padding: '20px', background: 'var(--bg-card)' }}>
+                    <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', fontWeight: 'bold' }}>Batch Launch Configuration</h4>
+                    
+                    <div className="form-group" style={{ marginBottom: '14px' }}>
+                      <label>Base UE Profile Template *</label>
+                      <select
+                        className="form-input"
+                        value={batchForm.baseProfileName}
+                        onChange={e => setBatchForm({...batchForm, baseProfileName: e.target.value})}
+                      >
+                        <option value="">-- Select UE Template --</option>
+                        {ueProfiles.map(p => (
+                          <option key={p.name} value={p.name}>{p.name} (MSIN: {p.msin})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '14px' }}>
+                      <label>Number of UEs to Launch (1–100) *</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        value={batchForm.count}
+                        onChange={e => setBatchForm({...batchForm, count: Math.min(100, Math.max(1, Number(e.target.value)))})}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '14px' }}>
+                      <label>Starting MSIN (Auto-increments per UE)</label>
+                      <input
+                        className="form-input"
+                        value={batchForm.startMsin}
+                        onChange={e => setBatchForm({...batchForm, startMsin: e.target.value})}
+                        placeholder="0000000001"
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '20px' }}>
+                      <label>Target gNodeB Cell</label>
+                      <select
+                        className="form-input"
+                        value={batchForm.targetGnbProfile}
+                        onChange={e => setBatchForm({...batchForm, targetGnbProfile: e.target.value})}
+                      >
+                        <option value="">Auto / Default gNodeB Cell</option>
+                        {gnbProfiles.map(g => (
+                          <option key={g.name} value={g.name}>{g.name} (gNB-ID: {g.gnbId})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button
+                      className="btn btn-primary"
+                      style={{ width: '100%', padding: '12px', fontSize: '14px', fontWeight: 'bold' }}
+                      onClick={executeBatchLaunch}
+                    >
+                      ⚡ Launch {batchForm.count} UEs Now
+                    </button>
+                  </div>
+
+                  {/* Batch Launch Results */}
+                  <div className="card" style={{ padding: '20px', background: 'var(--bg-card)' }}>
+                    <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', fontWeight: 'bold' }}>Batch Execution Log</h4>
+                    {!batchResults ? (
+                      <div className="fleet-empty-sm">Configure parameters on the left and click launch to view batch execution progress.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div style={{ display: 'flex', gap: '12px' }}>
+                          <div style={{ flex: 1, padding: '10px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '6px' }}>
+                            <div style={{ fontSize: '11px', color: '#10b981', fontWeight: 'bold' }}>SUCCESSFUL</div>
+                            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#10b981' }}>{batchResults.successfulUeIds?.length || 0}</div>
+                          </div>
+                          <div style={{ flex: 1, padding: '10px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '6px' }}>
+                            <div style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold' }}>ERRORS</div>
+                            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#ef4444' }}>{batchResults.errors?.length || 0}</div>
+                          </div>
+                        </div>
+
+                        {batchResults.successfulUeIds?.length > 0 && (
+                          <div>
+                            <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '6px' }}>Assigned UE IDs:</div>
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              {batchResults.successfulUeIds.map(id => (
+                                <span key={id} className="fleet-tag" style={{ background: 'rgba(16,185,129,0.2)', color: '#10b981' }}>UE-{id}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {batchResults.errors?.length > 0 && (
+                          <div style={{ marginTop: '10px' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#ef4444', marginBottom: '6px' }}>Error Details:</div>
+                            <div style={{ maxHeight: '150px', overflowY: 'auto', background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '6px', fontSize: '11px', fontFamily: 'monospace', color: '#f87171' }}>
+                              {batchResults.errors.map((err, i) => (
+                                <div key={i}>• {err}</div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── 5. Core & Slice Library Section ── */}
+            {fleetActiveSection === 'library' && (
+              <div className="fleet-panel">
+                <div className="fleet-panel-header">
+                  <h3><Layers size={16}/> 5G Core AMF, S-NSSAI Slice & Security Library</h3>
+                </div>
+                <p className="fleet-hint">Maintain central registries for 5G Core AMF endpoints, S-NSSAI slice definitions, and 3GPP authentication security credentials.</p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px', marginTop: '16px' }}>
+
+                  {/* Panel 1: AMF Core Registry */}
+                  <div className="card" style={{ padding: '18px', background: 'var(--bg-card)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Radio size={14} className="text-blue" /> 5G Core AMF Endpoints
+                      </h4>
+                      <button className="btn btn-xs btn-primary" onClick={() => { setEditingAMF({ name: '', ip: '127.0.0.1', port: 38412, mcc: '208', mnc: '93', description: '' }); setShowAMFForm(true); }}>
+                        + Add AMF
+                      </button>
+                    </div>
+
+                    {amfProfiles.length === 0 ? (
+                      <div className="fleet-empty-sm">No saved AMF endpoints.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {amfProfiles.map(a => (
+                          <div key={a.name} style={{ background: 'var(--bg-panel)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontWeight: 'bold', fontSize: '13px' }}>{a.name}</div>
+                              <div style={{ fontSize: '11px', fontFamily: 'monospace', color: '#38bdf8' }}>{a.ip}:{a.port} (PLMN: {a.mcc || '208'}-{a.mnc || '93'})</div>
+                              {a.description && <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>{a.description}</div>}
+                            </div>
+                            <div style={{ display: 'flex', gap: '4px' }}>
+                              <button className="btn btn-xs btn-ghost" onClick={() => { setEditingAMF(a); setShowAMFForm(true); }}>Edit</button>
+                              <button className="btn btn-xs btn-danger" onClick={() => deleteAMFProfile(a.name)}>🗑</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Panel 2: S-NSSAI Slice Catalog */}
+                  <div className="card" style={{ padding: '18px', background: 'var(--bg-card)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Layers size={14} className="text-purple" /> S-NSSAI Slice Library
+                      </h4>
+                      <button className="btn btn-xs btn-primary" onClick={() => { setEditingSlice({ name: '', sst: 1, sd: '010203', category: 'eMBB', description: '' }); setShowSliceForm(true); }}>
+                        + Add Slice
+                      </button>
+                    </div>
+
+                    {sliceProfiles.length === 0 ? (
+                      <div className="fleet-empty-sm">No saved slice profiles.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {sliceProfiles.map(s => (
+                          <div key={s.name} style={{ background: 'var(--bg-panel)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontWeight: 'bold', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                {s.name}
+                                {s.category && <span className="fleet-tag" style={{ fontSize: '9px', margin: 0 }}>{s.category}</span>}
+                              </div>
+                              <div style={{ fontSize: '11px', fontFamily: 'monospace', color: '#c084fc' }}>SST: {s.sst} {s.sd ? `SD: ${s.sd}` : ''}</div>
+                              {s.description && <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>{s.description}</div>}
+                            </div>
+                            <div style={{ display: 'flex', gap: '4px' }}>
+                              <button className="btn btn-xs btn-ghost" onClick={() => { setEditingSlice(s); setShowSliceForm(true); }}>Edit</button>
+                              <button className="btn btn-xs btn-danger" onClick={() => deleteSliceProfile(s.name)}>🗑</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Panel 3: Security Credentials Library */}
+                  <div className="card" style={{ padding: '18px', background: 'var(--bg-card)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Key size={14} className="text-green" /> Security Credential Presets
+                      </h4>
+                      <button className="btn btn-xs btn-primary" onClick={() => { setEditingSecurity({ name: '', key: '465B5CE8B2E8863F638D4F72EC869C96', opc: 'E8ED289DEBA952E4283B54E88E6183CA', amf: '8000', sqn: '000000000020', description: '' }); setShowSecurityForm(true); }}>
+                        + Add Credential
+                      </button>
+                    </div>
+
+                    {securityProfiles.length === 0 ? (
+                      <div className="fleet-empty-sm">No saved security credentials.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {securityProfiles.map(sec => (
+                          <div key={sec.name} style={{ background: 'var(--bg-panel)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontWeight: 'bold', fontSize: '13px' }}>{sec.name}</div>
+                              <div style={{ fontSize: '11px', fontFamily: 'monospace', color: '#4ade80' }}>K: {sec.key.substring(0, 8)}··· (AMF: {sec.amf})</div>
+                              {sec.description && <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>{sec.description}</div>}
+                            </div>
+                            <div style={{ display: 'flex', gap: '4px' }}>
+                              <button className="btn btn-xs btn-ghost" onClick={() => { setEditingSecurity(sec); setShowSecurityForm(true); }}>Edit</button>
+                              <button className="btn btn-xs btn-danger" onClick={() => deleteSecurityProfile(sec.name)}>🗑</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                 </div>
               </div>
@@ -9213,15 +9668,53 @@ export default function App() {
           </div>
         )}
 
-      {/* Fleet Form Overlays (Rendered at root layout to prevent transform/clipping side effects) */}
+      {/* Fleet Form Overlays */}
       {showUEForm && (
         <div className="fleet-form-overlay">
-          <div className="fleet-form-card">
+          <div className="fleet-form-card" style={{ maxWidth: '650px' }}>
             <div className="fleet-form-header">
               <h4>{editingUE.name && ueProfiles.find(p => p.name === editingUE.name) ? `Edit: ${editingUE.name}` : 'New UE Profile'}</h4>
               <button className="fleet-form-close" onClick={() => setShowUEForm(false)}>✕</button>
             </div>
             <div className="fleet-form-body">
+
+              {/* Preset Quick Fill Bar */}
+              <div style={{ background: 'rgba(59, 130, 246, 0.05)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(59, 130, 246, 0.2)', marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: '180px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Load Security Credential Preset</label>
+                  <select
+                    className="form-input"
+                    style={{ width: '100%', padding: '4px 8px', fontSize: '12px' }}
+                    onChange={e => {
+                      const sec = securityProfiles.find(s => s.name === e.target.value);
+                      if (sec) {
+                        setEditingUE({...editingUE, key: sec.key, opc: sec.opc, amf: sec.amf, sqn: sec.sqn});
+                      }
+                    }}
+                  >
+                    <option value="">-- Choose Credential --</option>
+                    {securityProfiles.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+                  </select>
+                </div>
+
+                <div style={{ flex: 1, minWidth: '180px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Load Slice Preset</label>
+                  <select
+                    className="form-input"
+                    style={{ width: '100%', padding: '4px 8px', fontSize: '12px' }}
+                    onChange={e => {
+                      const sl = sliceProfiles.find(s => s.name === e.target.value);
+                      if (sl) {
+                        setEditingUE({...editingUE, snssai: { sst: sl.sst, sd: sl.sd }});
+                      }
+                    }}
+                  >
+                    <option value="">-- Choose Slice --</option>
+                    {sliceProfiles.map(s => <option key={s.name} value={s.name}>{s.name} (SST:{s.sst})</option>)}
+                  </select>
+                </div>
+              </div>
+
               <div className="fleet-form-grid">
                 <div className="form-group">
                   <label>Profile Name *</label>
@@ -9231,47 +9724,59 @@ export default function App() {
                   <label>MSIN (8–10 digits) *</label>
                   <input className="form-input" value={editingUE.msin} onChange={e => setEditingUE({...editingUE, msin: e.target.value})} placeholder="0000000001" />
                 </div>
-                <div className="form-group">
-                  <label>Key (32 hex chars) *</label>
-                  <input className="form-input" value={editingUE.key} onChange={e => setEditingUE({...editingUE, key: e.target.value})} placeholder="465b5ce8b199b49faa5f0a2ee238a6bc" />
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label>Key (32 hex chars) *</label>
+                    <button
+                      type="button"
+                      className="btn btn-xs btn-ghost"
+                      style={{ fontSize: '10px', color: '#38bdf8' }}
+                      onClick={() => setEditingUE({...editingUE, key: generateRandomHex(32), opc: generateRandomHex(32)})}
+                    >
+                      🎲 Generate Random Key & OPC
+                    </button>
+                  </div>
+                  <input className="form-input font-mono" value={editingUE.key} onChange={e => setEditingUE({...editingUE, key: e.target.value})} placeholder="465b5ce8b199b49faa5f0a2ee238a6bc" />
                 </div>
-                <div className="form-group">
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
                   <label>OPC (32 hex chars) *</label>
-                  <input className="form-input" value={editingUE.opc} onChange={e => setEditingUE({...editingUE, opc: e.target.value})} placeholder="e8ed289deba952e4283b54e88e6183ca" />
+                  <input className="form-input font-mono" value={editingUE.opc} onChange={e => setEditingUE({...editingUE, opc: e.target.value})} placeholder="e8ed289deba952e4283b54e88e6183ca" />
                 </div>
                 <div className="form-group">
-                  <label>AMF (4 hex) *</label>
-                  <input className="form-input" value={editingUE.amf} onChange={e => setEditingUE({...editingUE, amf: e.target.value})} placeholder="8000" />
+                  <label>AMF Field (hex)</label>
+                  <input className="form-input font-mono" value={editingUE.amf} onChange={e => setEditingUE({...editingUE, amf: e.target.value})} placeholder="8000" />
                 </div>
                 <div className="form-group">
-                  <label>SQN (12 hex) *</label>
-                  <input className="form-input" value={editingUE.sqn} onChange={e => setEditingUE({...editingUE, sqn: e.target.value})} placeholder="000000000000" />
+                  <label>SQN (12 hex digits)</label>
+                  <input className="form-input font-mono" value={editingUE.sqn} onChange={e => setEditingUE({...editingUE, sqn: e.target.value})} placeholder="000000000000" />
                 </div>
                 <div className="form-group">
-                  <label>HPLMN MCC</label>
-                  <input className="form-input" value={editingUE.hplmn.mcc} onChange={e => setEditingUE({...editingUE, hplmn: {...editingUE.hplmn, mcc: e.target.value}})} placeholder="999" />
-                </div>
-                <div className="form-group">
-                  <label>HPLMN MNC</label>
-                  <input className="form-input" value={editingUE.hplmn.mnc} onChange={e => setEditingUE({...editingUE, hplmn: {...editingUE.hplmn, mnc: e.target.value}})} placeholder="70" />
-                </div>
-                <div className="form-group">
-                  <label>DNN</label>
+                  <label>DNN *</label>
                   <input className="form-input" value={editingUE.dnn} onChange={e => setEditingUE({...editingUE, dnn: e.target.value})} placeholder="internet" />
                 </div>
                 <div className="form-group">
                   <label>PDU Session Type</label>
                   <select className="form-input" value={editingUE.pduSessionType} onChange={e => setEditingUE({...editingUE, pduSessionType: e.target.value})}>
-                    <option>IPv4</option><option>IPv6</option><option>IPv4v6</option>
+                    <option value="IPv4">IPv4</option>
+                    <option value="IPv6">IPv6</option>
+                    <option value="IPv4v6">IPv4v6</option>
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Slice SST</label>
-                  <input className="form-input" type="number" value={editingUE.snssai.sst} onChange={e => setEditingUE({...editingUE, snssai: {...editingUE.snssai, sst: Number(e.target.value)}})} />
+                  <label>MCC *</label>
+                  <input className="form-input" value={editingUE.hplmn.mcc} onChange={e => setEditingUE({...editingUE, hplmn: {...editingUE.hplmn, mcc: e.target.value}})} placeholder="999" />
                 </div>
                 <div className="form-group">
-                  <label>Slice SD (6 hex, optional)</label>
-                  <input className="form-input" value={editingUE.snssai.sd} onChange={e => setEditingUE({...editingUE, snssai: {...editingUE.snssai, sst: editingUE.snssai.sst, sd: e.target.value}})} placeholder="010203 or empty" />
+                  <label>MNC *</label>
+                  <input className="form-input" value={editingUE.hplmn.mnc} onChange={e => setEditingUE({...editingUE, hplmn: {...editingUE.hplmn, mnc: e.target.value}})} placeholder="70" />
+                </div>
+                <div className="form-group">
+                  <label>Slice SST *</label>
+                  <input className="form-input" type="number" value={editingUE.snssai.sst} onChange={e => setEditingUE({...editingUE, snssai: {...editingUE.snssai, sst: Number(e.target.value)}})} placeholder="1" />
+                </div>
+                <div className="form-group">
+                  <label>Slice SD (hex)</label>
+                  <input className="form-input font-mono" value={editingUE.snssai.sd} onChange={e => setEditingUE({...editingUE, snssai: {...editingUE.snssai, sd: e.target.value}})} placeholder="010203" />
                 </div>
               </div>
             </div>
@@ -9328,12 +9833,50 @@ export default function App() {
 
       {showGNBForm && (
         <div className="fleet-form-overlay">
-          <div className="fleet-form-card">
+          <div className="fleet-form-card" style={{ maxWidth: '650px' }}>
             <div className="fleet-form-header">
               <h4>{editingGNB.name && gnbProfiles.find(p => p.name === editingGNB.name) ? `Edit: ${editingGNB.name}` : 'New gNB Profile'}</h4>
               <button className="fleet-form-close" onClick={() => setShowGNBForm(false)}>✕</button>
             </div>
             <div className="fleet-form-body">
+
+              {/* Preset Quick Fill Bar */}
+              <div style={{ background: 'rgba(59, 130, 246, 0.05)', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(59, 130, 246, 0.2)', marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: '180px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Load AMF Core Endpoint Preset</label>
+                  <select
+                    className="form-input"
+                    style={{ width: '100%', padding: '4px 8px', fontSize: '12px' }}
+                    onChange={e => {
+                      const amf = amfProfiles.find(a => a.name === e.target.value);
+                      if (amf) {
+                        setEditingGNB({...editingGNB, amfIp: amf.ip, amfPort: amf.port, mcc: amf.mcc || editingGNB.mcc, mnc: amf.mnc || editingGNB.mnc});
+                      }
+                    }}
+                  >
+                    <option value="">-- Choose AMF Core --</option>
+                    {amfProfiles.map(a => <option key={a.name} value={a.name}>{a.name} ({a.ip}:{a.port})</option>)}
+                  </select>
+                </div>
+
+                <div style={{ flex: 1, minWidth: '180px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Load Slice Preset</label>
+                  <select
+                    className="form-input"
+                    style={{ width: '100%', padding: '4px 8px', fontSize: '12px' }}
+                    onChange={e => {
+                      const sl = sliceProfiles.find(s => s.name === e.target.value);
+                      if (sl) {
+                        setEditingGNB({...editingGNB, sliceSst: String(sl.sst).padStart(2, '0'), sliceSd: sl.sd});
+                      }
+                    }}
+                  >
+                    <option value="">-- Choose Slice --</option>
+                    {sliceProfiles.map(s => <option key={s.name} value={s.name}>{s.name} (SST:{s.sst})</option>)}
+                  </select>
+                </div>
+              </div>
+
               <div className="fleet-form-grid">
                 <div className="form-group">
                   <label>Profile Name *</label>
@@ -9341,7 +9884,7 @@ export default function App() {
                 </div>
                 <div className="form-group">
                   <label>gNB-ID (hex) *</label>
-                  <input className="form-input" value={editingGNB.gnbId} onChange={e => setEditingGNB({...editingGNB, gnbId: e.target.value})} placeholder="000001" />
+                  <input className="form-input font-mono" value={editingGNB.gnbId} onChange={e => setEditingGNB({...editingGNB, gnbId: e.target.value})} placeholder="000001" />
                 </div>
                 <div className="form-group">
                   <label>MCC</label>
@@ -9353,7 +9896,7 @@ export default function App() {
                 </div>
                 <div className="form-group">
                   <label>TAC</label>
-                  <input className="form-input" value={editingGNB.tac} onChange={e => setEditingGNB({...editingGNB, tac: e.target.value})} placeholder="000001" />
+                  <input className="form-input font-mono" value={editingGNB.tac} onChange={e => setEditingGNB({...editingGNB, tac: e.target.value})} placeholder="000001" />
                 </div>
                 <div className="form-group">
                   <label>Slice SST</label>
@@ -9361,7 +9904,7 @@ export default function App() {
                 </div>
                 <div className="form-group">
                   <label>Control IF IP *</label>
-                  <input className="form-input" value={editingGNB.controlIp} onChange={e => setEditingGNB({...editingGNB, controlIp: e.target.value})} placeholder="127.0.0.1" />
+                  <input className="form-input font-mono" value={editingGNB.controlIp} onChange={e => setEditingGNB({...editingGNB, controlIp: e.target.value})} placeholder="127.0.0.1" />
                 </div>
                 <div className="form-group">
                   <label>Control IF Port *</label>
@@ -9369,7 +9912,7 @@ export default function App() {
                 </div>
                 <div className="form-group">
                   <label>Data IF IP</label>
-                  <input className="form-input" value={editingGNB.dataIp} onChange={e => setEditingGNB({...editingGNB, dataIp: e.target.value})} placeholder="127.0.0.1" />
+                  <input className="form-input font-mono" value={editingGNB.dataIp} onChange={e => setEditingGNB({...editingGNB, dataIp: e.target.value})} placeholder="127.0.0.1" />
                 </div>
                 <div className="form-group">
                   <label>Data IF Port</label>
@@ -9388,7 +9931,7 @@ export default function App() {
                 </div>
                 <div className="form-group">
                   <label>AMF IP *</label>
-                  <input className="form-input" value={editingGNB.amfIp} onChange={e => setEditingGNB({...editingGNB, amfIp: e.target.value})} placeholder="127.0.0.1" />
+                  <input className="form-input font-mono" value={editingGNB.amfIp} onChange={e => setEditingGNB({...editingGNB, amfIp: e.target.value})} placeholder="127.0.0.1" />
                 </div>
                 <div className="form-group">
                   <label>AMF Port *</label>
@@ -9399,6 +9942,149 @@ export default function App() {
             <div className="fleet-form-actions">
               <button className="btn btn-ghost" onClick={() => setShowGNBForm(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={saveGNBProfile}>Save Profile</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AMF Profile Form Modal */}
+      {showAMFForm && (
+        <div className="fleet-form-overlay">
+          <div className="fleet-form-card" style={{ maxWidth: '500px' }}>
+            <div className="fleet-form-header">
+              <h4>{editingAMF.name && amfProfiles.find(p => p.name === editingAMF.name) ? `Edit AMF: ${editingAMF.name}` : 'New AMF Endpoint'}</h4>
+              <button className="fleet-form-close" onClick={() => setShowAMFForm(false)}>✕</button>
+            </div>
+            <div className="fleet-form-body">
+              <div className="fleet-form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label>AMF Profile Name *</label>
+                  <input className="form-input" value={editingAMF.name} onChange={e => setEditingAMF({...editingAMF, name: e.target.value})} placeholder="e.g. Local Open5GS AMF" />
+                </div>
+                <div className="form-group">
+                  <label>AMF IP Address *</label>
+                  <input className="form-input font-mono" value={editingAMF.ip} onChange={e => setEditingAMF({...editingAMF, ip: e.target.value})} placeholder="127.0.0.1" />
+                </div>
+                <div className="form-group">
+                  <label>SCTP Port *</label>
+                  <input className="form-input" type="number" value={editingAMF.port} onChange={e => setEditingAMF({...editingAMF, port: Number(e.target.value)})} placeholder="38412" />
+                </div>
+                <div className="form-group">
+                  <label>MCC</label>
+                  <input className="form-input" value={editingAMF.mcc || ''} onChange={e => setEditingAMF({...editingAMF, mcc: e.target.value})} placeholder="208" />
+                </div>
+                <div className="form-group">
+                  <label>MNC</label>
+                  <input className="form-input" value={editingAMF.mnc || ''} onChange={e => setEditingAMF({...editingAMF, mnc: e.target.value})} placeholder="93" />
+                </div>
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label>Description</label>
+                  <input className="form-input" value={editingAMF.description || ''} onChange={e => setEditingAMF({...editingAMF, description: e.target.value})} placeholder="Primary test core" />
+                </div>
+              </div>
+            </div>
+            <div className="fleet-form-actions">
+              <button className="btn btn-ghost" onClick={() => setShowAMFForm(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveAMFProfile}>Save AMF Endpoint</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Slice Profile Form Modal */}
+      {showSliceForm && (
+        <div className="fleet-form-overlay">
+          <div className="fleet-form-card" style={{ maxWidth: '500px' }}>
+            <div className="fleet-form-header">
+              <h4>{editingSlice.name && sliceProfiles.find(p => p.name === editingSlice.name) ? `Edit Slice: ${editingSlice.name}` : 'New S-NSSAI Slice'}</h4>
+              <button className="fleet-form-close" onClick={() => setShowSliceForm(false)}>✕</button>
+            </div>
+            <div className="fleet-form-body">
+              <div className="fleet-form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label>Slice Profile Name *</label>
+                  <input className="form-input" value={editingSlice.name} onChange={e => setEditingSlice({...editingSlice, name: e.target.value})} placeholder="e.g. Standard eMBB" />
+                </div>
+                <div className="form-group">
+                  <label>SST (Slice/Service Type) *</label>
+                  <input className="form-input" type="number" value={editingSlice.sst} onChange={e => setEditingSlice({...editingSlice, sst: Number(e.target.value)})} placeholder="1" />
+                </div>
+                <div className="form-group">
+                  <label>SD (Slice Differentiator Hex)</label>
+                  <input className="form-input font-mono" value={editingSlice.sd} onChange={e => setEditingSlice({...editingSlice, sd: e.target.value})} placeholder="010203" />
+                </div>
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label>Category</label>
+                  <select className="form-input" value={editingSlice.category || 'eMBB'} onChange={e => setEditingSlice({...editingSlice, category: e.target.value})}>
+                    <option value="eMBB">eMBB (Enhanced Mobile Broadband)</option>
+                    <option value="URLLC">URLLC (Ultra-Reliable Low Latency)</option>
+                    <option value="MIoT">MIoT (Massive IoT)</option>
+                    <option value="Custom">Custom / Special Purpose</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label>Description</label>
+                  <input className="form-input" value={editingSlice.description || ''} onChange={e => setEditingSlice({...editingSlice, description: e.target.value})} placeholder="Default commercial slice" />
+                </div>
+              </div>
+            </div>
+            <div className="fleet-form-actions">
+              <button className="btn btn-ghost" onClick={() => setShowSliceForm(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveSliceProfile}>Save Slice Preset</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Security Profile Form Modal */}
+      {showSecurityForm && (
+        <div className="fleet-form-overlay">
+          <div className="fleet-form-card" style={{ maxWidth: '550px' }}>
+            <div className="fleet-form-header">
+              <h4>{editingSecurity.name && securityProfiles.find(p => p.name === editingSecurity.name) ? `Edit Security: ${editingSecurity.name}` : 'New Security Credential Preset'}</h4>
+              <button className="fleet-form-close" onClick={() => setShowSecurityForm(false)}>✕</button>
+            </div>
+            <div className="fleet-form-body">
+              <div className="fleet-form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label>Credential Preset Name *</label>
+                  <input className="form-input" value={editingSecurity.name} onChange={e => setEditingSecurity({...editingSecurity, name: e.target.value})} placeholder="e.g. Open5GS Default Key" />
+                </div>
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label>Key (32 hex chars) *</label>
+                    <button
+                      type="button"
+                      className="btn btn-xs btn-ghost"
+                      style={{ fontSize: '10px', color: '#38bdf8' }}
+                      onClick={() => setEditingSecurity({...editingSecurity, key: generateRandomHex(32), opc: generateRandomHex(32)})}
+                    >
+                      🎲 Generate Random Key & OPC
+                    </button>
+                  </div>
+                  <input className="form-input font-mono" value={editingSecurity.key} onChange={e => setEditingSecurity({...editingSecurity, key: e.target.value})} />
+                </div>
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label>OPC (32 hex chars) *</label>
+                  <input className="form-input font-mono" value={editingSecurity.opc} onChange={e => setEditingSecurity({...editingSecurity, opc: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>AMF Field (hex)</label>
+                  <input className="form-input font-mono" value={editingSecurity.amf} onChange={e => setEditingSecurity({...editingSecurity, amf: e.target.value})} placeholder="8000" />
+                </div>
+                <div className="form-group">
+                  <label>SQN (12 hex digits)</label>
+                  <input className="form-input font-mono" value={editingSecurity.sqn} onChange={e => setEditingSecurity({...editingSecurity, sqn: e.target.value})} placeholder="000000000020" />
+                </div>
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label>Description</label>
+                  <input className="form-input" value={editingSecurity.description || ''} onChange={e => setEditingSecurity({...editingSecurity, description: e.target.value})} placeholder="Default subscriber secret key" />
+                </div>
+              </div>
+            </div>
+            <div className="fleet-form-actions">
+              <button className="btn btn-ghost" onClick={() => setShowSecurityForm(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveSecurityProfile}>Save Security Credential</button>
             </div>
           </div>
         </div>

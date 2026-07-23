@@ -37,6 +37,25 @@
         "sst": 1,
         "sd": ""
       }
+    },
+    {
+      "name": "UE-test-1",
+      "msin": "0000000001",
+      "key": "465B5CE8B199B49FAA5F0A2EE238A6BC",
+      "opc": "E8ED289DEBA952E4283B54E88E6183CA",
+      "amf": "8000",
+      "sqn": "000000000000",
+      "dnn": "internet",
+      "pduSessionType": "IPv4",
+      "registrationType": "initial",
+      "hplmn": {
+        "mcc": "001",
+        "mnc": "01"
+      },
+      "snssai": {
+        "sst": 1,
+        "sd": ""
+      }
     }
   ],
   "gnbProfiles": [
@@ -62,6 +81,40 @@
       "gnbId": "000004",
       "mcc": "999",
       "mnc": "70",
+      "tac": "000001",
+      "sliceSst": "01",
+      "sliceSd": "",
+      "controlIp": "127.0.0.1",
+      "controlPort": 9525,
+      "dataIp": "127.0.0.8",
+      "dataPort": 2153,
+      "linkType": "unix",
+      "linkPort": 9526,
+      "amfIp": "127.0.0.18",
+      "amfPort": 38412
+    },
+    {
+      "name": "gNB-West-1",
+      "gnbId": "000002",
+      "mcc": "001",
+      "mnc": "01",
+      "tac": "000001",
+      "sliceSst": "01",
+      "sliceSd": "",
+      "controlIp": "127.0.0.1",
+      "controlPort": 9487,
+      "dataIp": "127.0.0.1",
+      "dataPort": 2152,
+      "linkType": "unix",
+      "linkPort": 9488,
+      "amfIp": "127.0.0.18",
+      "amfPort": 38412
+    },
+    {
+      "name": "gNB-East-1",
+      "gnbId": "000004",
+      "mcc": "001",
+      "mnc": "01",
       "tac": "000001",
       "sliceSst": "01",
       "sliceSd": "",
