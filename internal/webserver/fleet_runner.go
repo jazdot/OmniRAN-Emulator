@@ -330,8 +330,20 @@ func LaunchUEFromProfile(profileName string, targetGnbProfile string) (uint8, er
 
 	// Check PDU Session outcome
 	defaultSess := u.GetPduSession(1)
-	if defaultSess != nil && defaultSess.Error != "" {
-		logrus.Warnf("[FLEET] UE %d registered but PDU Session failed: %s", ueID, defaultSess.Error)
+	if defaultSess != nil {
+		if defaultSess.State == ueContext.SM5G_PDU_SESSION_ACTIVE_PENDING {
+			if u.GetSMError() != "" {
+				defaultSess.State = ueContext.SM5G_PDU_SESSION_INACTIVE
+				defaultSess.Error = u.GetSMError()
+			} else {
+				defaultSess.State = ueContext.SM5G_PDU_SESSION_INACTIVE
+				defaultSess.Error = fmt.Sprintf("PDU Session #1 Establishment Timed Out: 5G Core network (%s:%d) did not send 5GSM Accept or Resource Setup Request within 3.5s. Verify Core DNN ('%s'), S-NSSAI (SST: %d, SD: %s), UPF N4 tunnel, or gNB N3 GTP interface (2152).", cfg.AMF.Ip, cfg.AMF.Port, defaultSess.Dnn, defaultSess.Snssai.Sst, defaultSess.Snssai.Sd)
+				u.SetSMError(defaultSess.Error)
+			}
+		}
+		if defaultSess.Error != "" {
+			logrus.Warnf("[FLEET] UE %d registered but PDU Session failed: %s", ueID, defaultSess.Error)
+		}
 	}
 
 	logrus.Infof("[FLEET] Successfully launched UE profile '%s' as UE ID %d (SUPI: %s)", profileName, ueID, u.GetSupi())
@@ -355,11 +367,20 @@ func GetFleetRunningSummary() FleetRunningSummary {
 
 		pduSessions := make([]PDUSessionStatus, 0)
 		for _, sess := range u.PduSessions {
-			// Evaluate PDU session establishment timeout
-			if sess.State == ueContext.SM5G_PDU_SESSION_ACTIVE_PENDING && !sess.RequestedAt.IsZero() && time.Since(sess.RequestedAt) > 4*time.Second {
-				sess.State = ueContext.SM5G_PDU_SESSION_INACTIVE
-				sess.Error = fmt.Sprintf("PDU Session #%d Establishment Timed Out: AMF/SMF Core network did not send PDUSessionResourceSetupRequest or 5GSM Accept within 4s. Verify Core DNN ('%s'), S-NSSAI (SST: %d, SD: %s), UPF N4 tunnel, or gNB N3 GTP interface (2152).", sess.Id, sess.Dnn, sess.Snssai.Sst, sess.Snssai.Sd)
-				u.SetSMError(sess.Error)
+			// Synchronize global SM error if session error was recorded
+			if sess.Error == "" && u.GetSMError() != "" {
+				sess.Error = u.GetSMError()
+			}
+
+			// Evaluate PDU session establishment timeout at 2.5s
+			if sess.State == ueContext.SM5G_PDU_SESSION_ACTIVE_PENDING {
+				if sess.Error != "" {
+					sess.State = ueContext.SM5G_PDU_SESSION_INACTIVE
+				} else if !sess.RequestedAt.IsZero() && time.Since(sess.RequestedAt) > 2500*time.Millisecond {
+					sess.State = ueContext.SM5G_PDU_SESSION_INACTIVE
+					sess.Error = fmt.Sprintf("PDU Session #%d Establishment Timed Out: AMF/SMF Core network did not send PDUSessionResourceSetupRequest or 5GSM Accept within 2.5s. Verify Core DNN ('%s'), S-NSSAI (SST: %d, SD: %s), UPF N4 tunnel, or gNB N3 GTP interface (2152).", sess.Id, sess.Dnn, sess.Snssai.Sst, sess.Snssai.Sd)
+					u.SetSMError(sess.Error)
+				}
 			}
 
 			pduSessions = append(pduSessions, PDUSessionStatus{

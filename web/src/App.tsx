@@ -4788,14 +4788,15 @@ export default function App() {
                                 {activeUe.pduSessions && activeUe.pduSessions.length > 0 ? (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
                                     {activeUe.pduSessions.map(s => {
-                                      const isFailed = !!s.error;
+                                      const errText = s.error || (activeUe as any).smError;
+                                      const isFailed = !!errText;
                                       const isActive = !isFailed && s.stateDesc?.includes('ACTIVE') && !s.stateDesc?.includes('PENDING');
                                       const isPending = !isFailed && s.stateDesc?.includes('PENDING');
                                       return (
                                         <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '6px', width: '100%' }}>
                                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', width: '100%' }}>
                                             <span style={{ color: 'var(--color-info)' }}>PDU #{s.id} ({s.dnn}):</span>
-                                            <span className="font-mono ml-auto" style={{ marginRight: '6px' }}>{s.ueIp || '—'}</span>
+                                            <span className="font-mono ml-auto" style={{ marginRight: '6px' }}>{s.ueIp || (isFailed ? 'Rejected' : '—')}</span>
                                             <span className={`fleet-state-badge sm ${isActive ? 'registered' : isFailed ? 'danger' : 'warning'}`}>
                                               {isFailed ? 'REJECTED' : s.stateDesc}
                                             </span>
@@ -4805,12 +4806,12 @@ export default function App() {
                                               ⏳ Awaiting 5GSM PDU Session Establishment Accept / Resource Setup Request from 5G Core...
                                             </div>
                                           )}
-                                          {s.error && (
+                                          {errText && (
                                             <div style={{ fontSize: '10px', color: '#f87171', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '6px 8px', borderRadius: '4px', marginTop: '2px', lineHeight: '1.4' }}>
                                               <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                <AlertTriangle size={12} /> 3GPP PDU Session Reject Diagnostic:
+                                                <AlertTriangle size={12} /> 3GPP PDU Session Reject Cause:
                                               </div>
-                                              <div style={{ marginTop: '2px', fontWeight: '500' }}>{s.error}</div>
+                                              <div style={{ marginTop: '2px', fontWeight: '500' }}>{errText}</div>
                                             </div>
                                           )}
                                           {isActive && (

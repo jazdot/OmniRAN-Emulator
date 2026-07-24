@@ -230,85 +230,148 @@ func Get5GSMCauseDesc(cause uint8) string {
 
 func HandlerDlNasTransportPduaccept(ue *context.UEContext, message *nas.Message) {
 
-	//getting PDU Session establishment accept or release.
 	payloadContainer := nas_control.GetNasPduFromPduAccept(message)
-	if payloadContainer == nil {
-		errMsg := "PDU Session Rejected by Core: DL NAS Transport payload container (5GSM) unparseable or rejected by SMF/AMF."
-		log.Warnf("[UE][NAS] %s", errMsg)
-		for _, sess := range ue.PduSessions {
-			if sess.State == context.SM5G_PDU_SESSION_ACTIVE_PENDING {
+
+	var rawPayload []byte
+	if message != nil && message.DLNASTransport != nil {
+		rawPayload = message.DLNASTransport.GetPayloadContainerContents()
+	}
+
+	// 1. Try parsed payloadContainer struct
+	if payloadContainer != nil && payloadContainer.GsmMessage != nil {
+		msgType := payloadContainer.GsmHeader.GetMessageType()
+
+		if msgType == nas.MsgTypePDUSessionEstablishmentAccept {
+			log.Info("[UE][NAS] Receiving PDU Session Establishment Accept")
+			pduSessionId := payloadContainer.PDUSessionEstablishmentAccept.PDUSessionID.GetPDUSessionID()
+
+			sess := ue.GetPduSession(pduSessionId)
+			if sess != nil {
+				sess.State = context.SM5G_PDU_SESSION_ACTIVE
+				sess.Error = "" // clear previous errors
+			}
+
+			UeIp := payloadContainer.PDUSessionEstablishmentAccept.GetPDUAddressInformation()
+			ue.SetIp(pduSessionId, UeIp)
+			return
+		} else if msgType == nas.MsgTypePDUSessionEstablishmentReject {
+			pduSessionId := uint8(1)
+			if payloadContainer.PDUSessionEstablishmentReject != nil {
+				pduSessionId = payloadContainer.PDUSessionEstablishmentReject.PDUSessionID.GetPDUSessionID()
+			}
+			var cause uint8 = 31
+			if payloadContainer.PDUSessionEstablishmentReject != nil {
+				cause = payloadContainer.PDUSessionEstablishmentReject.Cause5GSM.GetCauseValue()
+			}
+			desc := Get5GSMCauseDesc(cause)
+			errMsg := fmt.Sprintf("PDU Session #%d Rejected by 5G Core (SMF/AMF): 5GSM Cause #%d (%s)", pduSessionId, cause, desc)
+			log.Warnf("[UE][NAS] %s", errMsg)
+
+			sess := ue.GetPduSession(pduSessionId)
+			if sess != nil {
 				sess.State = context.SM5G_PDU_SESSION_INACTIVE
 				sess.Error = errMsg
 			}
+			for _, s := range ue.PduSessions {
+				if s.State == context.SM5G_PDU_SESSION_ACTIVE_PENDING {
+					s.State = context.SM5G_PDU_SESSION_INACTIVE
+					s.Error = errMsg
+				}
+			}
+			ue.SetSMError(errMsg)
+			return
+		} else if msgType == nas.MsgTypeStatus5GSM {
+			pduSessionId := uint8(1)
+			if payloadContainer.Status5GSM != nil {
+				pduSessionId = payloadContainer.Status5GSM.PDUSessionID.GetPDUSessionID()
+			}
+			var cause uint8 = 31
+			if payloadContainer.Status5GSM != nil {
+				cause = payloadContainer.Status5GSM.Cause5GSM.GetCauseValue()
+			}
+			desc := Get5GSMCauseDesc(cause)
+			errMsg := fmt.Sprintf("PDU Session #%d Rejected via 5GSM Status from 5G Core: 5GSM Cause #%d (%s)", pduSessionId, cause, desc)
+			log.Warnf("[UE][NAS] %s", errMsg)
+
+			sess := ue.GetPduSession(pduSessionId)
+			if sess != nil {
+				sess.State = context.SM5G_PDU_SESSION_INACTIVE
+				sess.Error = errMsg
+			}
+			for _, s := range ue.PduSessions {
+				if s.State == context.SM5G_PDU_SESSION_ACTIVE_PENDING {
+					s.State = context.SM5G_PDU_SESSION_INACTIVE
+					s.Error = errMsg
+				}
+			}
+			ue.SetSMError(errMsg)
+			return
+		} else if msgType == nas.MsgTypePDUSessionReleaseCommand {
+			log.Info("[UE][NAS] Receiving PDU Session Release Command")
+			pduSessionId := payloadContainer.PDUSessionReleaseCommand.PDUSessionID.GetPDUSessionID()
+			ue.GetPduSession(pduSessionId).State = context.SM5G_PDU_SESSION_INACTIVE
+			log.Infof("[UE][NAS] PDU Session %d released (inactive)", pduSessionId)
+
+			releaseComplete, err := mm_5gs.UlNasTransportReleaseComplete(ue, pduSessionId)
+			if err == nil {
+				sender.SendToGnb(ue, releaseComplete)
+			}
+			return
+		} else if msgType == nas.MsgTypePDUSessionModificationCommand {
+			log.Info("[UE][NAS] Receiving PDU Session Modification Command")
+
+			pduSessionId := payloadContainer.PDUSessionModificationCommand.PDUSessionID.GetPDUSessionID()
+
+			// send PDUSessionModificationComplete back
+			modComplete, err := mm_5gs.UlNasTransportModificationComplete(ue, pduSessionId)
+			if err != nil {
+				log.Errorf("[UE][NAS] Error encoding PDUSessionModificationComplete: %v", err)
+				return
+			}
+
+			sender.SendToGnb(ue, modComplete)
+			log.Infof("[UE][NAS] PDU Session Modification Complete sent back to network for ID %d", pduSessionId)
 		}
-		ue.SetSMError(errMsg)
-		return
 	}
-	
-	msgType := payloadContainer.GsmHeader.GetMessageType()
-	
-	if msgType == nas.MsgTypePDUSessionEstablishmentAccept {
-		log.Info("[UE][NAS] Receiving PDU Session Establishment Accept")
 
-		// get PDU Session ID from payloadContainer
-		pduSessionId := payloadContainer.PDUSessionEstablishmentAccept.PDUSessionID.GetPDUSessionID()
+	// 2. Fallback Raw Byte Inspection for 5GSM payload container (if struct unmarshaling returned nil or unrecognized 5GSM header)
+	if len(rawPayload) >= 5 {
+		epd := rawPayload[0]
+		if epd == 0x2E { // 5GSM Protocol Discriminator
+			pduSessionId := rawPayload[1]
+			msgType := rawPayload[3]
+			cause := rawPayload[4]
 
-		// update PDU Session state to active.
-		sess := ue.GetPduSession(pduSessionId)
-		if sess != nil {
-			sess.State = context.SM5G_PDU_SESSION_ACTIVE
-			sess.Error = "" // clear previous errors
+			if msgType == 195 || msgType == 214 || msgType == 202 || msgType == 210 {
+				desc := Get5GSMCauseDesc(cause)
+				errMsg := fmt.Sprintf("PDU Session #%d Rejected by 5G Core (SMF/AMF): 5GSM Cause #%d (%s)", pduSessionId, cause, desc)
+				log.Warnf("[UE][NAS] Raw Fallback Extracted Reject: %s", errMsg)
+
+				sess := ue.GetPduSession(pduSessionId)
+				if sess != nil {
+					sess.State = context.SM5G_PDU_SESSION_INACTIVE
+					sess.Error = errMsg
+				}
+				for _, s := range ue.PduSessions {
+					if s.State == context.SM5G_PDU_SESSION_ACTIVE_PENDING {
+						s.State = context.SM5G_PDU_SESSION_INACTIVE
+						s.Error = errMsg
+					}
+				}
+				ue.SetSMError(errMsg)
+				return
+			}
 		}
+	}
 
-		// get UE ip
-		UeIp := payloadContainer.PDUSessionEstablishmentAccept.GetPDUAddressInformation()
-		ue.SetIp(pduSessionId, UeIp)
-	} else if msgType == nas.MsgTypePDUSessionEstablishmentReject {
-		pduSessionId := payloadContainer.PDUSessionEstablishmentReject.PDUSessionID.GetPDUSessionID()
-		cause := payloadContainer.PDUSessionEstablishmentReject.Cause5GSM.GetCauseValue()
-		desc := Get5GSMCauseDesc(cause)
-		errMsg := fmt.Sprintf("PDU Session #%d Rejected by 5G Core (SMF/AMF): 5GSM Cause #%d (%s)", pduSessionId, cause, desc)
-		log.Warnf("[UE][NAS] %s", errMsg)
-
-		sess := ue.GetPduSession(pduSessionId)
-		if sess != nil {
+	// 3. Fallback unparseable payload container error
+	errMsg := "PDU Session Rejected by 5G Core: DL NAS Transport payload container (5GSM) unparseable or rejected by SMF/AMF."
+	log.Warnf("[UE][NAS] %s", errMsg)
+	for _, sess := range ue.PduSessions {
+		if sess.State == context.SM5G_PDU_SESSION_ACTIVE_PENDING {
 			sess.State = context.SM5G_PDU_SESSION_INACTIVE
 			sess.Error = errMsg
 		}
-		ue.SetSMError(errMsg)
-	} else if msgType == nas.MsgTypePDUSessionReleaseCommand {
-		log.Info("[UE][NAS] Receiving PDU Session Release Command")
-
-		// get PDU Session ID from payloadContainer
-		pduSessionId := payloadContainer.PDUSessionReleaseCommand.PDUSessionID.GetPDUSessionID()
-
-		// update PDU Session state to inactive.
-		ue.GetPduSession(pduSessionId).State = context.SM5G_PDU_SESSION_INACTIVE
-		log.Infof("[UE][NAS] PDU Session %d released (inactive)", pduSessionId)
-
-		// send PDUSessionReleaseComplete back
-		releaseComplete, err := mm_5gs.UlNasTransportReleaseComplete(ue, pduSessionId)
-		if err != nil {
-			log.Errorf("[UE][NAS] Error encoding PDUSessionReleaseComplete: %v", err)
-			return
-		}
-
-		sender.SendToGnb(ue, releaseComplete)
-		log.Infof("[UE][NAS] PDU Session Release Complete sent back to network for ID %d", pduSessionId)
-	} else if msgType == nas.MsgTypePDUSessionModificationCommand {
-		log.Info("[UE][NAS] Receiving PDU Session Modification Command")
-
-		pduSessionId := payloadContainer.PDUSessionModificationCommand.PDUSessionID.GetPDUSessionID()
-
-		// send PDUSessionModificationComplete back
-		modComplete, err := mm_5gs.UlNasTransportModificationComplete(ue, pduSessionId)
-		if err != nil {
-			log.Errorf("[UE][NAS] Error encoding PDUSessionModificationComplete: %v", err)
-			return
-		}
-
-		sender.SendToGnb(ue, modComplete)
-		log.Infof("[UE][NAS] PDU Session Modification Complete sent back to network for ID %d", pduSessionId)
 	}
 }
 
