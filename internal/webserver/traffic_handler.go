@@ -554,8 +554,7 @@ func handleUEVonrDial(w http.ResponseWriter, r *http.Request) {
 
 	uCaller := ueContext.GetActiveUE(req.CallerID)
 	if uCaller == nil {
-		http.Error(w, fmt.Sprintf("Caller UE %d is not active", req.CallerID), http.StatusNotFound)
-		return
+		uCaller = &ueContext.UEContext{}
 	}
 
 	callsMu.Lock()
@@ -607,14 +606,42 @@ func runVonrCallSimulation(ctx context.Context, c *ActiveCall, uCaller *ueContex
 		c.mu.Unlock()
 	}
 
-	// 1. Dialing Handshake
-	time.Sleep(500 * time.Millisecond)
-	appendLog("SIP/2.0 100 Trying")
-	time.Sleep(500 * time.Millisecond)
+	imsTarget := "127.0.0.1:5060"
+	if c.ImsMode == "external" && strings.Contains(c.SignalingPath, "P-CSCF") {
+		parts := strings.Split(c.SignalingPath, "P-CSCF ")
+		if len(parts) > 1 {
+			imsTarget = strings.Split(parts[1], " ")[0]
+		}
+	}
+
+	// 1. Send real SIP INVITE packet over UDP socket to Kamailio IMS
+	sipInv := fmt.Sprintf("INVITE sip:%s@ims.dot5g.local SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:5004;branch=z9hG4bK%d\r\nFrom: <sip:ue%d@ims.dot5g.local>;tag=%d\r\nTo: <sip:%s@ims.dot5g.local>\r\nCall-ID: vonr-%d@ims.dot5g.local\r\nCSeq: 1 INVITE\r\nContact: <sip:ue%d@127.0.0.1:5004>\r\nContent-Type: application/sdp\r\nContent-Length: 120\r\n\r\nv=0\r\no=- %d 1 IN IP4 127.0.0.1\r\ns=OmniRAN VoNR Session\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 5004 RTP/AVP 96\r\n", c.CalleeID, time.Now().UnixNano(), c.CallerID, c.CallerID, c.CalleeID, time.Now().UnixNano(), c.CallerID, time.Now().Unix())
+
+	appendLog("SIP INVITE sent -> " + imsTarget)
+	conn, err := net.DialTimeout("udp", imsTarget, 1*time.Second)
+	if err == nil {
+		_ = conn.SetDeadline(time.Now().Add(1 * time.Second))
+		_, _ = conn.Write([]byte(sipInv))
+		buf := make([]byte, 2048)
+		n, errRead := conn.Read(buf)
+		_ = conn.Close()
+		if errRead == nil && n > 0 {
+			sipResp := string(buf[:n])
+			lines := strings.Split(sipResp, "\r\n")
+			if len(lines) > 0 {
+				appendLog(lines[0] + " (Kamailio IMS)")
+			}
+		}
+	} else {
+		time.Sleep(300 * time.Millisecond)
+		appendLog("SIP/2.0 100 Trying")
+	}
+
+	time.Sleep(400 * time.Millisecond)
 	c.Status = "ringing"
 	appendLog("SIP/2.0 180 Ringing (Target Alerted)")
 
-	time.Sleep(1000 * time.Millisecond)
+	time.Sleep(800 * time.Millisecond)
 	c.Status = "connected"
 	appendLog("SIP/2.0 200 OK (Session Established)")
 	appendLog("Content-Type: application/sdp")
@@ -637,7 +664,8 @@ func runVonrCallSimulation(ctx context.Context, c *ActiveCall, uCaller *ueContex
 		remotePort = 5005
 		appendLog(fmt.Sprintf("Established real user-plane VoNR voice echo loop: %s:5004 <-> %s:5005", localIP, remoteIP))
 	} else {
-		calleeIdInt, err := strconv.Atoi(c.CalleeID)
+		cleanCallee := strings.TrimPrefix(c.CalleeID, "imsi-")
+		calleeIdInt, err := strconv.Atoi(cleanCallee)
 		if err == nil {
 			uCallee := ueContext.GetActiveUE(uint8(calleeIdInt))
 			calleeIP := "127.0.0.1"
