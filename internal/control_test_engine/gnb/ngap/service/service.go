@@ -36,6 +36,17 @@ func InitConn(amf *context.GNBAmf, gnb *context.GNBContext) error {
 		rem,
 		sctp.InitMsg{NumOstreams: 2, MaxInstreams: 2})
 	if err != nil {
+		// Fallback to dynamic ephemeral port if fixed control port is in use or TIME_WAIT
+		locAny, errAny := sctp.ResolveSCTPAddr("sctp", fmt.Sprintf("%s:0", gnb.GetGnbIp()))
+		if errAny == nil {
+			conn, err = sctp.DialSCTPExt(
+				"sctp",
+				locAny,
+				rem,
+				sctp.InitMsg{NumOstreams: 2, MaxInstreams: 2})
+		}
+	}
+	if err != nil {
 		amf.SetSCTPConn(nil)
 		return err
 	}

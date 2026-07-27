@@ -2303,9 +2303,17 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	usersMu.RUnlock()
 
 	if !ok || !verifyPassword(req.Password, u.Salt, u.PasswordHash) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"error":"Invalid credentials"}`))
-		return
+		// Reload users from disk in case config/users.json was updated while server was running
+		_ = loadUsers()
+		usersMu.RLock()
+		u, ok = users[req.Username]
+		usersMu.RUnlock()
+
+		if !ok || !verifyPassword(req.Password, u.Salt, u.PasswordHash) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"Invalid credentials"}`))
+			return
+		}
 	}
 
 	tokenBytes := make([]byte, 32)

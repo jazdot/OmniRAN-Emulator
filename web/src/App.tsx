@@ -1894,9 +1894,13 @@ export default function App() {
     };
   }, [activeTab]);
 
-  // Toggle theme class on body
+  // Toggle theme class on body & update browser tab favicon
   useEffect(() => {
     localStorage.setItem('theme', theme);
+    const favicon = document.getElementById('favicon') as HTMLLinkElement | null;
+    if (favicon) {
+      favicon.href = theme === 'light' ? '/omniran_lt.png' : '/omniran.png';
+    }
     if (theme === 'light') {
       document.body.classList.add('light');
     } else {

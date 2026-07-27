@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/omniran.png" />
+    <link id="favicon" rel="icon" type="image/png" href="/omniran_lt.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OmniRAN Emulator</title>
   </head>
@@ -11,6 +11,10 @@
       (function() {
         const saved = localStorage.getItem('theme');
         const theme = (saved === 'dark' || saved === 'light') ? saved : 'light';
+        const favicon = document.getElementById('favicon');
+        if (favicon) {
+          favicon.href = theme === 'light' ? '/omniran_lt.png' : '/omniran.png';
+        }
         if (theme === 'light') {
           document.body.classList.add('light');
         } else {
