@@ -222,6 +222,7 @@ func StartServer(host string, port int) error {
 	mux.HandleFunc("/api/fleet/gnb/", withAuth(handleFleetGNBProfileDelete))
 	mux.HandleFunc("/api/fleet/launch/ue", withAuth(handleFleetLaunchUE))
 	mux.HandleFunc("/api/fleet/launch/gnb", withAuth(handleFleetLaunchGNB))
+	mux.HandleFunc("/api/fleet/gnb/test-amf", withAuth(handleFleetGNBTestAMF))
 	mux.HandleFunc("/api/fleet/stop/ue", withAuth(handleFleetStopUE))
 	mux.HandleFunc("/api/fleet/stop/gnb/", withAuth(handleFleetStopGNB))
 	mux.HandleFunc("/api/fleet/running", withAuth(handleFleetRunning))
@@ -442,6 +443,34 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		resolveUeConnectionDetails(u)
 		pduSessions := make([]PDUSessionStatus, 0)
 		for _, sess := range u.PduSessions {
+			// Synchronize global MM/SM error if session error was recorded or if MM/SM error exists
+			if sess.Error == "" {
+				if u.GetSMError() != "" {
+					sess.Error = u.GetSMError()
+				} else if u.GetMMError() != "" {
+					sess.Error = u.GetMMError()
+				}
+			}
+
+			// If UE 5GMM registration failed or is DEREGISTERED, PDU session CANNOT be pending
+			if u.GetStateMM() == ueContext.MM5G_DEREGISTERED && (u.GetMMError() != "" || u.GetSMError() != "") {
+				sess.State = ueContext.SM5G_PDU_SESSION_INACTIVE
+				if sess.Error == "" {
+					sess.Error = u.GetMMError()
+				}
+			}
+
+			// Evaluate PDU session establishment timeout at 2.5s or force inactive if error exists
+			if sess.State == ueContext.SM5G_PDU_SESSION_ACTIVE_PENDING {
+				if sess.Error != "" {
+					sess.State = ueContext.SM5G_PDU_SESSION_INACTIVE
+				} else if sess.RequestedAt.IsZero() || time.Since(sess.RequestedAt) > 2500*time.Millisecond {
+					sess.State = ueContext.SM5G_PDU_SESSION_INACTIVE
+					sess.Error = fmt.Sprintf("PDU Session #%d Establishment Timed Out: AMF/SMF Core network did not send PDUSessionResourceSetupRequest or 5GSM Accept within 2.5s.", sess.Id)
+					u.SetSMError(sess.Error)
+				}
+			}
+
 			pduSessions = append(pduSessions, PDUSessionStatus{
 				ID:             sess.Id,
 				UeIP:           u.GetIp(sess.Id),
@@ -451,6 +480,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 				Sd:             sess.Snssai.Sd,
 				State:          sess.State,
 				StateDesc:      ueContext.GetStateSMDesc(sess.State),
+				Error:          sess.Error,
 			})
 		}
 		runningUEs = append(runningUEs, UEStatus{
@@ -469,6 +499,8 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 			GnbProfileName:   u.GetGnbProfileName(),
 			PduSessions:      pduSessions,
 			ConnectionState:  getUeConnectionState(u),
+			MmError:          u.GetMMError(),
+			SmError:          u.GetSMError(),
 		})
 	}
 	resp.RunningUes = runningUEs
@@ -1471,6 +1503,64 @@ func handleFleetLaunchGNB(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"status":"launched"}`))
+}
+
+func handleFleetGNBTestAMF(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ProfileName string `json:"profileName"`
+		AmfIp       string `json:"amfIp"`
+		AmfPort     int    `json:"amfPort"`
+		ControlIp   string `json:"controlIp"`
+		Mcc         string `json:"mcc"`
+		Mnc         string `json:"mnc"`
+		Tac         string `json:"tac"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	prof := config.GNBProfile{
+		Name:      req.ProfileName,
+		AmfIp:     req.AmfIp,
+		AmfPort:   req.AmfPort,
+		ControlIp: req.ControlIp,
+		Mcc:       req.Mcc,
+		Mnc:       req.Mnc,
+		Tac:       req.Tac,
+	}
+
+	if req.ProfileName != "" {
+		if loadedProf, ok := config.GetGNBProfile(req.ProfileName); ok {
+			prof = loadedProf
+			if req.AmfIp != "" {
+				prof.AmfIp = req.AmfIp
+			}
+			if req.AmfPort != 0 {
+				prof.AmfPort = req.AmfPort
+			}
+		}
+	}
+
+	if prof.AmfIp == "" {
+		prof.AmfIp = "127.0.0.18"
+	}
+	if prof.AmfPort == 0 {
+		prof.AmfPort = 38412
+	}
+	if prof.ControlIp == "" {
+		prof.ControlIp = "127.0.0.1"
+	}
+
+	report := TestAMFConnection(prof)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(report)
 }
 
 // FleetStopUERequest carries the UE ID to stop.

@@ -329,7 +329,24 @@ func InitGnbFleet(conf config.Config, ctx stdctx.Context, gnbSocketPath string) 
 		}
 
 		trigger.SendNgSetupRequest(g, amf)
-		log.Infof("[GNB-FLEET] %s NG Setup Request sent", conf.GNodeB.PlmnList.GnbId)
+		log.Infof("[GNB-FLEET] %s NG Setup Request sent to AMF (%s:%d)", conf.GNodeB.PlmnList.GnbId, conf.AMF.Ip, conf.AMF.Port)
+
+		// Verify NG Setup Request outcome in initial 400ms before declaring gNB running
+		select {
+		case <-g.ConnLossChan():
+			errStr := g.GetError()
+			if errStr == "" {
+				errStr = fmt.Sprintf("gNB %s NG Setup failed: AMF (%s:%d) disconnected or rejected NG Setup Request (PLMN: MCC %s, MNC %s, TAC %s)", conf.GNodeB.PlmnList.GnbId, conf.AMF.Ip, conf.AMF.Port, conf.GNodeB.PlmnList.Mcc, conf.GNodeB.PlmnList.Mnc, conf.GNodeB.PlmnList.Tac)
+			}
+			g.Terminate()
+			if gnbSocketPath != "" {
+				_ = os.Remove(gnbSocketPath)
+			}
+			errCh <- fmt.Errorf("%s", errStr)
+			return
+		case <-time.After(400 * time.Millisecond):
+			// NG Setup acknowledged or no immediate rejection received
+		}
 
 		// Block until context cancelled or connection lost
 		select {

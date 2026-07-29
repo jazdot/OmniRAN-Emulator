@@ -53,6 +53,20 @@ type GNBContext struct {
 	ueIpGenerator  uint8  // ran ue ip.
 	connLossChan   chan struct{}
 	connLossOnce   sync.Once
+	lastError      string
+	lastErrorMu    sync.RWMutex
+}
+
+func (g *GNBContext) SetError(err string) {
+	g.lastErrorMu.Lock()
+	defer g.lastErrorMu.Unlock()
+	g.lastError = err
+}
+
+func (g *GNBContext) GetError() string {
+	g.lastErrorMu.RLock()
+	defer g.lastErrorMu.RUnlock()
+	return g.lastError
 }
 
 type DataInfo struct {

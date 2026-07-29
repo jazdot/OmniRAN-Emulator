@@ -35,7 +35,9 @@ import {
   RotateCcw,
   Square,
   Zap,
-  Upload
+  Upload,
+  Copy,
+  Edit3
 } from 'lucide-react';
 
 // API base path (works with relative path when served by Go, or proxied in dev)
@@ -2108,10 +2110,24 @@ export default function App() {
   const [batchResults, setBatchResults] = useState<{ successfulUeIds: number[]; errors: string[] } | null>(null);
 
   const [fleetRunning, setFleetRunning] = useState<{ runningUes: RunningUE[]; runningGnbs: RunningGNB[] }>({ runningUes: [], runningGnbs: [] });
-  const [fleetMsg, setFleetMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [fleetMsg, setFleetMsg] = useState<{ text: string; type: 'success' | 'error' | 'info'; details?: string; profileName?: string } | null>(null);
+  const toastTimerRef = useRef<any>(null);
   const [fleetActiveSection, setFleetActiveSection] = useState<'live' | 'gnb' | 'ue' | 'batch' | 'library'>('live');
   const [ueToLaunch, setUeToLaunch] = useState<string | null>(null);
   const [selectedTargetGnb, setSelectedTargetGnb] = useState<string>('');
+  const [testingAmfProfile, setTestingAmfProfile] = useState<string | null>(null);
+  const [diagnosticReportModal, setDiagnosticReportModal] = useState<{
+    profileName?: string;
+    title: string;
+    amfIp: string;
+    amfPort: number;
+    pingSuccess?: boolean;
+    sctpConnected?: boolean;
+    kernelSctpSupported?: boolean;
+    error?: string;
+    diagnostic: string;
+    suggestedActions?: string[];
+  } | null>(null);
 
   const renderSvgLinks = () => {
     const links: React.ReactNode[] = [];
@@ -2782,9 +2798,34 @@ export default function App() {
     }
   }, [activeTab]);
 
-  const showFleetMsg = (text: string, type: 'success' | 'error') => {
-    setFleetMsg({ text, type });
-    setTimeout(() => setFleetMsg(null), 4000);
+  const startToastTimer = (durationMs: number = 5000) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
+      setFleetMsg(null);
+    }, durationMs);
+  };
+
+  const handleToastMouseEnter = () => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+  };
+
+  const handleToastMouseLeave = () => {
+    startToastTimer(3000); // 3 seconds after mouse leaves
+  };
+
+  const showFleetMsg = (
+    text: string,
+    type: 'success' | 'error' | 'info' = 'info',
+    details?: string,
+    profileName?: string
+  ) => {
+    setFleetMsg({ text, type, details, profileName });
+    startToastTimer(type === 'error' ? 6000 : 4000);
   };
 
   const saveUEProfile = async () => {
@@ -2969,6 +3010,46 @@ export default function App() {
     }
   };
 
+  const testAMFLink = async (prof: GNBProfile) => {
+    setTestingAmfProfile(prof.name);
+    try {
+      const res = await fetch(`${API_BASE}/fleet/gnb/test-amf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profileName: prof.name,
+          amfIp: prof.amfIp,
+          amfPort: prof.amfPort,
+          controlIp: prof.controlIp,
+          mcc: prof.mcc,
+          mnc: prof.mnc,
+          tac: prof.tac
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDiagnosticReportModal({
+          profileName: prof.name,
+          title: data.sctpConnected ? `✅ SCTP Link Verified for ${prof.name}` : `❌ AMF SCTP Link Failed for ${prof.name}`,
+          amfIp: data.amfIp,
+          amfPort: data.amfPort,
+          pingSuccess: data.pingSuccess,
+          sctpConnected: data.sctpConnected,
+          kernelSctpSupported: data.kernelSctpSupported,
+          error: data.error,
+          diagnostic: data.diagnostic,
+          suggestedActions: data.suggestedActions || []
+        });
+      } else {
+        showFleetMsg(await res.text(), 'error');
+      }
+    } catch (err) {
+      showFleetMsg(`SCTP Test Error: ${err}`, 'error');
+    } finally {
+      setTestingAmfProfile(null);
+    }
+  };
+
   const launchGNBProfile = async (name: string) => {
     try {
       const res = await fetch(`${API_BASE}/fleet/launch/gnb`, {
@@ -2976,7 +3057,46 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ profileName: name })
       });
-      if (!res.ok) { showFleetMsg(await res.text(), 'error'); return; }
+      if (!res.ok) {
+        const errText = await res.text();
+        const targetProf = gnbProfiles.find(p => p.name === name) || defaultGNBProfile;
+        const errLower = errText.toLowerCase();
+
+        let summaryText = `gNB '${name}' launch failed`;
+        if (errLower.includes("protocol not supported") || errLower.includes("eprotonosupport")) {
+          summaryText = `gNB '${name}' failed: Linux Kernel SCTP module missing`;
+        } else if (errLower.includes("connection refused") || errLower.includes("econnrefused")) {
+          summaryText = `gNB '${name}' failed: Connection refused by AMF (${targetProf.amfIp}:${targetProf.amfPort})`;
+        } else if (errLower.includes("timeout") || errLower.includes("unreachable")) {
+          summaryText = `gNB '${name}' failed: AMF at ${targetProf.amfIp}:${targetProf.amfPort} timed out / blocked by firewall`;
+        } else if (errLower.includes("cannot assign requested address")) {
+          summaryText = `gNB '${name}' failed: Control IP '${targetProf.controlIp}' not configured locally`;
+        } else if (errLower.includes("unknown plmn") || errLower.includes("plmn")) {
+          summaryText = `gNB '${name}' failed: AMF rejected setup (Unknown PLMN ${targetProf.mcc}-${targetProf.mnc})`;
+        } else {
+          const lines = errText.trim().split('\n');
+          summaryText = `gNB '${name}' failed: ${lines[0].replace(/^[❌\s]+/, '')}`;
+        }
+
+        const fullDiagnostic = errText.includes('🔍 3GPP NGAP') ? errText : `❌ gNB '${name}' Launch Error:\n${errText}`;
+        const diagReport = {
+          profileName: name,
+          title: `❌ gNB '${name}' Launch Failed`,
+          amfIp: targetProf.amfIp || '127.0.0.18',
+          amfPort: targetProf.amfPort || 38412,
+          error: errText,
+          diagnostic: fullDiagnostic,
+          suggestedActions: [
+            'Run "sudo modprobe sctp" on host terminal if running on a fresh Linux machine',
+            'Verify 5G Core AMF service is running on target host (ps aux | grep amf)',
+            `Check firewall rules for SCTP protocol 132 / port ${targetProf.amfPort || 38412}`
+          ]
+        };
+
+        setDiagnosticReportModal(diagReport);
+        showFleetMsg(summaryText, 'error', fullDiagnostic, name);
+        return;
+      }
       showFleetMsg(`gNB '${name}' launched successfully`, 'success');
       setFleetActiveSection('live');
       fetchFleetRunning();
@@ -4735,18 +4855,6 @@ export default function App() {
 
                           {inspectorTab === 'details' && (
                             <div className="inspector-details" style={{ maxHeight: '380px', overflowY: 'auto' }}>
-                              {activeUe.mmError && (
-                                <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px', fontSize: '11px', color: '#f87171', lineHeight: '1.4' }}>
-                                  <strong style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' }}><AlertTriangle size={13} /> 5GMM Registration Error:</strong>
-                                  <div>{activeUe.mmError}</div>
-                                </div>
-                              )}
-                              {activeUe.smError && (
-                                <div style={{ background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px', fontSize: '11px', color: '#fbbf24', lineHeight: '1.4' }}>
-                                  <strong style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' }}><AlertTriangle size={13} /> 5GSM PDU Session Error:</strong>
-                                  <div>{activeUe.smError}</div>
-                                </div>
-                              )}
                               <div className="detail-row">
                                 <span className="detail-label">SUPI</span>
                                 <span className="detail-val font-mono">{activeUe.supi}</span>
@@ -4787,60 +4895,76 @@ export default function App() {
                                   {activeUe.gnbProfileName ? `${activeUe.gnbProfileName} (${activeUe.gnbId || '—'})` : '—'}
                                 </span>
                               </div>
-                              <div className="detail-row" style={{ flexDirection: 'column', alignItems: 'flex-start', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px', marginTop: '8px' }}>
-                                <span className="detail-label" style={{ marginBottom: '4px' }}>PDU Sessions ({activeUe.pduSessions?.length || 0})</span>
-                                {activeUe.pduSessions && activeUe.pduSessions.length > 0 ? (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
-                                    {activeUe.pduSessions.map(s => {
-                                      const errText = s.error || (activeUe as any).smError;
-                                      const isFailed = !!errText;
-                                      const isActive = !isFailed && s.stateDesc?.includes('ACTIVE') && !s.stateDesc?.includes('PENDING');
-                                      const isPending = !isFailed && s.stateDesc?.includes('PENDING');
-                                      return (
-                                        <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '6px', width: '100%' }}>
-                                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', width: '100%' }}>
-                                            <span style={{ color: 'var(--color-info)' }}>PDU #{s.id} ({s.dnn}):</span>
-                                            <span className="font-mono ml-auto" style={{ marginRight: '6px' }}>{s.ueIp || (isFailed ? 'Rejected' : '—')}</span>
-                                            <span className={`fleet-state-badge sm ${isActive ? 'registered' : isFailed ? 'danger' : 'warning'}`}>
-                                              {isFailed ? 'REJECTED' : s.stateDesc}
-                                            </span>
-                                          </div>
-                                          {isPending && (
-                                            <div style={{ fontSize: '10px', color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)', padding: '4px 6px', borderRadius: '4px', marginTop: '2px' }}>
-                                              ⏳ Awaiting 5GSM PDU Session Establishment Accept / Resource Setup Request from 5G Core...
+                              <div className="detail-row" style={{ flexDirection: 'column', alignItems: 'flex-start', borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '8px', width: '100%' }}>
+                                <span className="detail-label" style={{ marginBottom: '6px' }}>PDU Sessions ({activeUe.pduSessions?.length || 0})</span>
+
+                                {(() => {
+                                  const globalErr = (activeUe as any).smError || (activeUe as any).mmError || (activeUe as any).error;
+                                  const pduList = (activeUe.pduSessions && activeUe.pduSessions.length > 0) ? activeUe.pduSessions : (globalErr ? [{ id: 1, dnn: 'internet', stateDesc: 'REJECTED', error: globalErr }] : []);
+
+                                  if (pduList.length === 0) {
+                                    return <span className="detail-val" style={{ color: 'var(--text-muted)', fontSize: '11px' }}>None</span>;
+                                  }
+
+                                  return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
+                                      {pduList.map((s: any) => {
+                                        const errText = s.error || globalErr;
+                                        const isFailed = !!errText || s.stateDesc?.includes('INACTIVE') || s.stateDesc?.includes('REJECTED');
+                                        const isActive = !isFailed && s.stateDesc?.includes('ACTIVE') && !s.stateDesc?.includes('PENDING');
+                                        const isPending = !isFailed && s.stateDesc?.includes('PENDING');
+                                        return (
+                                          <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px', width: '100%' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', width: '100%' }}>
+                                              <span style={{ color: 'var(--color-info)' }}>PDU #{s.id} ({s.dnn}):</span>
+                                              <span className="font-mono ml-auto" style={{ marginRight: '6px' }}>{s.ueIp || (isFailed ? 'Rejected' : '—')}</span>
+                                              <span className={`fleet-state-badge sm ${isActive ? 'registered' : isFailed ? 'danger' : 'warning'}`}>
+                                                {isFailed ? 'REJECTED' : s.stateDesc}
+                                              </span>
                                             </div>
-                                          )}
-                                          {errText && (
-                                            <div style={{ fontSize: '10px', color: '#f87171', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '6px 8px', borderRadius: '4px', marginTop: '2px', lineHeight: '1.4' }}>
-                                              <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                <AlertTriangle size={12} /> 3GPP PDU Session Reject Cause:
+                                            {isPending && (
+                                              <div style={{ fontSize: '10px', color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)', padding: '4px 6px', borderRadius: '4px', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <RefreshCw size={10} className="spin" /> Awaiting 5GSM PDU Session Establishment Accept / Resource Setup Request from 5G Core...
                                               </div>
-                                              <div style={{ marginTop: '2px', fontWeight: '500' }}>{errText}</div>
-                                            </div>
-                                          )}
-                                          {isActive && (
-                                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '2px' }}>
-                                              <button 
-                                                onClick={() => modifyPduSession(activeUe.id, s.id)}
-                                                style={{ padding: '2px 6px', fontSize: '9px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', borderRadius: '3px', cursor: 'pointer', fontWeight: '600' }}
-                                              >
-                                                Modify QoS
-                                              </button>
-                                              <button 
-                                                onClick={() => releasePduSession(activeUe.id, s.id)}
-                                                style={{ padding: '2px 6px', fontSize: '9px', background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '3px', cursor: 'pointer', fontWeight: '600' }}
-                                              >
-                                                Release
-                                              </button>
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                ) : (
-                                  <span className="detail-val" style={{ color: 'var(--text-muted)', fontSize: '11px' }}>None</span>
-                                )}
+                                            )}
+                                            {isFailed && errText && (
+                                              <div style={{
+                                                fontSize: '11px',
+                                                lineHeight: '1.4',
+                                                padding: '6px 8px',
+                                                borderRadius: '4px',
+                                                marginTop: '4px',
+                                                background: 'rgba(239, 68, 68, 0.1)',
+                                                border: '1px solid rgba(239, 68, 68, 0.3)',
+                                                color: 'var(--text-primary)',
+                                                fontFamily: 'monospace',
+                                                wordBreak: 'break-word'
+                                              }}>
+                                                {errText}
+                                              </div>
+                                            )}
+                                            {isActive && (
+                                              <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '2px' }}>
+                                                <button 
+                                                  onClick={() => modifyPduSession(activeUe.id, s.id)}
+                                                  style={{ padding: '2px 6px', fontSize: '9px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', borderRadius: '3px', cursor: 'pointer', fontWeight: '600' }}
+                                                >
+                                                  Modify QoS
+                                                </button>
+                                                <button 
+                                                  onClick={() => releasePduSession(activeUe.id, s.id)}
+                                                  style={{ padding: '2px 6px', fontSize: '9px', background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '3px', cursor: 'pointer', fontWeight: '600' }}
+                                                >
+                                                  Release
+                                                </button>
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             </div>
                           )}
@@ -5762,25 +5886,26 @@ export default function App() {
                             <td style={{ padding: '10px' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 {ue.pduSessions && ue.pduSessions.map((pdu: any) => {
-                                  const isPduError = !!pdu.error;
-                                  const isPduActive = !isPduError && (pdu.state === 8 || (pdu.stateDesc?.includes('ACTIVE') && !pdu.stateDesc?.includes('PENDING')));
+                                  const errText = pdu.error || (ue as any).smError || (ue as any).mmError;
+                                  const isFailed = !!errText || pdu.stateDesc?.includes('INACTIVE');
+                                  const isPduActive = !isFailed && (pdu.state === 8 || (pdu.stateDesc?.includes('ACTIVE') && !pdu.stateDesc?.includes('PENDING')));
                                   return (
                                     <div key={pdu.id} style={{ fontSize: '12px', fontFamily: 'monospace' }}>
-                                      <span style={{ color: 'var(--color-info)' }}>PDU #{pdu.id} ({pdu.dnn}):</span> {pdu.ueIp || (isPduError ? 'Rejected' : 'Pending...')}
+                                      <span style={{ color: 'var(--color-info)' }}>PDU #{pdu.id} ({pdu.dnn}):</span> {pdu.ueIp || (isFailed ? 'Rejected' : 'Pending...')}
                                       <span style={{ 
                                         marginLeft: '6px',
                                         padding: '1px 4px', 
                                         borderRadius: '3px', 
                                         fontSize: '9px', 
                                         fontWeight: 'bold', 
-                                        background: isPduActive ? 'rgba(16, 185, 129, 0.12)' : isPduError ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.12)', 
-                                        color: isPduActive ? 'var(--color-success)' : isPduError ? '#f87171' : 'var(--color-warning)' 
+                                        background: isPduActive ? 'rgba(16, 185, 129, 0.12)' : isFailed ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.12)', 
+                                        color: isPduActive ? 'var(--color-success)' : isFailed ? '#f87171' : 'var(--color-warning)' 
                                       }}>
-                                        {isPduError ? 'REJECTED' : pdu.stateDesc}
+                                        {isFailed ? 'REJECTED' : pdu.stateDesc}
                                       </span>
-                                      {pdu.error && (
-                                        <div style={{ fontSize: '10px', color: '#f87171', marginTop: '2px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '3px 6px', borderRadius: '3px', whiteSpace: 'normal', fontFamily: 'sans-serif' }}>
-                                          ⚠️ {pdu.error}
+                                      {errText && (
+                                        <div style={{ fontSize: '10px', color: '#f87171', marginTop: '2px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', padding: '3px 6px', borderRadius: '3px', whiteSpace: 'normal', fontFamily: 'sans-serif', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                          <AlertTriangle size={11} /> {errText}
                                         </div>
                                       )}
                                     </div>
@@ -7088,11 +7213,11 @@ export default function App() {
                 {/* Preset Target Quick Buttons */}
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)', alignSelf: 'center', marginRight: '4px' }}>Presets:</span>
-                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => { setPingHost(configData?.AMF?.Ip || '127.0.0.1'); setPingPort(38412); setPingProtocol('sctp'); }}>AMF NGAP (38412)</button>
-                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => { setPingHost('127.0.0.8'); setPingPort(8805); setPingProtocol('udp'); }}>UPF PFCP (8805)</button>
-                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => { setPingHost('127.0.0.1'); setPingPort(2152); setPingProtocol('udp'); }}>GTP-U (2152)</button>
-                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => { setPingHost('127.0.0.10'); setPingPort(8000); setPingProtocol('tcp'); }}>NRF SBI (8000)</button>
-                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => { setPingHost('127.0.0.1'); setPingPort(5000); setPingProtocol('tcp'); }}>Core WebUI (5000)</button>
+                  <button type="button" className="btn-preset-chip" onClick={() => { setPingHost(configData?.AMF?.Ip || '127.0.0.1'); setPingPort(38412); setPingProtocol('sctp'); }}>AMF NGAP (38412)</button>
+                  <button type="button" className="btn-preset-chip" onClick={() => { setPingHost('127.0.0.8'); setPingPort(8805); setPingProtocol('udp'); }}>UPF PFCP (8805)</button>
+                  <button type="button" className="btn-preset-chip" onClick={() => { setPingHost('127.0.0.1'); setPingPort(2152); setPingProtocol('udp'); }}>GTP-U (2152)</button>
+                  <button type="button" className="btn-preset-chip" onClick={() => { setPingHost('127.0.0.10'); setPingPort(8000); setPingProtocol('tcp'); }}>NRF SBI (8000)</button>
+                  <button type="button" className="btn-preset-chip" onClick={() => { setPingHost('127.0.0.1'); setPingPort(5000); setPingProtocol('tcp'); }}>Core WebUI (5000)</button>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -7124,7 +7249,7 @@ export default function App() {
                   <h3 className="panel-title" style={{ margin: 0, color: '#10b981' }}>
                     <Network size={18} /> Network Interface & Route Inspector
                   </h3>
-                  <button type="button" className="btn btn-xs btn-ghost" onClick={fetchPcapInterfaces}>
+                  <button type="button" className="btn-preset-chip" onClick={fetchPcapInterfaces}>
                     <RefreshCw size={12} /> Refresh
                   </button>
                 </div>
@@ -7257,8 +7382,56 @@ export default function App() {
 
             {/* Fleet Toast */}
             {fleetMsg && (
-              <div className={`fleet-toast ${fleetMsg.type}`}>
-                {fleetMsg.text}
+              <div
+                className={`fleet-toast ${fleetMsg.type}`}
+                onMouseEnter={handleToastMouseEnter}
+                onMouseLeave={handleToastMouseLeave}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+                  {fleetMsg.type === 'error' && <AlertTriangle size={18} style={{ flexShrink: 0, color: '#f87171' }} />}
+                  {fleetMsg.type === 'success' && <CheckCircle2 size={18} style={{ flexShrink: 0, color: '#34d399' }} />}
+                  {fleetMsg.type === 'info' && <Zap size={18} style={{ flexShrink: 0, color: '#60a5fa' }} />}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 'bold' }} title={fleetMsg.text}>
+                    {fleetMsg.text}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                  {fleetMsg.details && (
+                    <button
+                      className="fleet-toast-btn-details"
+                      onClick={() => {
+                        if (!diagnosticReportModal && fleetMsg.profileName) {
+                          const prof = gnbProfiles.find(p => p.name === fleetMsg.profileName) || defaultGNBProfile;
+                          setDiagnosticReportModal({
+                            profileName: fleetMsg.profileName,
+                            title: `❌ gNB '${fleetMsg.profileName}' Diagnostic Report`,
+                            amfIp: prof.amfIp || '127.0.0.18',
+                            amfPort: prof.amfPort || 38412,
+                            diagnostic: fleetMsg.details || fleetMsg.text,
+                            suggestedActions: [
+                              'Run "sudo modprobe sctp" on host terminal',
+                              'Verify 5G Core AMF process (ps aux | grep amf)',
+                              'Check firewall for SCTP protocol 132'
+                            ]
+                          });
+                        }
+                      }}
+                    >
+                      🔍 View Details
+                    </button>
+                  )}
+                  <button
+                    className="fleet-toast-close"
+                    onClick={() => {
+                      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+                      setFleetMsg(null);
+                    }}
+                    title="Close Notification"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
             )}
 
@@ -7277,10 +7450,10 @@ export default function App() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <button className="btn btn-xs btn-ghost" onClick={exportFleetConfig} title="Export entire fleet configuration as JSON">
+                <button className="btn-fleet-action clone" onClick={exportFleetConfig} title="Export entire fleet configuration as JSON">
                   <Download size={13} /> Export Fleet JSON
                 </button>
-                <label className="btn btn-xs btn-ghost" style={{ cursor: 'pointer', margin: 0 }} title="Import fleet configuration JSON">
+                <label className="btn-fleet-action clone" style={{ cursor: 'pointer', margin: 0 }} title="Import fleet configuration JSON">
                   <Upload size={13} /> Import Fleet JSON
                   <input type="file" accept=".json" onChange={importFleetConfig} style={{ display: 'none' }} />
                 </label>
@@ -7356,7 +7529,7 @@ export default function App() {
                           <div key={u.id} className="fleet-ue-card">
                             <div className="fleet-ue-card-header">
                               <span className="fleet-ue-id">UE-{u.id}</span>
-                              <span className={`fleet-state-badge ${u.stateMmDesc.includes('REGISTERED') && !u.stateMmDesc.includes('INIT') ? 'registered' : 'pending'}`}>
+                              <span className={`fleet-state-badge ${(u as any).mmError || u.stateMmDesc.includes('DEREGISTERED') ? 'danger' : u.stateMmDesc.includes('REGISTERED') && !u.stateMmDesc.includes('INIT') ? 'registered' : 'pending'}`}>
                                 {u.stateMmDesc}
                               </span>
                               <button className="btn btn-xs btn-danger ml-auto" onClick={() => stopFleetUE(u.id)}>■ Stop</button>
@@ -7365,34 +7538,26 @@ export default function App() {
                               <div className="fleet-ue-detail"><span>SUPI</span><code>{u.supi}</code></div>
                               <div className="fleet-ue-detail"><span>Connected Cell</span><code>{u.gnbProfileName ? `${u.gnbProfileName} (${u.gnbId || '—'})` : u.gnbControlIp}</code></div>
                               <div className="fleet-ue-detail"><span>SM State</span><code>{u.stateSmDesc}</code></div>
-                              {(u as any).mmError && (
-                                <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '4px', padding: '4px 6px', fontSize: '10px', color: '#f87171', marginTop: '4px' }}>
-                                  ⚠️ 5GMM Error: {(u as any).mmError}
-                                </div>
-                              )}
-                              {(u as any).smError && (
-                                <div style={{ background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '4px', padding: '4px 6px', fontSize: '10px', color: '#fbbf24', marginTop: '4px' }}>
-                                  ⚠️ 5GSM Error: {(u as any).smError}
-                                </div>
-                              )}
+
                               {u.pduSessions?.length > 0 && (
                                 <div className="fleet-pdu-list">
                                   {u.pduSessions.map((s: any) => {
-                                    const isPduError = !!s.error;
-                                    const isPduActive = !isPduError && s.stateDesc?.includes('ACTIVE') && !s.stateDesc?.includes('PENDING');
+                                    const errText = s.error || (u as any).smError || (u as any).mmError;
+                                    const isFailed = !!errText || s.stateDesc?.includes('INACTIVE');
+                                    const isPduActive = !isFailed && s.stateDesc?.includes('ACTIVE') && !s.stateDesc?.includes('PENDING');
                                     return (
                                       <div key={s.id} style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '2px' }}>
                                         <div className="fleet-pdu-item">
                                           <span>PDU-{s.id}</span>
                                           <code>{s.ueIp || '—'}</code>
                                           <span className="fleet-tag">{s.dnn}</span>
-                                          <span className={`fleet-state-badge sm ${isPduActive ? 'registered' : isPduError ? 'danger' : 'pending'}`}>
-                                            {isPduError ? 'REJECTED' : s.stateDesc}
+                                          <span className={`fleet-state-badge sm ${isPduActive ? 'registered' : isFailed ? 'danger' : 'pending'}`}>
+                                            {isFailed ? 'REJECTED' : s.stateDesc}
                                           </span>
                                         </div>
-                                        {s.error && (
-                                          <div style={{ fontSize: '9px', color: '#f87171', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '4px 6px', borderRadius: '3px', marginTop: '2px', lineHeight: '1.3' }}>
-                                            ⚠️ {s.error}
+                                        {errText && (
+                                          <div style={{ fontSize: '9px', color: '#f87171', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '4px 6px', borderRadius: '3px', marginTop: '2px', lineHeight: '1.3', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                            <AlertTriangle size={10} /> {errText}
                                           </div>
                                         )}
                                       </div>
@@ -7606,11 +7771,26 @@ export default function App() {
                                   disabled={fleetRunning.runningGnbs?.some(g => g.profileName === p.name)}
                                   title={fleetRunning.runningGnbs?.some(g => g.profileName === p.name) ? 'Already running' : 'Launch gNB'}
                                 >
-                                  {fleetRunning.runningGnbs?.some(g => g.profileName === p.name) ? '● Running' : '▶ Launch'}
+                                  {fleetRunning.runningGnbs?.some(g => g.profileName === p.name) ? <Square size={12} /> : <Play size={12} />}
+                                  {fleetRunning.runningGnbs?.some(g => g.profileName === p.name) ? 'Running' : 'Launch'}
                                 </button>
-                                <button className="btn btn-xs btn-ghost" onClick={() => duplicateGNBProfile(p)} title="Duplicate">Clone</button>
-                                <button className="btn btn-xs btn-ghost" onClick={() => { setEditingGNB(p); setShowGNBForm(true); }} title="Edit">Edit</button>
-                                <button className="btn btn-xs btn-danger" onClick={() => deleteGNBProfile(p.name)} disabled={fleetRunning.runningGnbs?.some(g => g.profileName === p.name)}>🗑 Delete</button>
+                                <button
+                                  className="btn-fleet-action test"
+                                  onClick={() => testAMFLink(p)}
+                                  disabled={testingAmfProfile === p.name}
+                                  title="Test SCTP & 5G Core AMF Link Connectivity"
+                                >
+                                  <Zap size={12} /> {testingAmfProfile === p.name ? 'Testing...' : 'Test Link'}
+                                </button>
+                                <button className="btn-fleet-action clone" onClick={() => duplicateGNBProfile(p)} title="Duplicate">
+                                  <Copy size={12} /> Clone
+                                </button>
+                                <button className="btn-fleet-action edit" onClick={() => { setEditingGNB(p); setShowGNBForm(true); }} title="Edit">
+                                  <Edit3 size={12} /> Edit
+                                </button>
+                                <button className="btn-fleet-action delete" onClick={() => deleteGNBProfile(p.name)} disabled={fleetRunning.runningGnbs?.some(g => g.profileName === p.name)} title="Delete Profile">
+                                  <Trash2 size={12} /> Delete
+                                </button>
                               </div>
                             </td>
                           </tr>
@@ -7653,10 +7833,18 @@ export default function App() {
                             <td>SST:{p.snssai.sst}{p.snssai.sd ? ` SD:${p.snssai.sd}` : ''}</td>
                             <td>
                               <div className="fleet-action-btns">
-                                <button className="btn btn-xs btn-success" onClick={() => handleLaunchUEClick(p.name)} title="Launch UE">▶ Launch</button>
-                                <button className="btn btn-xs btn-ghost" onClick={() => duplicateUEProfile(p)} title="Duplicate">Clone</button>
-                                <button className="btn btn-xs btn-ghost" onClick={() => { setEditingUE(p); setShowUEForm(true); }} title="Edit">Edit</button>
-                                <button className="btn btn-xs btn-danger" onClick={() => deleteUEProfile(p.name)} title="Delete">🗑 Delete</button>
+                                <button className="btn btn-xs btn-success" onClick={() => handleLaunchUEClick(p.name)} title="Launch UE">
+                                  <Play size={12} /> Launch
+                                </button>
+                                <button className="btn-fleet-action clone" onClick={() => duplicateUEProfile(p)} title="Duplicate">
+                                  <Copy size={12} /> Clone
+                                </button>
+                                <button className="btn-fleet-action edit" onClick={() => { setEditingUE(p); setShowUEForm(true); }} title="Edit">
+                                  <Edit3 size={12} /> Edit
+                                </button>
+                                <button className="btn-fleet-action delete" onClick={() => deleteUEProfile(p.name)} title="Delete">
+                                  <Trash2 size={12} /> Delete
+                                </button>
                               </div>
                             </td>
                           </tr>
@@ -9947,6 +10135,89 @@ export default function App() {
             <div className="fleet-form-actions">
               <button className="btn btn-ghost" onClick={() => setShowGNBForm(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={saveGNBProfile}>Save Profile</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3GPP Connectivity & Diagnostic Debugger Overlay Modal */}
+      {diagnosticReportModal && (
+        <div className="fleet-form-overlay">
+          <div className="fleet-form-card" style={{ maxWidth: '720px', width: '90%', background: 'var(--bg-card)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}>
+            <div className="fleet-form-header" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+              <h4 style={{ color: diagnosticReportModal.sctpConnected ? 'var(--color-success)' : 'var(--color-danger, #ef4444)', display: 'flex', alignItems: 'center', gap: '8px', margin: 0, fontSize: '15px' }}>
+                <AlertTriangle size={18} /> {diagnosticReportModal.title.replace(/^[❌✅\s]+/, '')}
+              </h4>
+              <button className="fleet-form-close" onClick={() => setDiagnosticReportModal(null)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="fleet-form-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '80vh', overflowY: 'auto', paddingTop: '14px' }}>
+              
+              {/* Target Endpoint & Badges */}
+              <div style={{ display: 'flex', gap: '10px', background: 'var(--bg-muted, rgba(0,0,0,0.05))', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Target 5G Core AMF Endpoint:</div>
+                  <div style={{ fontSize: '14px', fontFamily: 'monospace', fontWeight: 'bold', color: 'var(--color-info)' }}>
+                    {diagnosticReportModal.amfIp}:{diagnosticReportModal.amfPort}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {diagnosticReportModal.pingSuccess !== undefined && (
+                    <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', background: diagnosticReportModal.pingSuccess ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)', color: diagnosticReportModal.pingSuccess ? '#10b981' : '#ef4444', border: diagnosticReportModal.pingSuccess ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)' }}>
+                      L3 Ping: {diagnosticReportModal.pingSuccess ? 'REACHABLE' : 'UNREACHABLE'}
+                    </span>
+                  )}
+                  {diagnosticReportModal.kernelSctpSupported !== undefined && (
+                    <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', background: diagnosticReportModal.kernelSctpSupported ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)', color: diagnosticReportModal.kernelSctpSupported ? '#10b981' : '#ef4444', border: diagnosticReportModal.kernelSctpSupported ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)' }}>
+                      Kernel SCTP: {diagnosticReportModal.kernelSctpSupported ? 'LOADED' : 'MISSING (sudo modprobe sctp)'}
+                    </span>
+                  )}
+                  {diagnosticReportModal.sctpConnected !== undefined && (
+                    <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', background: diagnosticReportModal.sctpConnected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)', color: diagnosticReportModal.sctpConnected ? '#10b981' : '#ef4444', border: diagnosticReportModal.sctpConnected ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)' }}>
+                      L4 SCTP Socket: {diagnosticReportModal.sctpConnected ? 'CONNECTED' : 'FAILED'}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Diagnostic Explanation Log */}
+              <div style={{ background: 'var(--bg-card-secondary, #0f172a)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '14px', color: 'var(--text-primary, #e2e8f0)', fontSize: '12px', lineHeight: '1.6', whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
+                {diagnosticReportModal.diagnostic.replace(/^[❌🔍⚡\s]+/, '')}
+              </div>
+
+              {/* Suggested Actions Checklist */}
+              {diagnosticReportModal.suggestedActions && diagnosticReportModal.suggestedActions.length > 0 && (
+                <div style={{ background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: '8px', padding: '12px 14px' }}>
+                  <div style={{ fontWeight: 'bold', color: 'var(--color-warning, #f59e0b)', fontSize: '12px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Zap size={14} /> Actionable Resolution Steps:
+                  </div>
+                  <ul style={{ paddingLeft: '18px', margin: 0, fontSize: '11px', color: 'var(--text-primary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {diagnosticReportModal.suggestedActions.map((act, idx) => (
+                      <li key={idx}><code>{act}</code></li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Footer */}
+              <div className="fleet-form-actions" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px', marginTop: '4px', display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                {diagnosticReportModal.profileName ? (
+                  <button
+                    className="btn-fleet-action test"
+                    onClick={() => {
+                      const prof = gnbProfiles.find(p => p.name === diagnosticReportModal.profileName);
+                      if (prof) testAMFLink(prof);
+                    }}
+                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                  >
+                    <Zap size={14} /> Re-test SCTP Link
+                  </button>
+                ) : <div />}
+                <button className="btn btn-sm btn-primary" onClick={() => setDiagnosticReportModal(null)}>Close Debugger</button>
+              </div>
+
             </div>
           </div>
         </div>

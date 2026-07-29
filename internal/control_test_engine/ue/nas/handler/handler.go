@@ -14,10 +14,19 @@ import (
 )
 
 func HandlerAuthenticationReject(ue *context.UEContext, message *nas.Message) {
-
-	log.Info("[UE][NAS] Authentication of UE ", ue.GetUeId(), " failed")
-
+	errMsg := "Authentication Rejected by AMF (Plain NAS 5GS Msg 0x58 - 3GPP TS 24.501 5GMM Cause #21: 5GS services not allowed)"
+	log.Warnf("[UE][NAS] Authentication of UE %d failed: %s", ue.GetUeId(), errMsg)
+	ue.SetMMError(errMsg)
+	ue.SetSMError(errMsg)
 	ue.SetStateMM_DEREGISTERED()
+	ue.SetStateSM_PDU_SESSION_INACTIVE()
+
+	for _, sess := range ue.PduSessions {
+		if sess.State == context.SM5G_PDU_SESSION_ACTIVE_PENDING || sess.State == 0 {
+			sess.State = context.SM5G_PDU_SESSION_INACTIVE
+			sess.Error = errMsg
+		}
+	}
 }
 
 func HandlerAuthenticationRequest(ue *context.UEContext, message *nas.Message) {
@@ -481,10 +490,19 @@ func Get5GMMCauseDesc(cause uint8) string {
 func HandlerRegistrationReject(ue *context.UEContext, message *nas.Message) {
 	cause := message.RegistrationReject.Cause5GMM.GetCauseValue()
 	desc := Get5GMMCauseDesc(cause)
-	log.Warnf("[UE][NAS] Registration Reject received, GMM Cause %d: %s", cause, desc)
-	ue.SetMMError(fmt.Sprintf("Registration Rejected by AMF: 5GMM Cause #%d (%s)", cause, desc))
+	errMsg := fmt.Sprintf("Registration Rejected by AMF (Plain NAS 5GS Msg 0x59 - 3GPP TS 24.501 5GMM Cause #%d: %s)", cause, desc)
+	log.Warnf("[UE][NAS] %s", errMsg)
+	ue.SetMMError(errMsg)
+	ue.SetSMError(errMsg)
 	ue.SetStateMM_DEREGISTERED()
 	ue.SetStateSM_PDU_SESSION_INACTIVE()
+
+	for _, sess := range ue.PduSessions {
+		if sess.State == context.SM5G_PDU_SESSION_ACTIVE_PENDING || sess.State == 0 {
+			sess.State = context.SM5G_PDU_SESSION_INACTIVE
+			sess.Error = errMsg
+		}
+	}
 }
 
 func HandlerServiceAccept(ue *context.UEContext, message *nas.Message) {
@@ -495,22 +513,32 @@ func HandlerServiceAccept(ue *context.UEContext, message *nas.Message) {
 func HandlerServiceReject(ue *context.UEContext, message *nas.Message) {
 	cause := message.ServiceReject.Cause5GMM.GetCauseValue()
 	desc := Get5GMMCauseDesc(cause)
-	log.Warnf("[UE][NAS] Service Reject received, GMM Cause %d: %s", cause, desc)
-	ue.SetMMError(fmt.Sprintf("Service Rejected by AMF: 5GMM Cause #%d (%s)", cause, desc))
+	errMsg := fmt.Sprintf("Service Request Rejected by AMF (Plain NAS 5GS Msg 0x4D - 3GPP TS 24.501 5GMM Cause #%d: %s)", cause, desc)
+	log.Warnf("[UE][NAS] %s", errMsg)
+	ue.SetMMError(errMsg)
+	ue.SetSMError(errMsg)
 	ue.SetStateMM_DEREGISTERED()
 	ue.SetStateSM_PDU_SESSION_INACTIVE()
+
+	for _, sess := range ue.PduSessions {
+		if sess.State == context.SM5G_PDU_SESSION_ACTIVE_PENDING || sess.State == 0 {
+			sess.State = context.SM5G_PDU_SESSION_INACTIVE
+			sess.Error = errMsg
+		}
+	}
 }
 
 func HandlerStatus5GMM(ue *context.UEContext, message *nas.Message) {
 	cause := message.Status5GMM.Cause5GMM.GetCauseValue()
 	desc := Get5GMMCauseDesc(cause)
-	errMsg := fmt.Sprintf("5GMM Status Message from Core: 5GMM Cause #%d (%s)", cause, desc)
+	errMsg := fmt.Sprintf("5GMM Status Message from AMF (3GPP TS 24.501 5GMM Cause #%d: %s)", cause, desc)
 	log.Warnf("[UE][NAS] %s", errMsg)
 	ue.SetMMError(errMsg)
+	ue.SetSMError(errMsg)
 	for _, sess := range ue.PduSessions {
-		if sess.State == context.SM5G_PDU_SESSION_ACTIVE_PENDING {
+		if sess.State == context.SM5G_PDU_SESSION_ACTIVE_PENDING || sess.State == 0 {
 			sess.State = context.SM5G_PDU_SESSION_INACTIVE
-			sess.Error = fmt.Sprintf("PDU Session #%d Rejected by AMF via 5GMM Status: Cause #%d (%s)", sess.Id, cause, desc)
+			sess.Error = errMsg
 		}
 	}
 }

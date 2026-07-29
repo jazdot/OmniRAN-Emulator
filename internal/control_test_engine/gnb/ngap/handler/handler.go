@@ -754,6 +754,7 @@ func HandlerNgSetupFailure(amf *context.GNBAmf, gnb *context.GNBContext, message
 
 	// check information about AMF and add in AMF context.
 	valueMessage := message.UnsuccessfulOutcome.Value.NGSetupFailure
+	var causeText string = "Unspecified NG Setup Failure"
 
 	for _, ies := range valueMessage.ProtocolIEs.List {
 
@@ -770,56 +771,47 @@ func HandlerNgSetupFailure(amf *context.GNBAmf, gnb *context.GNBContext, message
 				switch causeMisc {
 
 				case ngapType.CauseMiscPresentUnknownPLMN:
-					// Cannot find Served TAI in AMF.
+					causeText = "Unknown PLMN in Supported TAI (AMF core does not serve this MCC/MNC)"
 					log.Info("[GNB][AMF][NGAP] Unknown PLMN in Supported TAI")
 
 				case ngapType.CauseMiscPresentUnspecified:
-					// No supported TA exist in NG-Setup request.
+					causeText = "AMF rejected setup (Cause unspecified)"
 					log.Info("[GNB][AMF][NGAP] Error cause unspecified")
 
+				default:
+					causeText = fmt.Sprintf("AMF Misc Cause #%d", causeMisc)
 				}
 
 			case ngapType.CausePresentRadioNetwork:
-				// TODO treatment error
+				causeText = fmt.Sprintf("AMF RadioNetwork Cause #%d", ies.Value.Cause.RadioNetwork.Value)
 
 			case ngapType.CausePresentTransport:
-				// TODO treatment error
+				causeText = fmt.Sprintf("AMF Transport Cause #%d", ies.Value.Cause.Transport.Value)
 
 			case ngapType.CausePresentProtocol:
-				// TODO treatment error
+				causeText = fmt.Sprintf("AMF Protocol Cause #%d", ies.Value.Cause.Protocol.Value)
 
 			case ngapType.CausePresentNas:
-				// TODO treatment error
+				causeText = fmt.Sprintf("AMF NAS Cause #%d", ies.Value.Cause.Nas.Value)
 
 			}
 
 		case ngapType.ProtocolIEIDTimeToWait:
-
 			switch ies.Value.TimeToWait.Value {
-
 			case ngapType.TimeToWaitPresentV1s:
 			case ngapType.TimeToWaitPresentV2s:
 			case ngapType.TimeToWaitPresentV5s:
 			case ngapType.TimeToWaitPresentV10s:
 			case ngapType.TimeToWaitPresentV20s:
 			case ngapType.TimeToWaitPresentV60s:
-
 			}
-
-		case ngapType.ProtocolIEIDCriticalityDiagnostics:
-
-			// TODO treatment error
-
-			// ies.Value.CriticalityDiagnostics
-			// errors.IECriticality.Value
-			// ngapType.CriticalityPresentReject:
-			// ngapType.CriticalityPresentIgnore:
-			// ngapType.CriticalityPresentNotify:
-			// ngapType.TypeOfErrorPresentNotUnderstood:
-			// ngapType.TypeOfErrorPresentMissing:
-
 		}
 	}
+
+	errMsg := fmt.Sprintf("NGAP NG Setup Rejected by AMF (%s:%d): %s", amf.GetAmfIp(), amf.GetAmfPort(), causeText)
+	log.Errorf("[GNB][AMF][NGAP] %s", errMsg)
+	gnb.SetError(errMsg)
+	gnb.SignalConnLoss()
 
 	// redundant but useful for information about code.
 	amf.SetStateInactive()

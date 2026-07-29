@@ -3,11 +3,14 @@ package webserver
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/ishidawataru/sctp"
 	"OmniRAN-Emulator/config"
 	"OmniRAN-Emulator/internal/control_test_engine/gnb"
 	gnbContext "OmniRAN-Emulator/internal/control_test_engine/gnb/context"
@@ -87,7 +90,8 @@ func LaunchGNBProfile(profileName string) error {
 	case err := <-errCh:
 		if err != nil {
 			cancel()
-			return fmt.Errorf("gNB '%s' launch failed: %w", profileName, err)
+			diag := DiagnoseGNBLaunchError(err, prof)
+			return fmt.Errorf("%s", diag)
 		}
 	case <-time.After(600 * time.Millisecond):
 		// gNB started with no immediate transport error
@@ -367,16 +371,28 @@ func GetFleetRunningSummary() FleetRunningSummary {
 
 		pduSessions := make([]PDUSessionStatus, 0)
 		for _, sess := range u.PduSessions {
-			// Synchronize global SM error if session error was recorded
-			if sess.Error == "" && u.GetSMError() != "" {
-				sess.Error = u.GetSMError()
+			// Synchronize global MM/SM error if session error was recorded or if MM/SM error exists
+			if sess.Error == "" {
+				if u.GetSMError() != "" {
+					sess.Error = u.GetSMError()
+				} else if u.GetMMError() != "" {
+					sess.Error = u.GetMMError()
+				}
 			}
 
-			// Evaluate PDU session establishment timeout at 2.5s
+			// If UE 5GMM registration failed or is DEREGISTERED, PDU session CANNOT be pending
+			if u.GetStateMM() == ueContext.MM5G_DEREGISTERED && (u.GetMMError() != "" || u.GetSMError() != "") {
+				sess.State = ueContext.SM5G_PDU_SESSION_INACTIVE
+				if sess.Error == "" {
+					sess.Error = u.GetMMError()
+				}
+			}
+
+			// Evaluate PDU session establishment timeout at 2.5s or force inactive if error exists
 			if sess.State == ueContext.SM5G_PDU_SESSION_ACTIVE_PENDING {
 				if sess.Error != "" {
 					sess.State = ueContext.SM5G_PDU_SESSION_INACTIVE
-				} else if !sess.RequestedAt.IsZero() && time.Since(sess.RequestedAt) > 2500*time.Millisecond {
+				} else if sess.RequestedAt.IsZero() || time.Since(sess.RequestedAt) > 2500*time.Millisecond {
 					sess.State = ueContext.SM5G_PDU_SESSION_INACTIVE
 					sess.Error = fmt.Sprintf("PDU Session #%d Establishment Timed Out: AMF/SMF Core network did not send PDUSessionResourceSetupRequest or 5GSM Accept within 2.5s. Verify Core DNN ('%s'), S-NSSAI (SST: %d, SD: %s), UPF N4 tunnel, or gNB N3 GTP interface (2152).", sess.Id, sess.Dnn, sess.Snssai.Sst, sess.Snssai.Sd)
 					u.SetSMError(sess.Error)
@@ -578,4 +594,130 @@ func QuickStopAllGNBs() int {
 	}
 	return stopped
 }
+
+// AMFTestReport holds detailed diagnostic results for testing AMF SCTP link connectivity.
+type AMFTestReport struct {
+	ProfileName         string   `json:"profileName,omitempty"`
+	AmfIp               string   `json:"amfIp"`
+	AmfPort             int      `json:"amfPort"`
+	ControlIp           string   `json:"controlIp"`
+	PingSuccess         bool     `json:"pingSuccess"`
+	KernelSctpSupported bool     `json:"kernelSctpSupported"`
+	SctpConnected       bool     `json:"sctpConnected"`
+	Error               string   `json:"error,omitempty"`
+	Diagnostic          string   `json:"diagnostic"`
+	SuggestedActions    []string `json:"suggestedActions"`
+}
+
+// DiagnoseGNBLaunchError converts raw transport/NGAP errors into structured human-readable troubleshooting guidance.
+func DiagnoseGNBLaunchError(err error, prof config.GNBProfile) string {
+	if err == nil {
+		return ""
+	}
+	errStr := err.Error()
+	errStrLower := strings.ToLower(errStr)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("❌ gNB '%s' Launch Failed: %s\n\n", prof.Name, errStr))
+	sb.WriteString("🔍 3GPP NGAP / SCTP Diagnostics:\n")
+
+	if strings.Contains(errStrLower, "protocol not supported") || strings.Contains(errStrLower, "eprotonosupport") {
+		sb.WriteString("• ROOT CAUSE: Linux Kernel SCTP module is NOT loaded on this host system.\n")
+		sb.WriteString("• EXPLANATION: ICMP ping works because it uses raw IP/ICMP, but 5G NGAP uses SCTP (IP protocol 132). Linux does not load kernel module 'sctp' by default on some network environments or Linux distros.\n")
+		sb.WriteString("• ACTION REQUIRED: Run the following command on the host terminal to load SCTP kernel support:\n")
+		sb.WriteString("    sudo modprobe sctp\n")
+	} else if strings.Contains(errStrLower, "connection refused") || strings.Contains(errStrLower, "econnrefused") {
+		sb.WriteString(fmt.Sprintf("• ROOT CAUSE: SCTP Connection Refused by 5G Core AMF at %s:%d.\n", prof.AmfIp, prof.AmfPort))
+		sb.WriteString(fmt.Sprintf("• EXPLANATION: Host IP is pingable, but NO 5G Core AMF service (Open5GS, Free5GC, etc.) is listening on SCTP port %d, or the AMF is bound ONLY to loopback (127.0.0.1 / 127.0.0.18) rather than 0.0.0.0 / external interface.\n", prof.AmfPort))
+		sb.WriteString("• ACTION REQUIRED:\n")
+		sb.WriteString("  1. Check if AMF process is running:  ps aux | grep amf\n")
+		sb.WriteString(fmt.Sprintf("  2. Verify AMF listening ports:      sudo ss -sctp -l  or  sudo netstat -sctp\n"))
+		sb.WriteString(fmt.Sprintf("  3. Check AMF config (e.g. /etc/open5gs/amf.yaml or amfcfg.yaml) and ensure 'ngap.server' or 'ngapIp' is bound to 0.0.0.0 or %s.\n", prof.AmfIp))
+	} else if strings.Contains(errStrLower, "timeout") || strings.Contains(errStrLower, "no route") || strings.Contains(errStrLower, "unreachable") || strings.Contains(errStrLower, "etimedout") {
+		sb.WriteString(fmt.Sprintf("• ROOT CAUSE: SCTP packets to AMF at %s:%d timed out or were blocked by firewall.\n", prof.AmfIp, prof.AmfPort))
+		sb.WriteString(fmt.Sprintf("• EXPLANATION: Ping (ICMP protocol 1) is allowed, but SCTP (IP protocol 132 / port %d) packets are blocked by ufw/iptables/firewalld or a network security group/router.\n", prof.AmfPort))
+		sb.WriteString("• ACTION REQUIRED:\n")
+		sb.WriteString(fmt.Sprintf("  1. Allow SCTP traffic on host firewall:  sudo ufw allow %d/sctp  or  sudo iptables -A INPUT -p sctp --dport %d -j ACCEPT\n", prof.AmfPort, prof.AmfPort))
+		sb.WriteString("  2. If running across AWS/GCP/Docker/Subnets, ensure Security Groups pass IP Protocol 132 (SCTP).\n")
+	} else if strings.Contains(errStrLower, "cannot assign requested address") || strings.Contains(errStrLower, "eaddrnotavail") {
+		sb.WriteString(fmt.Sprintf("• ROOT CAUSE: Local Control IP '%s' is not assigned to any network interface on this machine.\n", prof.ControlIp))
+		sb.WriteString(fmt.Sprintf("• ACTION REQUIRED: Edit gNB profile '%s' and change Control IF IP to 127.0.0.1 or an active local IP address.\n", prof.Name))
+	} else if strings.Contains(errStrLower, "address already in use") || strings.Contains(errStrLower, "eaddrinuse") {
+		sb.WriteString(fmt.Sprintf("• ROOT CAUSE: Control IF Port %d is already bound by another running process.\n", prof.ControlPort))
+		sb.WriteString(fmt.Sprintf("• ACTION REQUIRED: Stop conflicting gNB or change Control IF Port in gNB profile.\n"))
+	} else if strings.Contains(errStrLower, "unknown plmn") || strings.Contains(errStrLower, "ngsetupfailure") || strings.Contains(errStrLower, "plmn") {
+		sb.WriteString(fmt.Sprintf("• ROOT CAUSE: 5G Core AMF (%s:%d) rejected gNB NG Setup Request (PLMN: MCC %s, MNC %s, TAC %s).\n", prof.AmfIp, prof.AmfPort, prof.Mcc, prof.Mnc, prof.Tac))
+		sb.WriteString(fmt.Sprintf("• ACTION REQUIRED: Ensure MCC (%s) and MNC (%s) in gNB profile match the supported PLMN / TAI in your 5G Core AMF config.\n", prof.Mcc, prof.Mnc))
+	} else {
+		sb.WriteString("• GENERAL TROUBLESHOOTING CHECKLIST:\n")
+		sb.WriteString("  1. Ensure SCTP kernel module is loaded:  sudo modprobe sctp\n")
+		sb.WriteString(fmt.Sprintf("  2. Test SCTP connectivity manually:      nc -z -v -u %s %d\n", prof.AmfIp, prof.AmfPort))
+		sb.WriteString("  3. Verify AMF service status and logs.\n")
+	}
+
+	return sb.String()
+}
+
+// TestAMFConnection performs a full multi-layer diagnostic check (ICMP, SCTP, Kernel Module) against a target AMF endpoint.
+func TestAMFConnection(prof config.GNBProfile) AMFTestReport {
+	report := AMFTestReport{
+		ProfileName:      prof.Name,
+		AmfIp:            prof.AmfIp,
+		AmfPort:          prof.AmfPort,
+		ControlIp:        prof.ControlIp,
+		SuggestedActions: make([]string, 0),
+	}
+
+	// 1. Check ICMP ping (L3 IP reachability)
+	cmd := exec.Command("ping", "-c", "1", "-W", "1", prof.AmfIp)
+	if err := cmd.Run(); err == nil {
+		report.PingSuccess = true
+	}
+
+	// 2. Check SCTP Dial
+	remote := fmt.Sprintf("%s:%d", prof.AmfIp, prof.AmfPort)
+	local := fmt.Sprintf("%s:0", prof.ControlIp)
+
+	rem, errRem := sctp.ResolveSCTPAddr("sctp", remote)
+	loc, errLoc := sctp.ResolveSCTPAddr("sctp", local)
+
+	if errRem == nil && errLoc == nil {
+		conn, errDial := sctp.DialSCTPExt("sctp", loc, rem, sctp.InitMsg{NumOstreams: 2, MaxInstreams: 2})
+		if errDial == nil {
+			report.KernelSctpSupported = true
+			report.SctpConnected = true
+			_ = conn.Close()
+		} else {
+			report.Error = errDial.Error()
+			errLower := strings.ToLower(errDial.Error())
+			if !strings.Contains(errLower, "protocol not supported") {
+				report.KernelSctpSupported = true
+			}
+		}
+	} else {
+		if errLoc != nil {
+			report.Error = fmt.Sprintf("Local SCTP address resolve error: %v", errLoc)
+		} else {
+			report.Error = fmt.Sprintf("Remote SCTP address resolve error: %v", errRem)
+		}
+	}
+
+	if report.SctpConnected {
+		report.Diagnostic = fmt.Sprintf("✅ SCTP Connection Successful! AMF Core at %s:%d is reachable and accepting 5G NGAP associations.", prof.AmfIp, prof.AmfPort)
+	} else {
+		report.Diagnostic = DiagnoseGNBLaunchError(fmt.Errorf("%s", report.Error), prof)
+		if !report.KernelSctpSupported {
+			report.SuggestedActions = append(report.SuggestedActions, "Run 'sudo modprobe sctp' on host terminal to load Linux SCTP module")
+		}
+		if report.PingSuccess && !report.SctpConnected {
+			report.SuggestedActions = append(report.SuggestedActions, fmt.Sprintf("Verify AMF is listening on %s:%d (check /etc/open5gs/amf.yaml or amfcfg.yaml)", prof.AmfIp, prof.AmfPort))
+			report.SuggestedActions = append(report.SuggestedActions, fmt.Sprintf("Allow SCTP protocol 132 on host firewall (sudo ufw allow %d/sctp)", prof.AmfPort))
+		} else if !report.PingSuccess {
+			report.SuggestedActions = append(report.SuggestedActions, fmt.Sprintf("Check network routing to %s (host IP is unreachable)", prof.AmfIp))
+		}
+	}
+
+	return report
+}
+
 

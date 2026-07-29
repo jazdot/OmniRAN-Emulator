@@ -41,10 +41,10 @@
     {
       "name": "UE-test-1",
       "msin": "0000000001",
-      "key": "465B5CE8B199B49FAA5F0A2EE238A6BC",
-      "opc": "E8ED289DEBA952E4283B54E88E6183CA",
+      "key": "8baf473f2f8fd09487cccbd7097c6862",
+      "opc": "8e27b6af0e692e750f32667a3b14605d",
       "amf": "8000",
-      "sqn": "000000000000",
+      "sqn": "000000000023",
       "dnn": "internet",
       "pduSessionType": "IPv4",
       "registrationType": "initial",
@@ -126,6 +126,64 @@
       "linkPort": 9526,
       "amfIp": "127.0.0.18",
       "amfPort": 38412
+    }
+  ],
+  "amfProfiles": [
+    {
+      "name": "Local Open5GS Core",
+      "ip": "127.0.0.18",
+      "port": 38412,
+      "mcc": "208",
+      "mnc": "93",
+      "description": "Default local Open5GS 5G Core AMF"
+    },
+    {
+      "name": "Loopback AMF (127.0.0.1)",
+      "ip": "127.0.0.1",
+      "port": 38412,
+      "mcc": "208",
+      "mnc": "93",
+      "description": "Standard loopback 5GC AMF"
+    }
+  ],
+  "sliceProfiles": [
+    {
+      "name": "eMBB General (SST:1, SD:010203)",
+      "sst": 1,
+      "sd": "010203",
+      "category": "eMBB",
+      "description": "Enhanced Mobile Broadband standard slice"
+    },
+    {
+      "name": "URLLC Ultra-Low Latency (SST:2, SD:112233)",
+      "sst": 2,
+      "sd": "112233",
+      "category": "URLLC",
+      "description": "Ultra-reliable low-latency communications"
+    },
+    {
+      "name": "MIoT Smart Metering (SST:3, SD:FFFFFF)",
+      "sst": 3,
+      "sd": "FFFFFF",
+      "category": "MIoT",
+      "description": "Massive Internet of Things slice"
+    },
+    {
+      "name": "IMS VoNR Voice (SST:1, SD:111111)",
+      "sst": 1,
+      "sd": "111111",
+      "category": "VoNR",
+      "description": "Dedicated Voice over NR IMS slice"
+    }
+  ],
+  "securityProfiles": [
+    {
+      "name": "Standard 3GPP Test Keys",
+      "key": "465B5CE8B2E8863F638D4F72EC869C96",
+      "opc": "E8ED289DEBA952E4283B54E88E6183CA",
+      "amf": "8000",
+      "sqn": "000000000020",
+      "description": "Default 5G AKA authentication credentials"
     }
   ]
 }
